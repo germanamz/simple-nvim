@@ -22,14 +22,20 @@ return {
       { "<leader>fk", "<cmd>Telescope keymaps<cr>", desc = "Keymaps" },
       { "<leader>fc", "<cmd>Telescope commands<cr>", desc = "Commands" },
       { "<leader>f/", "<cmd>Telescope current_buffer_fuzzy_find<cr>", desc = "Fuzzy find in buffer" },
-      { "<leader><space>", "<cmd>Telescope find_files<cr>", desc = "Find files (quick)" },
+      { "<leader>gs", "<cmd>Telescope git_status<cr>", desc = "Git changed files" },
+      {
+        "<leader><space>",
+        function() require("config.telescope_smart").smart_files() end,
+        desc = "Files (changed first)",
+      },
     },
     opts = function()
       local actions = require("telescope.actions")
       return {
         defaults = {
           prompt_prefix = "  ",
-          selection_caret = " ",
+          selection_caret = "▶ ",
+          entry_prefix = "  ",
           path_display = { "truncate" },
           sorting_strategy = "ascending",
           layout_config = {
