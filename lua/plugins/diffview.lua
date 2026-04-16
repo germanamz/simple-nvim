@@ -4,6 +4,20 @@ return {
     "nvim-lua/plenary.nvim",
     "nvim-tree/nvim-web-devicons",
   },
+  init = function()
+    -- Override netrw's buffer-local `gd` (NetrwForceChgDir) which fires via
+    -- <nowait> after <space> times out, stealing the keystroke from <leader>gd.
+    vim.api.nvim_create_autocmd("FileType", {
+      pattern = "netrw",
+      callback = function(args)
+        vim.keymap.set("n", "gd", "<cmd>DiffviewOpen<cr>", {
+          buffer = args.buf,
+          nowait = true,
+          desc = "Diffview: open working tree vs index",
+        })
+      end,
+    })
+  end,
   cmd = {
     "DiffviewOpen",
     "DiffviewClose",
