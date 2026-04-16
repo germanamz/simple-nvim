@@ -42,6 +42,7 @@ opt.splitbelow = true
 opt.splitright = true
 opt.scrolloff = 8
 opt.sidescrolloff = 8
+opt.laststatus = 2
 opt.wrap = true
 opt.linebreak = true         -- wrap at word boundaries, not mid-word
 opt.breakindent = true       -- wrapped lines keep indent
