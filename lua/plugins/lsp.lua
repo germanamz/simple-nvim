@@ -32,6 +32,17 @@ local servers = {
   marksman = { filetypes = { "markdown" } },
 }
 
+-- Buffer-local LSP keymaps. `gd` overrides netrw's `gd` only where LSP attaches.
+-- `]d` / `[d` come free from Neovim 0.11 defaults, so only the non-default
+-- mappings are declared here.
+vim.api.nvim_create_autocmd("LspAttach", {
+  callback = function(args)
+    local opts = { buffer = args.buf, silent = true }
+    vim.keymap.set("n", "gd",        vim.lsp.buf.definition,    opts)
+    vim.keymap.set("n", "<leader>e", vim.diagnostic.open_float, opts)
+  end,
+})
+
 return {
   {
     "mason-org/mason.nvim",
@@ -46,16 +57,6 @@ return {
     lazy = false,
     dependencies = { "mason-org/mason.nvim" },
     config = function()
-      vim.api.nvim_create_autocmd("LspAttach", {
-        callback = function(args)
-          local opts = { buffer = args.buf, silent = true }
-          vim.keymap.set("n", "gd",         vim.lsp.buf.definition,      opts)
-          vim.keymap.set("n", "]d",         vim.diagnostic.goto_next,    opts)
-          vim.keymap.set("n", "[d",         vim.diagnostic.goto_prev,    opts)
-          vim.keymap.set("n", "<leader>e",  vim.diagnostic.open_float,   opts)
-        end,
-      })
-
       local server_names = vim.tbl_keys(servers)
 
       require("mason-lspconfig").setup({
@@ -63,8 +64,8 @@ return {
         automatic_installation = false,
       })
 
-      for name, opts in pairs(servers) do
-        vim.lsp.config(name, opts)
+      for name, cfg in pairs(servers) do
+        vim.lsp.config(name, cfg)
         vim.lsp.enable(name)
       end
     end,
