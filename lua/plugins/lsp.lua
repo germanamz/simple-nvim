@@ -35,10 +35,36 @@ local servers = {
 -- Buffer-local LSP keymaps. `gd` overrides netrw's `gd` only where LSP attaches.
 -- `]d` / `[d` come free from Neovim 0.11 defaults, so only the non-default
 -- mappings are declared here.
+--
+-- TypeScript note: plain `textDocument/definition` on an imported symbol lands
+-- on the import binding, not the real source. ts_ls exposes a custom command
+-- `_typescript.goToSourceDefinition` that follows imports through to the
+-- defining file; we prefer it for ts_ls buffers and fall back to the standard
+-- definition if it returns nothing.
+local function ts_goto_source_definition(client, bufnr)
+  local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
+  client:request("workspace/executeCommand", {
+    command = "_typescript.goToSourceDefinition",
+    arguments = { params.textDocument.uri, params.position },
+  }, function(err, result)
+    if err or not result or vim.tbl_isempty(result) then
+      vim.lsp.buf.definition()
+      return
+    end
+    vim.lsp.util.show_document(result[1], client.offset_encoding, { focus = true })
+  end, bufnr)
+end
+
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(args)
     local opts = { buffer = args.buf, silent = true }
-    vim.keymap.set("n", "gd",        vim.lsp.buf.definition,    opts)
+    local client = vim.lsp.get_client_by_id(args.data.client_id)
+
+    if client and client.name == "ts_ls" then
+      vim.keymap.set("n", "gd", function() ts_goto_source_definition(client, args.buf) end, opts)
+    else
+      vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
+    end
     vim.keymap.set("n", "<leader>e", vim.diagnostic.open_float, opts)
   end,
 })
