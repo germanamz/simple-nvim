@@ -165,7 +165,7 @@ return {
       return string.format(" +%d ~%d -%d ↓%d ", add, change, delete, total)
     end
 
-    vim.o.statusline = "%f %m%r%=%{v:lua.gitsigns_below_status()} %y %l:%c "
+    vim.o.statusline = "%f %m%r%=%{v:lua.gitsigns_below_status()} %y %l:%c %p%% "
 
     vim.api.nvim_create_autocmd("User", {
       pattern = "GitSignsUpdate",
