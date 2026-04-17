@@ -23,9 +23,13 @@ return {
 
       require("nvim-treesitter").install(parsers)
 
+      -- Global filetype → parser registration. Downstream plugins
+      -- (render-markdown, etc.) resolve parser via this registry, not via
+      -- our ad-hoc `ft_to_lang` table below. mdx has no dedicated parser,
+      -- so reuse markdown.
+      vim.treesitter.language.register("markdown", "mdx")
+
       -- filetype → parser language mapping (only where they differ)
-      -- mdx has no dedicated parser in nvim-treesitter; reuse markdown. JSX
-      -- blocks lose precise highlight but prose/headings/fences still render.
       local ft_to_lang = {
         typescriptreact = "tsx",
         javascriptreact = "javascript",
