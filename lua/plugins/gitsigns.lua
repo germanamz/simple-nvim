@@ -1,30 +1,54 @@
 return {
   "lewis6991/gitsigns.nvim",
   event = { "BufReadPre", "BufNewFile" },
-  opts = {
-    signcolumn = false,
-    numhl = true,
-    linehl = false,
-    word_diff = true,
-    diff_opts = { internal = true, linematch = 60 },
-    on_attach = function(bufnr)
-      local gs = require("gitsigns")
-      local map = function(mode, lhs, rhs, desc)
-        vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc })
-      end
-      map("n", "]c", function() gs.nav_hunk("next") end, "Next hunk")
-      map("n", "[c", function() gs.nav_hunk("prev") end, "Prev hunk")
-      map("n", "<leader>hp", gs.preview_hunk, "Preview hunk")
-      map("n", "<leader>hs", gs.stage_hunk, "Stage hunk")
-      map("n", "<leader>hr", gs.reset_hunk, "Reset hunk")
-      map("n", "<leader>hb", function() gs.blame_line({ full = true }) end, "Blame line")
-      map("n", "<leader>hd", gs.diffthis, "Diff against index")
-      map("n", "<leader>ht", gs.toggle_deleted, "Toggle deleted lines inline")
-      map("n", "<leader>hi", gs.preview_hunk_inline, "Inline preview hunk")
-    end,
-  },
+  opts = function()
+    local review_base = require("config.review_base")
+
+    local function apply_base(bufnr)
+      local fname = vim.api.nvim_buf_get_name(bufnr)
+      local start = (fname ~= "" and vim.fn.fnamemodify(fname, ":h")) or vim.fn.getcwd()
+      local root = review_base.git_root(start)
+      local ref = root and review_base.get(root) or nil
+      require("gitsigns").change_base(ref, true)
+    end
+
+    return {
+      signcolumn = false,
+      numhl = true,
+      linehl = false,
+      word_diff = true,
+      diff_opts = { internal = true, linematch = 60 },
+      on_attach = function(bufnr)
+        apply_base(bufnr)
+        local gs = require("gitsigns")
+        local map = function(mode, lhs, rhs, desc)
+          vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc })
+        end
+        map("n", "]c", function() gs.nav_hunk("next") end, "Next hunk")
+        map("n", "[c", function() gs.nav_hunk("prev") end, "Prev hunk")
+        map("n", "<leader>hp", gs.preview_hunk, "Preview hunk")
+        map("n", "<leader>hs", gs.stage_hunk, "Stage hunk")
+        map("n", "<leader>hr", gs.reset_hunk, "Reset hunk")
+        map("n", "<leader>hb", function() gs.blame_line({ full = true }) end, "Blame line")
+        map("n", "<leader>hd", gs.diffthis, "Diff against index")
+        map("n", "<leader>ht", gs.toggle_deleted, "Toggle deleted lines inline")
+        map("n", "<leader>hi", gs.preview_hunk_inline, "Inline preview hunk")
+      end,
+    }
+  end,
   config = function(_, opts)
+    local review_base = require("config.review_base")
+    review_base.bootstrap()
+
     require("gitsigns").setup(opts)
+
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "ReviewBaseChanged",
+      callback = function(args)
+        local ref = args.data and args.data.ref or nil
+        require("gitsigns").change_base(ref, true)
+      end,
+    })
 
     local function paint()
       vim.api.nvim_set_hl(0, "GitSignsAddNr",    { fg = "#ffffff", bg = "#4ea862" })
