@@ -46,6 +46,16 @@ return {
     lazy = false,
     dependencies = { "mason-org/mason.nvim" },
     config = function()
+      vim.api.nvim_create_autocmd("LspAttach", {
+        callback = function(args)
+          local opts = { buffer = args.buf, silent = true }
+          vim.keymap.set("n", "gd",         vim.lsp.buf.definition,      opts)
+          vim.keymap.set("n", "]d",         vim.diagnostic.goto_next,    opts)
+          vim.keymap.set("n", "[d",         vim.diagnostic.goto_prev,    opts)
+          vim.keymap.set("n", "<leader>e",  vim.diagnostic.open_float,   opts)
+        end,
+      })
+
       local server_names = vim.tbl_keys(servers)
 
       require("mason-lspconfig").setup({
