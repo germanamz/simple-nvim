@@ -1,0 +1,119 @@
+---
+title: MDX Test File
+author: German
+tags: [nvim, mdx, test]
+---
+
+import { Button } from './components/Button'
+import Chart from './components/Chart'
+
+# MDX Test Document
+
+This file exercises the **nvim MDX setup**: filetype detection, treesitter highlighting, `mdx_analyzer` LSP, and `render-markdown.nvim` inline rendering.
+
+## Prose features
+
+Regular markdown works here: *italic*, **bold**, ***both***, ~~strike~~, `inline code`, and [links](https://mdxjs.com).
+
+> Blockquotes render with a left border in render-markdown.nvim.
+>
+> Second paragraph inside the quote.
+
+### Lists
+
+- Unordered item one
+- Unordered item two
+  - Nested item
+  - Another nested
+- Unordered item three
+
+1. Ordered first
+2. Ordered second
+3. Ordered third
+
+- [x] Completed task
+- [ ] Pending task
+- [ ] Another pending
+
+### Tables
+
+| Feature          | Status | Notes                      |
+| ---------------- | :----: | -------------------------- |
+| Filetype         |   ✓    | `mdx` ext → `mdx` ft       |
+| Treesitter       |   ✓    | reuses `markdown` parser   |
+| LSP              |   ?    | requires `mdx_analyzer`    |
+| Inline render    |   ✓    | `render-markdown.nvim`     |
+
+## Code fences
+
+```ts
+type Props = { label: string; onClick: () => void }
+
+export function Button({ label, onClick }: Props) {
+  return <button onClick={onClick}>{label}</button>
+}
+```
+
+```python
+def greet(name: str) -> str:
+    return f"Hello, {name}!"
+```
+
+```sh
+nvim test.mdx
+:checkhealth render-markdown
+```
+
+## JSX expressions
+
+Inline expression: the current year is {new Date().getFullYear()}.
+
+A component with children:
+```tsx
+<Button label="Click me" onClick={() => alert('hi')} />
+
+<Chart
+  data={[1, 2, 3, 5, 8, 13]}
+  title="Fibonacci"
+  color="steelblue"
+/>
+```
+
+Nested JSX with markdown inside:
+
+<div className="callout">
+
+**Note:** MDX lets you mix markdown *inside* JSX blocks as long as blank lines
+surround the markdown block.
+
+- still a list
+- still rendered
+
+</div>
+
+## Export statement
+
+export const metadata = {
+  updated: '2026-04-17',
+  version: 2,
+}
+
+## Math (if supported)
+
+Inline: $E = mc^2$
+
+Block:
+
+$$
+\int_{-\infty}^{\infty} e^{-x^2}\,dx = \sqrt{\pi}
+$$
+
+## Footnotes
+
+Here is a claim with a footnote.[^1]
+
+[^1]: And here is the footnote content.
+
+---
+
+End of test file.
