@@ -20,6 +20,7 @@ return {
       { "<leader>fs", "<cmd>Telescope grep_string<cr>", desc = "Grep word under cursor" },
       { "<leader>fd", "<cmd>Telescope diagnostics<cr>", desc = "Diagnostics" },
       { "<leader>fk", "<cmd>Telescope keymaps<cr>", desc = "Keymaps" },
+      { "<leader>?", "<cmd>Telescope keymaps<cr>", desc = "Keymaps reference" },
       { "<leader>fc", "<cmd>Telescope commands<cr>", desc = "Commands" },
       { "<leader>f/", "<cmd>Telescope current_buffer_fuzzy_find<cr>", desc = "Fuzzy find in buffer" },
       { "<leader>gs", "<cmd>Telescope git_status<cr>", desc = "Git changed files" },
