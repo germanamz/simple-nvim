@@ -7,7 +7,7 @@
 local servers = {
   ts_ls         = { filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" } },
   pyright       = { filetypes = { "python" } },
-  gopls         = { filetypes = { "go", "gomod", "gosum", "gowork" } },
+  gopls         = { filetypes = { "go", "gomod" } },
   rust_analyzer = { filetypes = { "rust" } },
   lua_ls        = {
     filetypes = { "lua" },
@@ -79,9 +79,16 @@ return {
     end,
   },
   {
+    -- nvim-lspconfig ships default `lsp/<name>.lua` files (including `cmd`)
+    -- that vim.lsp.config merges with our per-server overrides. Without it,
+    -- `vim.lsp.config("gopls", {...})` errors out because `cmd` is nil.
+    "neovim/nvim-lspconfig",
+    lazy = false,
+  },
+  {
     "mason-org/mason-lspconfig.nvim",
     lazy = false,
-    dependencies = { "mason-org/mason.nvim" },
+    dependencies = { "mason-org/mason.nvim", "neovim/nvim-lspconfig" },
     config = function()
       local server_names = vim.tbl_keys(servers)
 
