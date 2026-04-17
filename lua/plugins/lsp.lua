@@ -1,20 +1,35 @@
 -- LSP stack: native vim.lsp.config (Neovim 0.11+) + mason.nvim for binaries.
--- mason-lspconfig provides the `ensure_installed` bridge so every server in
--- the list is auto-installed on first start. Servers are registered/enabled
--- in a later step.
+--   • Mason installs server binaries into stdpath("data")/mason.
+--   • mason-lspconfig drives ensure_installed.
+--   • vim.lsp.config(name, {...}) registers each server; vim.lsp.enable(name)
+--     activates it. The server's `filetypes` list gates attach per buffer, so
+--     a server only starts when a matching filetype is opened.
 local servers = {
-  "ts_ls",
-  "pyright",
-  "gopls",
-  "rust_analyzer",
-  "lua_ls",
-  "bashls",
-  "jsonls",
-  "yamlls",
-  "taplo",
-  "html",
-  "cssls",
-  "marksman",
+  ts_ls         = { filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" } },
+  pyright       = { filetypes = { "python" } },
+  gopls         = { filetypes = { "go", "gomod", "gosum", "gowork" } },
+  rust_analyzer = { filetypes = { "rust" } },
+  lua_ls        = {
+    filetypes = { "lua" },
+    settings = {
+      Lua = {
+        runtime     = { version = "LuaJIT" },
+        diagnostics = { globals = { "vim" } },
+        workspace   = {
+          library = vim.api.nvim_get_runtime_file("", true),
+          checkThirdParty = false,
+        },
+        telemetry = { enable = false },
+      },
+    },
+  },
+  bashls   = { filetypes = { "sh", "bash" } },
+  jsonls   = { filetypes = { "json", "jsonc" } },
+  yamlls   = { filetypes = { "yaml" } },
+  taplo    = { filetypes = { "toml" } },
+  html     = { filetypes = { "html" } },
+  cssls    = { filetypes = { "css", "scss", "less" } },
+  marksman = { filetypes = { "markdown" } },
 }
 
 return {
@@ -31,10 +46,17 @@ return {
     lazy = false,
     dependencies = { "mason-org/mason.nvim" },
     config = function()
+      local server_names = vim.tbl_keys(servers)
+
       require("mason-lspconfig").setup({
-        ensure_installed = servers,
+        ensure_installed = server_names,
         automatic_installation = false,
       })
+
+      for name, opts in pairs(servers) do
+        vim.lsp.config(name, opts)
+        vim.lsp.enable(name)
+      end
     end,
   },
 }
