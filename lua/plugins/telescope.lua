@@ -27,12 +27,13 @@ return {
         "<leader>gB",
         function()
           local rb = require("config.review_base")
-          -- BRIDGE (removed in Phase 2): on_done is nil here so setting the base
-          -- only persists and fires the autocmd; Phase 2 replaces nil with a
-          -- callback that auto-opens smart_files when a ref was selected.
-          rb.pick(rb.git_root(), nil)
+          rb.pick(rb.git_root(), function(ref)
+            if ref then
+              require("config.telescope_smart").smart_files()
+            end
+          end)
         end,
-        desc = "Review base: pick branch",
+        desc = "Review base: pick branch (auto-opens files)",
       },
       {
         "<leader>gX",
