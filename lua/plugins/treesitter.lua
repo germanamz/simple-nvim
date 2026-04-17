@@ -24,14 +24,17 @@ return {
       require("nvim-treesitter").install(parsers)
 
       -- filetype → parser language mapping (only where they differ)
+      -- mdx has no dedicated parser in nvim-treesitter; reuse markdown. JSX
+      -- blocks lose precise highlight but prose/headings/fences still render.
       local ft_to_lang = {
         typescriptreact = "tsx",
         javascriptreact = "javascript",
         sh              = "bash",
+        mdx             = "markdown",
       }
 
       local ft_pattern = {
-        "markdown",
+        "markdown", "mdx",
         "typescript", "typescriptreact", "javascript", "javascriptreact",
         "python",
         "go", "gomod", "gosum", "gowork",

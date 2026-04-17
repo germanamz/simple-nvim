@@ -18,6 +18,8 @@ vim.opt.rtp:prepend(lazypath)
 vim.g.mapleader = " "
 vim.g.maplocalleader = "\\"
 
+vim.filetype.add({ extension = { mdx = "mdx" } })
+
 require("config.options")
 
 require("lazy").setup("plugins")

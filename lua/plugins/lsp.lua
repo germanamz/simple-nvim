@@ -29,7 +29,17 @@ local servers = {
   taplo    = { filetypes = { "toml" } },
   html     = { filetypes = { "html" } },
   cssls    = { filetypes = { "css", "scss", "less" } },
-  marksman = { filetypes = { "markdown" } },
+  marksman      = { filetypes = { "markdown" } },
+  -- mdx_analyzer wraps tsserver, needs typescript lib. Falls back to
+  -- mason's bundled typescript when the workspace has no node_modules.
+  mdx_analyzer  = {
+    filetypes = { "mdx" },
+    init_options = {
+      typescript = {
+        tsdk = vim.fn.stdpath("data") .. "/mason/packages/typescript-language-server/node_modules/typescript/lib",
+      },
+    },
+  },
 }
 
 -- Buffer-local LSP keymaps. `gd` overrides netrw's `gd` only where LSP attaches.
