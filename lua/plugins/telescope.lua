@@ -24,6 +24,31 @@ return {
       { "<leader>f/", "<cmd>Telescope current_buffer_fuzzy_find<cr>", desc = "Fuzzy find in buffer" },
       { "<leader>gs", "<cmd>Telescope git_status<cr>", desc = "Git changed files" },
       {
+        "<leader>gB",
+        function()
+          local rb = require("config.review_base")
+          -- BRIDGE (removed in Phase 2): on_done is nil here so setting the base
+          -- only persists and fires the autocmd; Phase 2 replaces nil with a
+          -- callback that auto-opens smart_files when a ref was selected.
+          rb.pick(rb.git_root(), nil)
+        end,
+        desc = "Review base: pick branch",
+      },
+      {
+        "<leader>gX",
+        function()
+          local rb = require("config.review_base")
+          local root = rb.git_root()
+          if not root then
+            vim.notify("Not a git repo", vim.log.levels.WARN)
+            return
+          end
+          rb.clear(root)
+          vim.notify("Review base cleared")
+        end,
+        desc = "Review base: clear",
+      },
+      {
         "<leader><space>",
         function() require("config.telescope_smart").smart_files() end,
         desc = "Files (changed first)",
