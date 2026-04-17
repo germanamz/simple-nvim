@@ -61,23 +61,39 @@ local function close_legend()
   legend_win, legend_buf = nil, nil
 end
 
-local function open_legend()
+local function open_legend(base)
   close_legend()
   set_legend_highlights()
-  local text = " ◆ staged   ● modified   ○ untracked "
+
+  local segments = {
+    { icon = "◆", label = "staged",    hl = "SmartFilesStaged" },
+    { icon = "●", label = "modified",  hl = "SmartFilesModified" },
+    { icon = "○", label = "untracked", hl = "SmartFilesUntracked" },
+  }
+  if base then
+    table.insert(segments, { icon = "◈", label = "vs " .. base, hl = "SmartFilesCommitted" })
+  end
+
+  local text = " "
+  local ranges = {}
+  for i, seg in ipairs(segments) do
+    if i > 1 then text = text .. "   " end
+    local icon_start = #text
+    text = text .. seg.icon
+    table.insert(ranges, { seg.hl, icon_start, #text })
+    text = text .. " "
+    local label_start = #text
+    text = text .. seg.label
+    table.insert(ranges, { "SmartFilesLegend", label_start, #text })
+  end
+  text = text .. " "
+
   legend_buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(legend_buf, 0, -1, false, { text })
   local ns = vim.api.nvim_create_namespace("smart_files_legend")
-  -- each icon (◆●○) is 3 bytes
-  local function add_hl(group, s, e)
-    vim.api.nvim_buf_add_highlight(legend_buf, ns, group, 0, s, e)
+  for _, r in ipairs(ranges) do
+    vim.api.nvim_buf_add_highlight(legend_buf, ns, r[1], 0, r[2], r[3])
   end
-  add_hl("SmartFilesStaged",    1,  4)
-  add_hl("SmartFilesLegend",    4, 14)
-  add_hl("SmartFilesModified", 14, 17)
-  add_hl("SmartFilesLegend",   17, 29)
-  add_hl("SmartFilesUntracked", 29, 32)
-  add_hl("SmartFilesLegend",   32, #text)
 
   local width = vim.api.nvim_strwidth(text)
   legend_win = vim.api.nvim_open_win(legend_buf, false, {
@@ -164,7 +180,7 @@ function M.smart_files()
     end,
   }):find()
 
-  open_legend()
+  open_legend(base)
 end
 
 return M
