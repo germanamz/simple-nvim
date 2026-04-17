@@ -17,6 +17,7 @@ Personal Neovim configuration targeting Neovim 0.11+. Uses lazy.nvim for plugin 
 - Treesitter uses the `main` branch API (Neovim 0.11+): no `configs.setup()`, parsers installed via `require("nvim-treesitter").install()`, highlighting started per-buffer via `vim.treesitter.start()` in a FileType autocmd.
 - Telescope uses fzf-native extension (requires `make`). Single-escape closes insert mode directly.
 - Diffview configured with `diff3_mixed` merge layout; `q` closes in all panels.
+- LSP uses Neovim 0.11+ native API (`vim.lsp.config` / `vim.lsp.enable`) with `mason.nvim` managing server binaries. Servers are declared as a single table in `lua/plugins/lsp.lua`; each entry's `filetypes` gates per-buffer attach. Buffer-local keymaps are set from a single `LspAttach` autocmd.
 
 ## Adding a plugin
 
