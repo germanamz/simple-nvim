@@ -103,13 +103,15 @@ function M.smart_files()
   set_legend_highlights()
 
   local root = git_root()
-  local staged, modified, untracked = {}, {}, {}
-  if root then staged, modified, untracked = git_changes(root) end
+  local base = root and review_base.get(root) or nil
+  local staged, modified, untracked, committed = {}, {}, {}, {}
+  if root then staged, modified, untracked, committed = git_changes(root, base) end
 
   local seen, results = {}, {}
   for f, _ in pairs(staged)    do if not seen[f] then seen[f] = true; table.insert(results, f) end end
   for f, _ in pairs(modified)  do if not seen[f] then seen[f] = true; table.insert(results, f) end end
   for f, _ in pairs(untracked) do if not seen[f] then seen[f] = true; table.insert(results, f) end end
+  for f, _ in pairs(committed) do if not seen[f] then seen[f] = true; table.insert(results, f) end end
   local all = list_all()
   if vim.v.shell_error == 0 then
     for _, f in ipairs(all) do
@@ -121,7 +123,7 @@ function M.smart_files()
   local entry_maker = make_entry.gen_from_file({ cwd = vim.fn.getcwd() })
 
   pickers.new({}, {
-    prompt_title = "Files",
+    prompt_title = base and ("Files (base: " .. base .. ")") or "Files",
     finder = finders.new_table({
       results = results,
       entry_maker = function(line)
@@ -130,6 +132,7 @@ function M.smart_files()
         if staged[line] then icon, hl = "◆ ", "SmartFilesStaged"
         elseif modified[line] then icon, hl = "● ", "SmartFilesModified"
         elseif untracked[line] then icon, hl = "○ ", "SmartFilesUntracked"
+        elseif committed[line] then icon, hl = "◈ ", "SmartFilesCommitted"
         end
         if icon then
           local base = e.display
