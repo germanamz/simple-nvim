@@ -18,6 +18,13 @@ return {
       linehl = false,
       word_diff = true,
       diff_opts = { internal = true, linematch = 60 },
+      current_line_blame = true,
+      current_line_blame_opts = {
+        virt_text = true,
+        virt_text_pos = "eol",
+        delay = 0,
+        ignore_whitespace = false,
+      },
       on_attach = function(bufnr)
         apply_base(bufnr)
         local gs = require("gitsigns")
@@ -30,6 +37,7 @@ return {
         map("n", "<leader>hs", gs.stage_hunk, "Stage hunk")
         map("n", "<leader>hr", gs.reset_hunk, "Reset hunk")
         map("n", "<leader>hb", function() gs.blame_line({ full = true }) end, "Blame line")
+        map("n", "<leader>hB", gs.toggle_current_line_blame, "Toggle line blame virtual text")
         map("n", "<leader>hd", gs.diffthis, "Diff against index")
         map("n", "<leader>ht", gs.toggle_deleted, "Toggle deleted lines inline")
         map("n", "<leader>hi", gs.preview_hunk_inline, "Inline preview hunk")
