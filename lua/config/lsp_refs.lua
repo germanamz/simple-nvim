@@ -1,10 +1,19 @@
 -- Count LSP references to the symbol under the cursor within the current buffer
 -- and expose the result as a statusline segment (`_G.lsp_refs_status`).
+-- Also highlights the in-buffer occurrences via extmarks in a dedicated namespace.
 
 local M = {}
 
+local ns = vim.api.nvim_create_namespace("lsp_refs_status")
+
 -- state[bufnr] = { row, col, count } — last resolved result for that buffer.
 local state = {}
+
+local function clear_marks(bufnr)
+  if vim.api.nvim_buf_is_valid(bufnr) then
+    vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+  end
+end
 
 local function has_refs_client(bufnr)
   for _, c in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
@@ -47,6 +56,7 @@ local function request(bufnr)
       if vim.api.nvim_get_current_buf() ~= bufnr then return end
 
       local seen = {}
+      local ranges = {}
       local count = 0
       for _, loc in ipairs(result) do
         if loc.uri == buf_uri then
@@ -55,7 +65,20 @@ local function request(bufnr)
           if not seen[key] then
             seen[key] = true
             count = count + 1
+            ranges[#ranges + 1] = loc.range
           end
+        end
+      end
+
+      clear_marks(bufnr)
+      if count >= 2 then
+        for _, r in ipairs(ranges) do
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, r.start.line, r.start.character, {
+            end_row = r["end"].line,
+            end_col = r["end"].character,
+            hl_group = "LspReferenceText",
+            priority = 120,
+          })
         end
       end
 
@@ -73,6 +96,7 @@ local function invalidate_on_move()
   local row, col = cursor_rc()
   if s.row ~= row or s.col ~= col then
     state[bufnr] = nil
+    clear_marks(bufnr)
     vim.cmd("redrawstatus")
   end
 end
@@ -101,7 +125,10 @@ function M.setup()
 
   vim.api.nvim_create_autocmd({ "BufLeave", "BufWipeout" }, {
     group = group,
-    callback = function(args) state[args.buf] = nil end,
+    callback = function(args)
+      state[args.buf] = nil
+      clear_marks(args.buf)
+    end,
   })
 
   _G.lsp_refs_status = M.status
