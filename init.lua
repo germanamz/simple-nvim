@@ -21,5 +21,6 @@ vim.g.maplocalleader = "\\"
 vim.filetype.add({ extension = { mdx = "mdx" } })
 
 require("config.options")
+require("config.lsp_refs").setup()
 
 require("lazy").setup("plugins")
