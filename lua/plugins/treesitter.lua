@@ -17,7 +17,7 @@ return {
         "go", "gomod", "gosum", "gowork",
         "rust",
         "lua", "luadoc", "vim", "vimdoc", "query",
-        "bash", "json", "jsonc", "yaml", "toml",
+        "bash", "json", "yaml", "toml",
         "html", "css", "regex", "diff", "git_config",
       }
 
@@ -28,6 +28,8 @@ return {
       -- our ad-hoc `ft_to_lang` table below. mdx has no dedicated parser,
       -- so reuse markdown.
       vim.treesitter.language.register("markdown", "mdx")
+      -- jsonc has no dedicated parser; the json parser handles it.
+      vim.treesitter.language.register("json", "jsonc")
 
       -- filetype → parser language mapping (only where they differ)
       local ft_to_lang = {
@@ -35,6 +37,7 @@ return {
         javascriptreact = "javascript",
         sh              = "bash",
         mdx             = "markdown",
+        jsonc           = "json",
       }
 
       local ft_pattern = {
