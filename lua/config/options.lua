@@ -11,6 +11,7 @@ opt.cursorline = true
 opt.list = true
 opt.listchars = {
   tab = "» ",
+  lead = "·",
   trail = "·",
   extends = "›",
   precedes = "‹",
