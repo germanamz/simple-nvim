@@ -152,7 +152,7 @@ return {
       end
     end
 
-    function _G.gitsigns_below_status()
+    function _G.gitsigns_hunks_status()
       local ok, gs = pcall(require, "gitsigns")
       if not ok then return "" end
       local bufnr = vim.api.nvim_get_current_buf()
@@ -160,20 +160,20 @@ return {
       if not hunks or #hunks == 0 then return "" end
       local cursor = vim.api.nvim_win_get_cursor(0)[1]
       local add, change, delete = 0, 0, 0
+      local above, below = 0, 0
       for _, h in ipairs(hunks) do
-        if h.added.start >= cursor then
-          if h.type == "add" then add = add + 1
-          elseif h.type == "change" then change = change + 1
-          elseif h.type == "delete" then delete = delete + 1
-          end
+        if h.type == "add" then add = add + 1
+        elseif h.type == "change" then change = change + 1
+        elseif h.type == "delete" then delete = delete + 1
+        end
+        if h.added.start < cursor then above = above + 1
+        else below = below + 1
         end
       end
-      local total = add + change + delete
-      if total == 0 then return "" end
-      return string.format(" +%d ~%d -%d ↓%d ", add, change, delete, total)
+      return string.format(" +%d ~%d -%d ↑%d ↓%d ", add, change, delete, above, below)
     end
 
-    vim.o.statusline = "%f %m%r%=%{v:lua.lsp_refs_status()}%{v:lua.gitsigns_below_status()} %y %l:%c %p%% "
+    vim.o.statusline = "%f %m%r%=%{v:lua.lsp_refs_status()}%{v:lua.gitsigns_hunks_status()} %y %l:%c %p%% "
 
     vim.api.nvim_create_autocmd("User", {
       pattern = "GitSignsUpdate",
