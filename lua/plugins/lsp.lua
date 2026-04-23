@@ -67,15 +67,21 @@ end
 
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(args)
-    local opts = { buffer = args.buf, silent = true }
     local client = vim.lsp.get_client_by_id(args.data.client_id)
+    local function map(lhs, rhs, desc)
+      vim.keymap.set("n", lhs, rhs, { buffer = args.buf, silent = true, desc = desc })
+    end
 
     if client and client.name == "ts_ls" then
-      vim.keymap.set("n", "gd", function() ts_goto_source_definition(client, args.buf) end, opts)
+      map("gd", function() ts_goto_source_definition(client, args.buf) end, "Goto source definition (ts_ls)")
     else
-      vim.keymap.set("n", "gd", vim.lsp.buf.definition, opts)
+      map("gd", vim.lsp.buf.definition, "Goto definition")
     end
-    vim.keymap.set("n", "<leader>e", vim.diagnostic.open_float, opts)
+    map("<leader>e", vim.diagnostic.open_float, "Show diagnostic float")
+
+    local lsp_refs = require("config.lsp_refs")
+    map("]r", lsp_refs.next, "Next LSP reference")
+    map("[r", lsp_refs.prev, "Prev LSP reference")
   end,
 })
 
