@@ -36,6 +36,20 @@ opt.incsearch = true
 opt.termguicolors = true
 opt.mouse = "a"
 opt.clipboard = "unnamedplus"
+
+-- OSC52 clipboard provider for containers/SSH (host uses pbcopy/xclip natively)
+local in_container = vim.env.REMOTE_CONTAINERS == "true"
+  or vim.env.CODESPACES == "true"
+  or vim.uv.fs_stat("/.dockerenv") ~= nil
+if in_container or vim.env.SSH_TTY then
+  local osc52 = require("vim.ui.clipboard.osc52")
+  vim.g.clipboard = {
+    name = "OSC 52",
+    copy = { ["+"] = osc52.copy("+"), ["*"] = osc52.copy("*") },
+    paste = { ["+"] = osc52.paste("+"), ["*"] = osc52.paste("*") },
+  }
+end
+
 opt.undofile = true
 opt.updatetime = 250
 opt.timeoutlen = 400
