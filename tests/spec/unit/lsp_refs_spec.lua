@@ -1,7 +1,7 @@
 local nvim_env = require("helpers.nvim_env")
 
 local function fresh_buffer_with_lines(lines)
-  local buf = vim.api.nvim_create_buf(true, true)
+  local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_set_current_buf(buf)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   return buf
@@ -138,7 +138,7 @@ describe("config.lsp_refs", function()
       vim.api.nvim_win_set_cursor(0, { 1, 0 })
       local captured = install_lsp_stubs(buf)
 
-      vim.api.nvim_exec_autocmds("CursorHold", { buffer = buf })
+      vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
       local uri = vim.uri_from_bufnr(buf)
@@ -167,7 +167,7 @@ describe("config.lsp_refs", function()
       vim.api.nvim_win_set_cursor(0, { 1, 0 })
       local captured = install_lsp_stubs(buf)
 
-      vim.api.nvim_exec_autocmds("CursorHold", { buffer = buf })
+      vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
       local uri = vim.uri_from_bufnr(buf)
@@ -187,7 +187,7 @@ describe("config.lsp_refs", function()
       vim.api.nvim_win_set_cursor(0, { 1, 0 })
       local captured = install_lsp_stubs(buf)
 
-      vim.api.nvim_exec_autocmds("CursorHold", { buffer = buf })
+      vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
       local uri = vim.uri_from_bufnr(buf)
@@ -216,7 +216,7 @@ describe("config.lsp_refs", function()
       vim.api.nvim_win_set_cursor(0, { 1, 0 })
       local captured = install_lsp_stubs(buf)
 
-      vim.api.nvim_exec_autocmds("CursorHold", { buffer = buf })
+      vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
       vim.api.nvim_win_set_cursor(0, { 2, 1 })
@@ -247,7 +247,7 @@ describe("config.lsp_refs", function()
       vim.api.nvim_win_set_cursor(0, { 1, 0 })
       local captured = install_lsp_stubs(buf)
 
-      vim.api.nvim_exec_autocmds("CursorHold", { buffer = buf })
+      vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
       local uri = vim.uri_from_bufnr(buf)
