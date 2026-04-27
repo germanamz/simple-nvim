@@ -21,7 +21,9 @@ local M = {}
 ---@param revs table<string, string> map: parser name -> revision string
 function M.apply(revs)
   local ok, parsers = pcall(require, "nvim-treesitter.parsers")
-  if not ok then return end
+  if not ok then
+    return
+  end
   for name, revision in pairs(revs) do
     if parsers[name] and parsers[name].install_info then
       parsers[name].install_info.revision = revision

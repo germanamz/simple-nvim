@@ -10,6 +10,12 @@ return {
     separator = "─",
   },
   keys = {
-    { "<leader>ut", function() require("treesitter-context").toggle() end, desc = "Toggle treesitter context" },
+    {
+      "<leader>ut",
+      function()
+        require("treesitter-context").toggle()
+      end,
+      desc = "Toggle treesitter context",
+    },
   },
 }

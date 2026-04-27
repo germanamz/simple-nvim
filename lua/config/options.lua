@@ -4,7 +4,7 @@ local opt = vim.opt
 opt.number = true
 opt.relativenumber = false
 opt.numberwidth = 4
-opt.signcolumn = "yes"       -- always show sign column (prevents jitter)
+opt.signcolumn = "yes" -- always show sign column (prevents jitter)
 opt.cursorline = true
 
 -- Whitespace rendering
@@ -59,8 +59,8 @@ opt.scrolloff = 8
 opt.sidescrolloff = 8
 opt.laststatus = 2
 opt.wrap = true
-opt.linebreak = true         -- wrap at word boundaries, not mid-word
-opt.breakindent = true       -- wrapped lines keep indent
+opt.linebreak = true -- wrap at word boundaries, not mid-word
+opt.breakindent = true -- wrapped lines keep indent
 opt.showbreak = "↪ "
 
 -- Force wrap inside diff mode (vim disables it by default, diffview inherits)

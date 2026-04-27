@@ -13,7 +13,9 @@ return {
     keys = {
       {
         "<leader>K",
-        function() require("which-key").show({ global = true }) end,
+        function()
+          require("which-key").show({ global = true })
+        end,
         desc = "All keymaps (which-key)",
       },
     },

@@ -31,7 +31,11 @@ return {
     { "<leader>gD", "<cmd>DiffviewClose<cr>", desc = "Diffview: close" },
     { "<leader>gh", "<cmd>DiffviewFileHistory<cr>", desc = "Diffview: repo file history" },
     { "<leader>gf", "<cmd>DiffviewFileHistory %<cr>", desc = "Diffview: current file history" },
-    { "<leader>gm", "<cmd>DiffviewOpen origin/main...HEAD<cr>", desc = "Diffview: branch vs origin/main" },
+    {
+      "<leader>gm",
+      "<cmd>DiffviewOpen origin/main...HEAD<cr>",
+      desc = "Diffview: branch vs origin/main",
+    },
     { "<leader>gt", "<cmd>DiffviewToggleFiles<cr>", desc = "Diffview: toggle file panel" },
   },
   opts = function()

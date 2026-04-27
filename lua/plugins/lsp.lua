@@ -5,17 +5,17 @@
 --     activates it. The server's `filetypes` list gates attach per buffer, so
 --     a server only starts when a matching filetype is opened.
 local servers = {
-  ts_ls         = { filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" } },
-  pyright       = { filetypes = { "python" } },
-  gopls         = { filetypes = { "go", "gomod" } },
+  ts_ls = { filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" } },
+  pyright = { filetypes = { "python" } },
+  gopls = { filetypes = { "go", "gomod" } },
   rust_analyzer = { filetypes = { "rust" } },
-  lua_ls        = {
+  lua_ls = {
     filetypes = { "lua" },
     settings = {
       Lua = {
-        runtime     = { version = "LuaJIT" },
+        runtime = { version = "LuaJIT" },
         diagnostics = { globals = { "vim" } },
-        workspace   = {
+        workspace = {
           library = vim.api.nvim_get_runtime_file("", true),
           checkThirdParty = false,
         },
@@ -23,20 +23,21 @@ local servers = {
       },
     },
   },
-  bashls   = { filetypes = { "sh", "bash" } },
-  jsonls   = { filetypes = { "json", "jsonc" } },
-  yamlls   = { filetypes = { "yaml" } },
-  taplo    = { filetypes = { "toml" } },
-  html     = { filetypes = { "html" } },
-  cssls    = { filetypes = { "css", "scss", "less" } },
-  marksman      = { filetypes = { "markdown" } },
+  bashls = { filetypes = { "sh", "bash" } },
+  jsonls = { filetypes = { "json", "jsonc" } },
+  yamlls = { filetypes = { "yaml" } },
+  taplo = { filetypes = { "toml" } },
+  html = { filetypes = { "html" } },
+  cssls = { filetypes = { "css", "scss", "less" } },
+  marksman = { filetypes = { "markdown" } },
   -- mdx_analyzer wraps tsserver, needs typescript lib. Falls back to
   -- mason's bundled typescript when the workspace has no node_modules.
-  mdx_analyzer  = {
+  mdx_analyzer = {
     filetypes = { "mdx" },
     init_options = {
       typescript = {
-        tsdk = vim.fn.stdpath("data") .. "/mason/packages/typescript-language-server/node_modules/typescript/lib",
+        tsdk = vim.fn.stdpath("data")
+          .. "/mason/packages/typescript-language-server/node_modules/typescript/lib",
       },
     },
   },
@@ -73,7 +74,9 @@ vim.api.nvim_create_autocmd("LspAttach", {
     end
 
     if client and client.name == "ts_ls" then
-      map("gd", function() ts_goto_source_definition(client, args.buf) end, "Goto source definition (ts_ls)")
+      map("gd", function()
+        ts_goto_source_definition(client, args.buf)
+      end, "Goto source definition (ts_ls)")
     else
       map("gd", vim.lsp.buf.definition, "Goto definition")
     end

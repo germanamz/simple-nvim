@@ -31,12 +31,18 @@ return {
         local map = function(mode, lhs, rhs, desc)
           vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc })
         end
-        map("n", "]c", function() gs.nav_hunk("next") end, "Next hunk")
-        map("n", "[c", function() gs.nav_hunk("prev") end, "Prev hunk")
+        map("n", "]c", function()
+          gs.nav_hunk("next")
+        end, "Next hunk")
+        map("n", "[c", function()
+          gs.nav_hunk("prev")
+        end, "Prev hunk")
         map("n", "<leader>hp", gs.preview_hunk, "Preview hunk")
         map("n", "<leader>hs", gs.stage_hunk, "Stage hunk")
         map("n", "<leader>hr", gs.reset_hunk, "Reset hunk")
-        map("n", "<leader>hb", function() gs.blame_line({ full = true }) end, "Blame line")
+        map("n", "<leader>hb", function()
+          gs.blame_line({ full = true })
+        end, "Blame line")
         map("n", "<leader>hB", gs.toggle_current_line_blame, "Toggle line blame virtual text")
         map("n", "<leader>hd", gs.diffthis, "Diff against index")
         map("n", "<leader>ht", gs.toggle_deleted, "Toggle deleted lines inline")
@@ -59,15 +65,15 @@ return {
     })
 
     local function paint()
-      vim.api.nvim_set_hl(0, "GitSignsAddNr",    { fg = "#ffffff", bg = "#4ea862" })
+      vim.api.nvim_set_hl(0, "GitSignsAddNr", { fg = "#ffffff", bg = "#4ea862" })
       vim.api.nvim_set_hl(0, "GitSignsChangeNr", { fg = "#ffffff", bg = "#7a5d1a" })
       vim.api.nvim_set_hl(0, "GitSignsDeleteNr", { fg = "#ffffff", bg = "#c85050" })
 
-      vim.api.nvim_set_hl(0, "GitSignsAddLn",    { bg = "#b8e0c4" })
+      vim.api.nvim_set_hl(0, "GitSignsAddLn", { bg = "#b8e0c4" })
       vim.api.nvim_set_hl(0, "GitSignsChangeLn", { bg = "#ead090" })
       vim.api.nvim_set_hl(0, "GitSignsDeleteLn", { sp = "#c85050", underdashed = true })
 
-      vim.api.nvim_set_hl(0, "GitSignsAddLnInline",    { bg = "#8fd4a3" })
+      vim.api.nvim_set_hl(0, "GitSignsAddLnInline", { bg = "#8fd4a3" })
       vim.api.nvim_set_hl(0, "GitSignsChangeLnInline", { bg = "#8fd4a3" })
       vim.api.nvim_set_hl(0, "GitSignsDeleteLnInline", {})
 
@@ -79,15 +85,21 @@ return {
     local ns = vim.api.nvim_create_namespace("gs_custom")
 
     local function mark_hunks(bufnr)
-      if not vim.api.nvim_buf_is_valid(bufnr) then return end
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
       vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
       local ok, gs = pcall(require, "gitsigns")
-      if not ok then return end
+      if not ok then
+        return
+      end
       local hunks = gs.get_hunks(bufnr) or {}
       local line_count = vim.api.nvim_buf_line_count(bufnr)
 
       local function line_bg(row, hl)
-        if row < 0 or row >= line_count then return end
+        if row < 0 or row >= line_count then
+          return
+        end
         pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, 0, {
           end_row = row + 1,
           end_col = 0,
@@ -120,8 +132,7 @@ return {
               p = p + 1
             end
             local s = 0
-            while s < olen - p and s < nlen - p
-              and old:byte(olen - s) == new:byte(nlen - s) do
+            while s < olen - p and s < nlen - p and old:byte(olen - s) == new:byte(nlen - s) do
               s = s + 1
             end
             local old_mid = olen - p - s
@@ -154,26 +165,36 @@ return {
 
     function _G.gitsigns_hunks_status()
       local ok, gs = pcall(require, "gitsigns")
-      if not ok then return "" end
+      if not ok then
+        return ""
+      end
       local bufnr = vim.api.nvim_get_current_buf()
       local hunks = gs.get_hunks(bufnr)
-      if not hunks or #hunks == 0 then return "" end
+      if not hunks or #hunks == 0 then
+        return ""
+      end
       local cursor = vim.api.nvim_win_get_cursor(0)[1]
       local add, change, delete = 0, 0, 0
       local above, below = 0, 0
       for _, h in ipairs(hunks) do
-        if h.type == "add" then add = add + 1
-        elseif h.type == "change" then change = change + 1
-        elseif h.type == "delete" then delete = delete + 1
+        if h.type == "add" then
+          add = add + 1
+        elseif h.type == "change" then
+          change = change + 1
+        elseif h.type == "delete" then
+          delete = delete + 1
         end
-        if h.added.start < cursor then above = above + 1
-        else below = below + 1
+        if h.added.start < cursor then
+          above = above + 1
+        else
+          below = below + 1
         end
       end
       return string.format(" +%d ~%d -%d ↑%d ↓%d ", add, change, delete, above, below)
     end
 
-    vim.o.statusline = "%f %m%r%=%{v:lua.lsp_refs_status()}%{v:lua.gitsigns_hunks_status()} %y %l:%c %p%% "
+    vim.o.statusline =
+      "%f %m%r%=%{v:lua.lsp_refs_status()}%{v:lua.gitsigns_hunks_status()} %y %l:%c %p%% "
 
     vim.api.nvim_create_autocmd("User", {
       pattern = "GitSignsUpdate",

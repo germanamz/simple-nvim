@@ -30,8 +30,12 @@ local function cursor_rc()
 end
 
 local function request(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) then return end
-  if bufnr ~= vim.api.nvim_get_current_buf() then return end
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return
+  end
+  if bufnr ~= vim.api.nvim_get_current_buf() then
+    return
+  end
 
   local client = has_refs_client(bufnr)
   if not client then
@@ -45,15 +49,27 @@ local function request(bufnr)
 
   local buf_uri = vim.uri_from_bufnr(bufnr)
 
-  local ok = pcall(vim.lsp.buf_request, bufnr, "textDocument/references", params,
+  local ok = pcall(
+    vim.lsp.buf_request,
+    bufnr,
+    "textDocument/references",
+    params,
     function(err, result)
-      if err or not result then return end
-      if not vim.api.nvim_buf_is_valid(bufnr) then return end
+      if err or not result then
+        return
+      end
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
 
       -- Drop stale responses: cursor moved off the position we queried.
       local cur_row, cur_col = cursor_rc()
-      if cur_row ~= row or cur_col ~= col then return end
-      if vim.api.nvim_get_current_buf() ~= bufnr then return end
+      if cur_row ~= row or cur_col ~= col then
+        return
+      end
+      if vim.api.nvim_get_current_buf() ~= bufnr then
+        return
+      end
 
       local seen = {}
       local ranges = {}
@@ -84,9 +100,12 @@ local function request(bufnr)
 
       state[bufnr] = { row = row, col = col, count = count }
       vim.cmd("redrawstatus")
-    end)
+    end
+  )
 
-  if not ok then state[bufnr] = nil end
+  if not ok then
+    state[bufnr] = nil
+  end
 end
 
 -- True if (row, col) falls inside any extmark range in `ns` for this buffer.
@@ -97,7 +116,9 @@ local function cursor_on_mark(bufnr, row, col)
     local er, ec = det.end_row or sr, det.end_col or sc
     local after_start = row > sr or (row == sr and col >= sc)
     local before_end = row < er or (row == er and col < ec)
-    if after_start and before_end then return true end
+    if after_start and before_end then
+      return true
+    end
   end
   return false
 end
@@ -105,11 +126,17 @@ end
 local function invalidate_on_move()
   local bufnr = vim.api.nvim_get_current_buf()
   local s = state[bufnr]
-  if not s then return end
+  if not s then
+    return
+  end
   local row, col = cursor_rc()
-  if s.row == row and s.col == col then return end
+  if s.row == row and s.col == col then
+    return
+  end
   -- Keep marks when jumping between references for the same symbol.
-  if cursor_on_mark(bufnr, row, col) then return end
+  if cursor_on_mark(bufnr, row, col) then
+    return
+  end
   state[bufnr] = nil
   clear_marks(bufnr)
   vim.cmd("redrawstatus")
@@ -120,10 +147,14 @@ end
 local function jump(dir)
   local bufnr = vim.api.nvim_get_current_buf()
   local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})
-  if #marks == 0 then return end
+  if #marks == 0 then
+    return
+  end
 
   table.sort(marks, function(a, b)
-    if a[2] ~= b[2] then return a[2] < b[2] end
+    if a[2] ~= b[2] then
+      return a[2] < b[2]
+    end
     return a[3] < b[3]
   end)
 
@@ -151,15 +182,23 @@ local function jump(dir)
   vim.api.nvim_win_set_cursor(0, { target[2] + 1, target[3] })
 end
 
-function M.next() jump(1) end
-function M.prev() jump(-1) end
+function M.next()
+  jump(1)
+end
+function M.prev()
+  jump(-1)
+end
 
 function M.status()
   local bufnr = vim.api.nvim_get_current_buf()
   local s = state[bufnr]
-  if not s or s.count <= 0 then return "" end
+  if not s or s.count <= 0 then
+    return ""
+  end
   local row, col = cursor_rc()
-  if s.row ~= row or s.col ~= col then return "" end
+  if s.row ~= row or s.col ~= col then
+    return ""
+  end
   return string.format(" ⇄%d ", s.count)
 end
 
@@ -168,7 +207,9 @@ function M.setup()
 
   vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
     group = group,
-    callback = function(args) request(args.buf) end,
+    callback = function(args)
+      request(args.buf)
+    end,
   })
 
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
