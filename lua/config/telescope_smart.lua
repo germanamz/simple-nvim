@@ -10,7 +10,7 @@ local function git_root()
   return out[1]
 end
 
-local function git_changes(root, base)
+function M._git_changes(root, base)
   local staged, modified, untracked, committed = {}, {}, {}, {}
   local st = vim.fn.systemlist({ "git", "-C", root, "diff", "--cached", "--name-only" })
   if vim.v.shell_error == 0 then
@@ -57,6 +57,42 @@ local function list_all()
   else
     return vim.fn.systemlist({ "find", ".", "-type", "f", "-not", "-path", "*/.git/*" })
   end
+end
+
+function M._merge_results(staged, modified, untracked, committed, all_files)
+  local seen, results = {}, {}
+  for f, _ in pairs(staged) do
+    if not seen[f] then
+      seen[f] = true
+      table.insert(results, f)
+    end
+  end
+  for f, _ in pairs(modified) do
+    if not seen[f] then
+      seen[f] = true
+      table.insert(results, f)
+    end
+  end
+  for f, _ in pairs(untracked) do
+    if not seen[f] then
+      seen[f] = true
+      table.insert(results, f)
+    end
+  end
+  for f, _ in pairs(committed) do
+    if not seen[f] then
+      seen[f] = true
+      table.insert(results, f)
+    end
+  end
+  for _, f in ipairs(all_files) do
+    f = f:gsub("^%./", "")
+    if not seen[f] then
+      seen[f] = true
+      table.insert(results, f)
+    end
+  end
+  return results
 end
 
 local function set_legend_highlights()
@@ -142,44 +178,14 @@ function M.smart_files()
   local base = root and review_base.get(root) or nil
   local staged, modified, untracked, committed = {}, {}, {}, {}
   if root then
-    staged, modified, untracked, committed = git_changes(root, base)
+    staged, modified, untracked, committed = M._git_changes(root, base)
   end
 
-  local seen, results = {}, {}
-  for f, _ in pairs(staged) do
-    if not seen[f] then
-      seen[f] = true
-      table.insert(results, f)
-    end
-  end
-  for f, _ in pairs(modified) do
-    if not seen[f] then
-      seen[f] = true
-      table.insert(results, f)
-    end
-  end
-  for f, _ in pairs(untracked) do
-    if not seen[f] then
-      seen[f] = true
-      table.insert(results, f)
-    end
-  end
-  for f, _ in pairs(committed) do
-    if not seen[f] then
-      seen[f] = true
-      table.insert(results, f)
-    end
-  end
   local all = list_all()
-  if vim.v.shell_error == 0 then
-    for _, f in ipairs(all) do
-      f = f:gsub("^%./", "")
-      if not seen[f] then
-        seen[f] = true
-        table.insert(results, f)
-      end
-    end
+  if vim.v.shell_error ~= 0 then
+    all = {}
   end
+  local results = M._merge_results(staged, modified, untracked, committed, all)
 
   local entry_maker = make_entry.gen_from_file({ cwd = vim.fn.getcwd() })
 
