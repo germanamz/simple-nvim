@@ -23,4 +23,6 @@ vim.filetype.add({ extension = { mdx = "mdx" } })
 require("config.options")
 require("config.lsp_refs").setup()
 
-require("lazy").setup("plugins")
+if vim.env.NVIM_BOOTSTRAP ~= "0" then
+  require("lazy").setup("plugins")
+end

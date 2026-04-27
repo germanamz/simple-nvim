@@ -21,6 +21,9 @@ return {
         "html", "css", "regex", "diff", "git_config",
       }
 
+      -- Pin parsers to lockfile revisions before install. See
+      -- lua/config/ts_pinned.lua for why this can't be done as a per-call arg.
+      require("config.ts_pinned").apply(require("tests.parser-revisions"))
       require("nvim-treesitter").install(parsers)
 
       -- Global filetype → parser registration. Downstream plugins

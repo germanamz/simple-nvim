@@ -106,10 +106,11 @@ return {
     lazy = false,
     dependencies = { "mason-org/mason.nvim", "neovim/nvim-lspconfig" },
     config = function()
-      local server_names = vim.tbl_keys(servers)
-
+      -- Tool installs are owned by mason-tool-installer (reads
+      -- mason-tool-versions.lock); mason-lspconfig is kept only for
+      -- vim.lsp.config integration, so ensure_installed is intentionally empty.
       require("mason-lspconfig").setup({
-        ensure_installed = server_names,
+        ensure_installed = {},
         automatic_installation = false,
       })
 
@@ -117,6 +118,27 @@ return {
         vim.lsp.config(name, cfg)
         vim.lsp.enable(name)
       end
+    end,
+  },
+  {
+    "WhoIsSethDaniel/mason-tool-installer.nvim",
+    lazy = false,
+    dependencies = { "mason-org/mason.nvim" },
+    config = function()
+      local lockfile = vim.fn.stdpath("config") .. "/mason-tool-versions.lock"
+      local raw = assert(io.open(lockfile, "r"), "missing " .. lockfile):read("*a")
+      local versions = vim.json.decode(raw)
+
+      local ensure_installed = {}
+      for name, version in pairs(versions) do
+        ensure_installed[#ensure_installed + 1] = { name, version = version }
+      end
+
+      require("mason-tool-installer").setup({
+        ensure_installed = ensure_installed,
+        auto_update = false,
+        run_on_start = true,
+      })
     end,
   },
 }
