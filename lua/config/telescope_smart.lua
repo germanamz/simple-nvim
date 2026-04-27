@@ -49,7 +49,7 @@ function M._git_changes(root, base)
   return staged, modified, untracked, committed
 end
 
-local function list_all()
+function M._list_all()
   if vim.fn.executable("rg") == 1 then
     return vim.fn.systemlist({ "rg", "--files", "--hidden", "--glob", "!.git" })
   elseif vim.fn.executable("fd") == 1 then
@@ -181,7 +181,7 @@ function M.smart_files()
     staged, modified, untracked, committed = M._git_changes(root, base)
   end
 
-  local all = list_all()
+  local all = M._list_all()
   if vim.v.shell_error ~= 0 then
     all = {}
   end
