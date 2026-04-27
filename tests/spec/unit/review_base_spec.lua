@@ -23,8 +23,7 @@ local function state_path()
 end
 
 describe("config.review_base", function()
-  local env_root
-  local M
+  local env_root, M, orig_rename
 
   before_each(function()
     env_root = nvim_env.setup_isolated_env()
@@ -33,6 +32,11 @@ describe("config.review_base", function()
   end)
 
   after_each(function()
+    if orig_rename then
+      os.rename = orig_rename
+      orig_rename = nil
+    end
+    vim.api.nvim_clear_autocmds({ event = "User", pattern = "ReviewBaseChanged" })
     nvim_env.teardown(env_root)
   end)
 
@@ -116,7 +120,7 @@ describe("config.review_base", function()
     it("persists ref and fires User ReviewBaseChanged exactly once", function()
       local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
       local fires = {}
-      local id = vim.api.nvim_create_autocmd("User", {
+      vim.api.nvim_create_autocmd("User", {
         pattern = "ReviewBaseChanged",
         callback = function(args)
           table.insert(fires, args.data)
@@ -129,8 +133,6 @@ describe("config.review_base", function()
       assert.are.equal(repo, fires[1].root)
       assert.are.equal("main", fires[1].ref)
       assert.are.equal("main", M.get(repo))
-
-      pcall(vim.api.nvim_del_autocmd, id)
     end)
   end)
 
@@ -141,7 +143,7 @@ describe("config.review_base", function()
       assert.are.equal("main", M.get(repo))
 
       local fires = {}
-      local id = vim.api.nvim_create_autocmd("User", {
+      vim.api.nvim_create_autocmd("User", {
         pattern = "ReviewBaseChanged",
         callback = function(args)
           table.insert(fires, args.data)
@@ -154,8 +156,6 @@ describe("config.review_base", function()
       assert.are.equal(repo, fires[1].root)
       assert.is_nil(fires[1].ref)
       assert.is_nil(M.get(repo))
-
-      pcall(vim.api.nvim_del_autocmd, id)
     end)
   end)
 
@@ -187,13 +187,12 @@ describe("config.review_base", function()
       local pre_content = read_file(state_path())
       assert.is_not_nil(pre_content)
 
-      local orig_rename = os.rename
+      orig_rename = os.rename
       os.rename = function()
         error("simulated rename failure")
       end
 
       local ok = pcall(M.set, repo, "feature")
-      os.rename = orig_rename
 
       assert.is_false(ok)
       assert.are.equal(pre_content, read_file(state_path()))
