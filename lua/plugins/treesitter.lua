@@ -41,7 +41,9 @@ return {
 
       -- Pin parsers to lockfile revisions before install. See
       -- lua/config/ts_pinned.lua for why this can't be done as a per-call arg.
-      require("config.ts_pinned").apply(require("tests.parser-revisions"))
+      -- tests/ isn't on package.path during normal startup (only the test
+      -- harness prepends it), so load by absolute path.
+      require("config.ts_pinned").apply(dofile(vim.fn.stdpath("config") .. "/tests/parser-revisions.lua"))
       require("nvim-treesitter").install(parsers)
 
       -- Global filetype → parser registration. Downstream plugins
