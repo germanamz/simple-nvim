@@ -35,9 +35,16 @@ return {
     vim.api.nvim_create_autocmd("User", {
       pattern = "MiniFilesBufferCreate",
       callback = function(args)
-        vim.keymap.set("n", "q", function()
+        local close = function()
           require("mini.files").close()
-        end, { buffer = args.data.buf_id, desc = "Close mini.files" })
+        end
+        vim.keymap.set("n", "q", close, { buffer = args.data.buf_id, desc = "Close mini.files" })
+        vim.keymap.set(
+          "n",
+          "<Esc>",
+          close,
+          { buffer = args.data.buf_id, desc = "Close mini.files" }
+        )
       end,
     })
   end,

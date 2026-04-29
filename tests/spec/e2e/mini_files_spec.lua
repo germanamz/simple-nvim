@@ -115,20 +115,28 @@ describe("e2e: mini.files", function()
     end)
   end)
 
-  describe("q mapping", function()
-    it("closes the explorer", function()
+  describe("close mappings", function()
+    local function assert_closes_with(key)
       vim.fn.chdir(fixture)
 
       press("<Space>E")
       wait.wait_for_buffer({ filetype = "minifiles", timeout = 3000 })
       assert.is_true(is_minifiles_open())
 
-      press("q")
+      press(key)
       wait.wait_for(function()
         return not is_minifiles_open()
-      end, 2000, "explorer did not close after pressing q")
+      end, 2000, "explorer did not close after pressing " .. key)
 
       assert.is_false(is_minifiles_open())
+    end
+
+    it("q closes the explorer", function()
+      assert_closes_with("q")
+    end)
+
+    it("<Esc> closes the explorer", function()
+      assert_closes_with("<Esc>")
     end)
   end)
 end)
