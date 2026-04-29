@@ -69,6 +69,8 @@ describe("smoke: boot", function()
       "Diffview: branch vs origin/main",
       "Diffview: toggle file panel",
       "Files (changed first)",
+      "File explorer (current file)",
+      "File explorer (cwd)",
       "All keymaps (which-key)",
     }
 
