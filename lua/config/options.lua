@@ -92,11 +92,20 @@ vim.api.nvim_create_autocmd("FileType", {
       -- LSP attach sets formatexpr to vim.lsp.formatexpr, which doesn't honor
       -- textwidth. Drop it for the duration of gq so vim's internal formatter
       -- runs and reflows to textwidth=80. Save/restore cursor so the user
-      -- isn't dumped at the last formatted line.
+      -- isn't dumped at the last formatted line. Skip past YAML frontmatter
+      -- so wrapping never breaks `key: value` lines into invalid YAML.
       local saved_fe = vim.bo.formatexpr
       local pos = vim.api.nvim_win_get_cursor(0)
       vim.bo.formatexpr = ""
-      vim.cmd("silent! keepjumps normal! gqG")
+
+      local fm_end = require("config.markdown_paragraphs").frontmatter_end(0)
+      local start_line = math.max(pos[1], fm_end + 1)
+      local last_line = vim.api.nvim_buf_line_count(0)
+      if start_line <= last_line then
+        pcall(vim.api.nvim_win_set_cursor, 0, { start_line, 0 })
+        vim.cmd("silent! keepjumps normal! gqG")
+      end
+
       vim.bo.formatexpr = saved_fe
       pcall(vim.api.nvim_win_set_cursor, 0, pos)
     end, {

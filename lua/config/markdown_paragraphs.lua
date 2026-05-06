@@ -50,6 +50,29 @@ local function is_hr(line)
     or stripped:match("^___+$") ~= nil
 end
 
+-- YAML frontmatter: file starts with '---' on line 1 and a closing '---'
+-- somewhere below. Returns the 1-indexed line number of the closing '---',
+-- or 0 if there is no frontmatter.
+local function find_frontmatter_end(lines)
+  if lines[1] ~= "---" then
+    return 0
+  end
+  for i = 2, #lines do
+    if lines[i] == "---" then
+      return i
+    end
+  end
+  return 0
+end
+
+function M.frontmatter_end(bufnr)
+  bufnr = bufnr or vim.api.nvim_get_current_buf()
+  if not vim.api.nvim_buf_is_valid(bufnr) then
+    return 0
+  end
+  return find_frontmatter_end(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
+end
+
 -- Aligns with what ¶N points to in writing tools / Pandoc AST: body prose
 -- only. Headings (ATX + Setext), lists, block quotes, tables, horizontal
 -- rules, and fenced code are all skipped.
@@ -59,6 +82,7 @@ local function compute(bufnr)
   end
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local starts = {}
+  local fm_end = find_frontmatter_end(lines)
   local in_code = false
   local in_para = false
   local count = 0
@@ -66,7 +90,10 @@ local function compute(bufnr)
   local prev_was_text = false
 
   for i, line in ipairs(lines) do
-    if is_code_fence(line) then
+    if i <= fm_end then
+      in_para = false
+      prev_was_text = false
+    elseif is_code_fence(line) then
       in_code = not in_code
       in_para = false
       prev_was_text = false
