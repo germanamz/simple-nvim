@@ -32,8 +32,16 @@ local servers = {
   marksman = { filetypes = { "markdown" } },
   -- mdx_analyzer wraps tsserver, needs typescript lib. Falls back to
   -- mason's bundled typescript when the workspace has no node_modules.
+  -- workspace.didChangeWatchedFiles.dynamicRegistration is disabled because
+  -- the server registers a `**/*.{mdx}` watcher pattern, which Neovim 0.12's
+  -- vim.glob rejects ("Invalid glob"), crashing the server on startup.
   mdx_analyzer = {
     filetypes = { "mdx" },
+    capabilities = {
+      workspace = {
+        didChangeWatchedFiles = { dynamicRegistration = false },
+      },
+    },
     init_options = {
       typescript = {
         tsdk = vim.fn.stdpath("data")
