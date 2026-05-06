@@ -89,7 +89,13 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.opt_local.textwidth = 80
     vim.opt_local.formatoptions:append("t") -- auto-wrap text using textwidth
     vim.keymap.set("n", "<leader>w", function()
+      -- LSP attach sets formatexpr to vim.lsp.formatexpr, which doesn't honor
+      -- textwidth. Drop it for the duration of gq so vim's internal formatter
+      -- runs and reflows to textwidth=80.
+      local saved = vim.bo.formatexpr
+      vim.bo.formatexpr = ""
       vim.cmd("silent! keepjumps normal! gqG")
+      vim.bo.formatexpr = saved
     end, {
       buffer = args.buf,
       desc = "Rewrap from cursor to end of file",
