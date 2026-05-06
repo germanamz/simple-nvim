@@ -93,4 +93,23 @@ describe("config.options", function()
     assert.is_not_nil(vim.bo[buf].formatoptions:find("t", 1, true))
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  it("binds <leader>w to rewrap (gqG) on markdown buffers", function()
+    vim.g.mapleader = " "
+    require("config.options")
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    vim.bo[buf].filetype = "markdown"
+
+    local found
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+      if m.rhs == "gqG" then
+        found = m
+        break
+      end
+    end
+    assert.is_not_nil(found)
+    assert.are.equal(" w", found.lhs)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
 end)

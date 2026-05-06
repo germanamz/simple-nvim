@@ -88,6 +88,10 @@ vim.api.nvim_create_autocmd("FileType", {
   callback = function(args)
     vim.opt_local.textwidth = 80
     vim.opt_local.formatoptions:append("t") -- auto-wrap text using textwidth
+    vim.keymap.set("n", "<leader>w", "gqG", {
+      buffer = args.buf,
+      desc = "Rewrap from cursor to end of file",
+    })
     require("config.markdown_paragraphs").attach(args.buf)
   end,
 })
