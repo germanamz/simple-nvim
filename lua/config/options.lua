@@ -80,3 +80,26 @@ vim.api.nvim_create_autocmd({ "FileType" }, {
     vim.opt_local.linebreak = true
   end,
 })
+
+-- Writing-friendly markdown: paragraph numbering in gutter, thin ruler line at
+-- column 80, hard-wrap before the word that would push past textwidth.
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = { "markdown", "mdx" },
+  callback = function(args)
+    vim.opt_local.textwidth = 80
+    vim.opt_local.formatoptions:append("t") -- auto-wrap text using textwidth
+    require("config.markdown_paragraphs").attach(args.buf)
+  end,
+})
+
+vim.api.nvim_create_autocmd("BufWinEnter", {
+  callback = function(args)
+    local ft = vim.bo[args.buf].filetype
+    local mp = require("config.markdown_paragraphs")
+    if ft == "markdown" or ft == "mdx" then
+      mp.apply_window()
+    else
+      mp.detach_window()
+    end
+  end,
+})

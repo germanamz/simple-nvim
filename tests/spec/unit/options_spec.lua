@@ -10,6 +10,10 @@ describe("config.options", function()
       event = "FileType",
       pattern = { "DiffviewFiles", "DiffviewFileHistory" },
     })
+    pcall(vim.api.nvim_clear_autocmds, {
+      event = "FileType",
+      pattern = { "markdown", "mdx" },
+    })
   end)
 
   it("sets indentation to 2-space expandtab", function()
@@ -77,5 +81,16 @@ describe("config.options", function()
     assert.is_true(ok, tostring(err))
     assert.is_true(vim.opt_local.wrap:get())
     vim.api.nvim_win_close(win, true)
+  end)
+
+  it("applies textwidth=80 and 't' formatoption to markdown buffers", function()
+    require("config.options")
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    vim.bo[buf].filetype = "markdown"
+
+    assert.are.equal(80, vim.bo[buf].textwidth)
+    assert.is_not_nil(vim.bo[buf].formatoptions:find("t", 1, true))
+    vim.api.nvim_buf_delete(buf, { force = true })
   end)
 end)
