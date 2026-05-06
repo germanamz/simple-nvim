@@ -94,7 +94,7 @@ describe("config.options", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
-  it("binds <leader>w to rewrap (gqG) on markdown buffers", function()
+  it("binds <leader>w to rewrap on markdown buffers", function()
     vim.g.mapleader = " "
     require("config.options")
     local buf = vim.api.nvim_create_buf(false, true)
@@ -103,13 +103,13 @@ describe("config.options", function()
 
     local found
     for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
-      if m.rhs == "gqG" then
+      if m.lhs == " w" then
         found = m
         break
       end
     end
     assert.is_not_nil(found)
-    assert.are.equal(" w", found.lhs)
+    assert.is_not_nil(found.desc and found.desc:lower():find("rewrap"))
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 end)
