@@ -91,11 +91,14 @@ vim.api.nvim_create_autocmd("FileType", {
     vim.keymap.set("n", "<leader>w", function()
       -- LSP attach sets formatexpr to vim.lsp.formatexpr, which doesn't honor
       -- textwidth. Drop it for the duration of gq so vim's internal formatter
-      -- runs and reflows to textwidth=80.
-      local saved = vim.bo.formatexpr
+      -- runs and reflows to textwidth=80. Save/restore cursor so the user
+      -- isn't dumped at the last formatted line.
+      local saved_fe = vim.bo.formatexpr
+      local pos = vim.api.nvim_win_get_cursor(0)
       vim.bo.formatexpr = ""
       vim.cmd("silent! keepjumps normal! gqG")
-      vim.bo.formatexpr = saved
+      vim.bo.formatexpr = saved_fe
+      pcall(vim.api.nvim_win_set_cursor, 0, pos)
     end, {
       buffer = args.buf,
       desc = "Rewrap from cursor to end of file",
