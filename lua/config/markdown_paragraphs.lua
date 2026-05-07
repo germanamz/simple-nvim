@@ -10,7 +10,9 @@ local M = {}
 local cache = {}
 
 local ns_ruler = vim.api.nvim_create_namespace("markdown_column_ruler")
-local RULER_COL = 80
+-- One past textwidth=80, matching the `colorcolumn=81` convention: the ruler
+-- marks the boundary without overlaying the last allowed character.
+local RULER_COL = 81
 
 local function is_blank(line)
   return line:match("^%s*$") ~= nil
@@ -134,8 +136,9 @@ local function compute(bufnr)
   cache[bufnr] = starts
 end
 
--- Per-line `│` overlay anchored at window column RULER_COL-1. Works because
--- textwidth=80 hard-wraps content, so no soft-wrap continuation rows.
+-- Per-line `│` overlay anchored at window column RULER_COL-1 (0-indexed).
+-- Works because textwidth=80 hard-wraps content, so no soft-wrap continuation
+-- rows.
 local function render_ruler(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
