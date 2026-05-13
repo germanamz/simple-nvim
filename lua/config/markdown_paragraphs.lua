@@ -9,10 +9,52 @@ local M = {}
 -- into strings.
 local cache = {}
 
-local ns_ruler = vim.api.nvim_create_namespace("markdown_column_ruler")
--- One past textwidth=80, matching the `colorcolumn=81` convention: the ruler
--- marks the boundary without overlaying the last allowed character.
+-- One past textwidth=80: the ruler marks the boundary without overlaying the
+-- last allowed character.
 local RULER_COL = 81
+
+-- Subtle dim ColorColumn that doesn't compete with Visual selection and is
+-- distinguishable from CursorLine on the active row. Derives a bg by blending
+-- Normal's bg toward black (or white for light themes), and re-applies when
+-- the colorscheme changes.
+local function blend(hex, target, ratio)
+  local r = bit.band(bit.rshift(hex, 16), 0xff)
+  local g = bit.band(bit.rshift(hex, 8), 0xff)
+  local b = bit.band(hex, 0xff)
+  local tr = bit.band(bit.rshift(target, 16), 0xff)
+  local tg = bit.band(bit.rshift(target, 8), 0xff)
+  local tb = bit.band(target, 0xff)
+  local nr = math.floor(r + (tr - r) * ratio)
+  local ng = math.floor(g + (tg - g) * ratio)
+  local nb = math.floor(b + (tb - b) * ratio)
+  return string.format("#%02x%02x%02x", nr, ng, nb)
+end
+
+local function apply_ruler_hl()
+  -- Prefer deriving from CursorLine so the ruler stays related to the active
+  -- theme's cursor-line shade, but distinctly darker so the two don't merge
+  -- on the cursor row. Fall back to Normal.bg, then to a fixed dark value
+  -- when neither has a defined bg (e.g. default colorscheme on a dark term).
+  local cursorline = vim.api.nvim_get_hl(0, { name = "CursorLine", link = false })
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
+  local base = cursorline.bg or normal.bg
+  local bg
+  if base then
+    local luminance = (bit.band(bit.rshift(base, 16), 0xff) * 0.299
+      + bit.band(bit.rshift(base, 8), 0xff) * 0.587
+      + bit.band(base, 0xff) * 0.114)
+    local ratio = luminance < 128 and 0.55 or 0.18
+    bg = blend(base, 0x000000, ratio)
+  else
+    bg = vim.o.background == "light" and "#c0c0c0" or "#0a0a0a"
+  end
+  vim.api.nvim_set_hl(0, "ColorColumn", { bg = bg, default = false })
+end
+apply_ruler_hl()
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = vim.api.nvim_create_augroup("markdown_paragraphs_hl", { clear = true }),
+  callback = apply_ruler_hl,
+})
 
 local function is_blank(line)
   return line:match("^%s*$") ~= nil
@@ -136,24 +178,6 @@ local function compute(bufnr)
   cache[bufnr] = starts
 end
 
--- Per-line `│` overlay anchored at window column RULER_COL-1 (0-indexed).
--- Works because textwidth=80 hard-wraps content, so no soft-wrap continuation
--- rows.
-local function render_ruler(bufnr)
-  if not vim.api.nvim_buf_is_valid(bufnr) then
-    return
-  end
-  vim.api.nvim_buf_clear_namespace(bufnr, ns_ruler, 0, -1)
-  local n = vim.api.nvim_buf_line_count(bufnr)
-  for i = 0, n - 1 do
-    vim.api.nvim_buf_set_extmark(bufnr, ns_ruler, i, 0, {
-      virt_text = { { "│", "NonText" } },
-      virt_text_win_col = RULER_COL - 1,
-      hl_mode = "combine",
-    })
-  end
-end
-
 -- Called per-line during statuscolumn evaluation. Must be fast: table lookup
 -- only. Uses g:statusline_winid so we read the buffer being drawn, not the
 -- focused buffer (matters when the same buffer is shown in multiple windows).
@@ -187,7 +211,6 @@ local STATUSCOLUMN = "%s%C%{%v:lua._markdown_paragraph_marker()%}%l "
 function M.attach(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   compute(bufnr)
-  render_ruler(bufnr)
 
   local group = vim.api.nvim_create_augroup("markdown_paragraphs_buf_" .. bufnr, { clear = true })
   vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
@@ -195,7 +218,6 @@ function M.attach(bufnr)
     buffer = bufnr,
     callback = function()
       compute(bufnr)
-      render_ruler(bufnr)
     end,
   })
   vim.api.nvim_create_autocmd("BufWipeout", {
@@ -211,6 +233,7 @@ end
 
 function M.apply_window()
   vim.opt_local.statuscolumn = STATUSCOLUMN
+  vim.opt_local.colorcolumn = tostring(RULER_COL)
   vim.w.markdown_writing_active = true
 end
 
@@ -221,6 +244,7 @@ function M.detach_window()
     return
   end
   vim.opt_local.statuscolumn = ""
+  vim.opt_local.colorcolumn = ""
   vim.w.markdown_writing_active = nil
 end
 

@@ -125,15 +125,20 @@ describe("config.markdown_paragraphs", function()
     assert.are.same({ [1] = 1, [7] = 2 }, starts)
   end)
 
-  it("places ruler extmarks at column 80 on every line", function()
+  it("sets colorcolumn=81 on the current window", function()
+    vim.api.nvim_set_current_buf(bufnr)
     compute_for({ "line one", "line two", "line three" })
-    local ns = vim.api.nvim_get_namespaces()["markdown_column_ruler"]
-    assert.is_not_nil(ns)
-    local extmarks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })
-    assert.are.equal(3, #extmarks)
-    local _, _, _, details = unpack(extmarks[1])
-    assert.are.equal(79, details.virt_text_win_col)
-    assert.are.equal("│", details.virt_text[1][1])
+    assert.are.equal("81", vim.wo.colorcolumn)
+  end)
+
+  it("sets ColorColumn bg darker than Normal so it stands apart from CursorLine", function()
+    vim.api.nvim_set_hl(0, "Normal", { bg = "#202020" })
+    package.loaded["config.markdown_paragraphs"] = nil
+    require("config.markdown_paragraphs")
+    local hl = vim.api.nvim_get_hl(0, { name = "ColorColumn", link = false })
+    assert.is_not_nil(hl.bg)
+    local normal_bg = vim.api.nvim_get_hl(0, { name = "Normal", link = false }).bg
+    assert.is_true(hl.bg < normal_bg)
   end)
 
   it("sets a custom statuscolumn on the current window", function()
@@ -143,11 +148,12 @@ describe("config.markdown_paragraphs", function()
     assert.is_true(vim.w.markdown_writing_active)
   end)
 
-  it("detach_window restores statuscolumn and clears the active flag", function()
+  it("detach_window restores statuscolumn, clears colorcolumn, and clears the active flag", function()
     vim.api.nvim_set_current_buf(bufnr)
     compute_for({ "para" })
     mp.detach_window()
     assert.are.equal("", vim.wo.statuscolumn)
+    assert.are.equal("", vim.wo.colorcolumn)
     assert.is_nil(vim.w.markdown_writing_active)
   end)
 
