@@ -1,22 +1,24 @@
--- Paragraph numbering for markdown/mdx, rendered into the statuscolumn next
--- to the line number. A paragraph is a run of non-blank lines outside fenced
--- code blocks, separated by blank lines.
+-- Paragraph and section numbering for markdown/mdx, rendered into the
+-- statuscolumn next to the line number. Implements the editorial-review anchor
+-- grammar: headings H2..H6 each contribute a dotted-path component (§N,
+-- §N.M, §N.M.K, ...), and any heading at any of those levels resets the ¶
+-- counter for its own scope. H1 is ignored (title lives in frontmatter).
+-- Scratchpad blockquotes (`Mental Note`, `TODO`, `Note to self`, `Draft note`
+-- as the first token) and HTML comments are skipped; code fences, regular
+-- blockquotes, lists, tables, and MDX components all count as one ¶.
 
 local M = {}
 
--- bufnr -> { [line_num] = paragraph_num } for paragraph-start lines.
--- Module-local table avoids a vim.b round-trip that would coerce integer keys
--- into strings.
+-- bufnr -> {
+--   blocks   = { [lnum] = { path = {ints}, paragraph = N } },
+--   headings = { [lnum] = { path = {ints} } },
+--   markers  = { [lnum] = "%#Comment#§1.2¶3   %*" },  -- padded statuscolumn text
+--   empty    = "        ",                            -- pad for non-block lines
+-- }
 local cache = {}
 
--- One past textwidth=80: the ruler marks the boundary without overlaying the
--- last allowed character.
 local RULER_COL = 81
 
--- Subtle dim ColorColumn that doesn't compete with Visual selection and is
--- distinguishable from CursorLine on the active row. Derives a bg by blending
--- Normal's bg toward black (or white for light themes), and re-applies when
--- the colorscheme changes.
 local function blend(hex, target, ratio)
   local r = bit.band(bit.rshift(hex, 16), 0xff)
   local g = bit.band(bit.rshift(hex, 8), 0xff)
@@ -31,18 +33,16 @@ local function blend(hex, target, ratio)
 end
 
 local function apply_ruler_hl()
-  -- Prefer deriving from CursorLine so the ruler stays related to the active
-  -- theme's cursor-line shade, but distinctly darker so the two don't merge
-  -- on the cursor row. Fall back to Normal.bg, then to a fixed dark value
-  -- when neither has a defined bg (e.g. default colorscheme on a dark term).
   local cursorline = vim.api.nvim_get_hl(0, { name = "CursorLine", link = false })
   local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
   local base = cursorline.bg or normal.bg
   local bg
   if base then
-    local luminance = (bit.band(bit.rshift(base, 16), 0xff) * 0.299
+    local luminance = (
+      bit.band(bit.rshift(base, 16), 0xff) * 0.299
       + bit.band(bit.rshift(base, 8), 0xff) * 0.587
-      + bit.band(base, 0xff) * 0.114)
+      + bit.band(base, 0xff) * 0.114
+    )
     local ratio = luminance < 128 and 0.55 or 0.18
     bg = blend(base, 0x000000, ratio)
   else
@@ -64,39 +64,60 @@ local function is_code_fence(line)
   return line:match("^%s*```") ~= nil or line:match("^%s*~~~") ~= nil
 end
 
-local function is_atx_heading(line)
-  -- # H1, ## H2, etc. (CommonMark allows # followed by space, or # alone)
-  return line:match("^%s*#+%s") ~= nil or line:match("^%s*#+$") ~= nil
+-- Returns 1..6 if the line is an ATX heading at that level, else nil.
+local function heading_level(line)
+  local hashes = line:match("^(#+)%s") or line:match("^(#+)$")
+  if not hashes then
+    return nil
+  end
+  local n = #hashes
+  if n >= 1 and n <= 6 then
+    return n
+  end
+  return nil
 end
 
 local function is_setext_underline(line)
   return line:match("^%s*=+%s*$") ~= nil or line:match("^%s*%-+%s*$") ~= nil
 end
 
-local function is_list_item(line)
-  -- bullet (-, *, +) or ordered (1. / 1))
-  return line:match("^%s*[%-%*%+]%s") ~= nil or line:match("^%s*%d+[%.%)]%s") ~= nil
+local function is_html_comment_start(line)
+  return line:match("^%s*<!%-%-") ~= nil
 end
 
-local function is_block_quote(line)
-  return line:match("^%s*>") ~= nil
+local function has_html_comment_end(line)
+  return line:match("%-%->") ~= nil
 end
 
-local function is_table_row(line)
-  return line:match("^%s*|") ~= nil
+local function is_scratchpad_first_line(line)
+  local content = line:match("^%s*>%s*(.*)$")
+  if not content then
+    return false
+  end
+  return content:match("^Mental Note") ~= nil
+    or content:match("^TODO") ~= nil
+    or content:match("^Note to self") ~= nil
+    or content:match("^Draft note") ~= nil
 end
 
-local function is_hr(line)
-  -- 3+ of - / * / _, possibly separated by whitespace, nothing else on the line
-  local stripped = line:gsub("%s", "")
-  return stripped:match("^%-%-%-+$") ~= nil
-    or stripped:match("^%*%*%*+$") ~= nil
-    or stripped:match("^___+$") ~= nil
+local function is_mdx_block_start(line)
+  return line:match("^%s*</?%a") ~= nil
 end
 
--- YAML frontmatter: file starts with '---' on line 1 and a closing '---'
--- somewhere below. Returns the 1-indexed line number of the closing '---',
--- or 0 if there is no frontmatter.
+local function mdx_balance(line)
+  local bal = 0
+  for _ in line:gmatch("<%a") do
+    bal = bal + 1
+  end
+  for _ in line:gmatch("</") do
+    bal = bal - 1
+  end
+  for _ in line:gmatch("/>") do
+    bal = bal - 1
+  end
+  return bal
+end
+
 local function find_frontmatter_end(lines)
   if lines[1] ~= "---" then
     return 0
@@ -117,70 +138,196 @@ function M.frontmatter_end(bufnr)
   return find_frontmatter_end(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
 end
 
--- Aligns with what ¶N points to in writing tools / Pandoc AST: body prose
--- only. Headings (ATX + Setext), lists, block quotes, tables, horizontal
--- rules, and fenced code are all skipped.
+-- Joins a path of integers into a key for the counters dict. Empty entries
+-- (used for level-skipping like H2 → H4) become empty path components, so
+-- {2, 0, 1} keys as "2..1" and "§2..1" is addressable but unusual.
+local function path_key(path, depth)
+  if depth == 0 then
+    return ""
+  end
+  local parts = {}
+  for i = 1, depth do
+    parts[i] = tostring(path[i] or 0)
+  end
+  return table.concat(parts, ".")
+end
+
+local function format_path(path)
+  if #path == 0 then
+    return ""
+  end
+  local parts = {}
+  for i, n in ipairs(path) do
+    parts[i] = n == 0 and "" or tostring(n)
+  end
+  return table.concat(parts, ".")
+end
+
+local function copy_path(path)
+  local out = {}
+  for i, v in ipairs(path) do
+    out[i] = v
+  end
+  return out
+end
+
 local function compute(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
   end
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-  local starts = {}
+  local blocks = {}
+  local headings = {}
   local fm_end = find_frontmatter_end(lines)
+
+  local path = {}
+  local counters = {}
+  local paragraph = 0
+  local in_block = false
   local in_code = false
-  local in_para = false
-  local count = 0
-  local last_para_start = nil
+  local in_html_comment = false
+  local in_mdx = false
+  local mdx_depth = 0
   local prev_was_text = false
+  local last_paragraph_line = nil
 
   for i, line in ipairs(lines) do
     if i <= fm_end then
-      in_para = false
+      in_block = false
       prev_was_text = false
-    elseif is_code_fence(line) then
-      in_code = not in_code
-      in_para = false
+    elseif in_html_comment then
+      if has_html_comment_end(line) then
+        in_html_comment = false
+      end
       prev_was_text = false
     elseif in_code then
+      if is_code_fence(line) then
+        in_code = false
+        in_block = false
+      end
+      prev_was_text = false
+    elseif in_mdx then
+      mdx_depth = mdx_depth + mdx_balance(line)
+      if mdx_depth <= 0 then
+        in_mdx = false
+        mdx_depth = 0
+        in_block = false
+      end
       prev_was_text = false
     elseif is_blank(line) then
-      in_para = false
+      in_block = false
       prev_was_text = false
-    elseif is_setext_underline(line) and prev_was_text then
-      -- prior text line(s) were actually a Setext heading — undo the start
-      if last_para_start then
-        starts[last_para_start] = nil
-        count = count - 1
+    elseif is_html_comment_start(line) then
+      if not has_html_comment_end(line) then
+        in_html_comment = true
       end
-      in_para = false
-      last_para_start = nil
-      prev_was_text = false
-    elseif
-      is_atx_heading(line)
-      or is_list_item(line)
-      or is_block_quote(line)
-      or is_table_row(line)
-      or is_hr(line)
-    then
-      in_para = false
+      in_block = false
       prev_was_text = false
     else
-      if not in_para then
-        count = count + 1
-        starts[i] = count
-        last_para_start = i
-        in_para = true
+      local hl = heading_level(line)
+      if hl == 1 then
+        in_block = false
+        prev_was_text = false
+      elseif hl then
+        local depth = hl - 1
+        for j = #path, depth, -1 do
+          path[j] = nil
+        end
+        for j = #path + 1, depth - 1 do
+          path[j] = 0
+        end
+        counters[depth] = counters[depth] or {}
+        local parent_key = path_key(path, depth - 1)
+        local prev_count = counters[depth][parent_key] or 0
+        counters[depth][parent_key] = prev_count + 1
+        path[depth] = counters[depth][parent_key]
+        paragraph = 0
+        headings[i] = { path = copy_path(path) }
+        in_block = false
+        prev_was_text = false
+      elseif is_setext_underline(line) and prev_was_text then
+        if last_paragraph_line and blocks[last_paragraph_line] then
+          blocks[last_paragraph_line] = nil
+          paragraph = paragraph - 1
+          last_paragraph_line = nil
+        end
+        in_block = false
+        prev_was_text = false
+      else
+        if not in_block then
+          if is_scratchpad_first_line(line) then
+            in_block = true
+            prev_was_text = false
+          elseif is_code_fence(line) then
+            in_code = true
+            paragraph = paragraph + 1
+            blocks[i] = { path = copy_path(path), paragraph = paragraph }
+            last_paragraph_line = i
+            in_block = true
+            prev_was_text = false
+          elseif is_mdx_block_start(line) then
+            local bal = mdx_balance(line)
+            paragraph = paragraph + 1
+            blocks[i] = { path = copy_path(path), paragraph = paragraph }
+            last_paragraph_line = i
+            in_block = true
+            if bal > 0 then
+              in_mdx = true
+              mdx_depth = bal
+            end
+            prev_was_text = false
+          else
+            paragraph = paragraph + 1
+            blocks[i] = { path = copy_path(path), paragraph = paragraph }
+            last_paragraph_line = i
+            in_block = true
+            prev_was_text = true
+          end
+        end
       end
-      prev_was_text = true
     end
   end
 
-  cache[bufnr] = starts
+  local raw = {}
+  local max_w = 5
+  for lnum, h in pairs(headings) do
+    local s = "§" .. format_path(h.path)
+    raw[lnum] = s
+    local w = vim.api.nvim_strwidth(s)
+    if w > max_w then
+      max_w = w
+    end
+  end
+  for lnum, b in pairs(blocks) do
+    local p = format_path(b.path)
+    local s
+    if p == "" then
+      s = "¶" .. b.paragraph
+    else
+      s = "§" .. p .. "¶" .. b.paragraph
+    end
+    raw[lnum] = s
+    local w = vim.api.nvim_strwidth(s)
+    if w > max_w then
+      max_w = w
+    end
+  end
+
+  local total = max_w + 1
+  local markers = {}
+  for lnum, s in pairs(raw) do
+    local pad = string.rep(" ", total - vim.api.nvim_strwidth(s))
+    markers[lnum] = "%#Comment#" .. s .. pad .. "%*"
+  end
+
+  cache[bufnr] = {
+    blocks = blocks,
+    headings = headings,
+    markers = markers,
+    empty = string.rep(" ", total),
+  }
 end
 
--- Called per-line during statuscolumn evaluation. Must be fast: table lookup
--- only. Uses g:statusline_winid so we read the buffer being drawn, not the
--- focused buffer (matters when the same buffer is shown in multiple windows).
 function M.marker()
   local winid = vim.g.statusline_winid
   local bufnr
@@ -190,20 +337,13 @@ function M.marker()
   else
     bufnr = vim.api.nvim_get_current_buf()
   end
-  local starts = cache[bufnr]
-  if not starts then
-    return "    "
+  local data = cache[bufnr]
+  if not data then
+    return "      "
   end
-  local n = starts[vim.v.lnum]
-  if not n then
-    return "    "
-  end
-  return string.format("%%#Comment#¶%-3d%%*", n)
+  return data.markers[vim.v.lnum] or data.empty
 end
 
--- Expose as a global so statuscolumn can call v:lua._markdown_paragraph_marker()
--- without going through v:lua.require'...', which depends on vim expression
--- parser handling Lua-style string-arg call syntax.
 _G._markdown_paragraph_marker = M.marker
 
 local STATUSCOLUMN = "%s%C%{%v:lua._markdown_paragraph_marker()%}%l "
@@ -237,8 +377,6 @@ function M.apply_window()
   vim.w.markdown_writing_active = true
 end
 
--- Reset window-local statuscolumn when a window switches to a non-markdown
--- buffer. No-op if attach was never called on this window.
 function M.detach_window()
   if not vim.w.markdown_writing_active then
     return
@@ -248,7 +386,6 @@ function M.detach_window()
   vim.w.markdown_writing_active = nil
 end
 
--- Test inspection: returns the {line_num -> paragraph_num} table for a buffer.
 function M.get_starts(bufnr)
   return cache[bufnr]
 end

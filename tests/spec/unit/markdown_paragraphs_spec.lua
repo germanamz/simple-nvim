@@ -20,8 +20,16 @@ describe("config.markdown_paragraphs", function()
     return mp.get_starts(bufnr)
   end
 
+  local function b(path, n)
+    return { path = path, paragraph = n }
+  end
+
+  local function h(path)
+    return { path = path }
+  end
+
   it("numbers consecutive prose paragraphs separated by blanks", function()
-    local starts = compute_for({
+    local data = compute_for({
       "First paragraph",
       "still first",
       "",
@@ -29,24 +37,143 @@ describe("config.markdown_paragraphs", function()
       "",
       "Third paragraph",
     })
-    assert.are.same({ [1] = 1, [4] = 2, [6] = 3 }, starts)
+    assert.are.same({ [1] = b({}, 1), [4] = b({}, 2), [6] = b({}, 3) }, data.blocks)
+    assert.are.same({}, data.headings)
   end)
 
-  it("skips ATX headings", function()
-    local starts = compute_for({
-      "# Heading",
+  it("increments § on H2 and resets ¶ within each section", function()
+    local data = compute_for({
+      "Pre-section paragraph.",
       "",
-      "Paragraph one",
+      "## First section",
       "",
-      "## Subheading",
+      "Paragraph in §1",
       "",
-      "Paragraph two",
+      "## Second section",
+      "",
+      "Paragraph in §2",
     })
-    assert.are.same({ [3] = 1, [7] = 2 }, starts)
+    assert.are.same({ [1] = b({}, 1), [5] = b({ 1 }, 1), [9] = b({ 2 }, 1) }, data.blocks)
+    assert.are.same({ [3] = h({ 1 }), [7] = h({ 2 }) }, data.headings)
+  end)
+
+  it("ignores H1 entirely", function()
+    local data = compute_for({
+      "# Title",
+      "",
+      "Para before any H2",
+      "",
+      "## Section",
+      "",
+      "Para inside §1",
+    })
+    assert.are.same({ [3] = b({}, 1), [7] = b({ 1 }, 1) }, data.blocks)
+    assert.are.same({ [5] = h({ 1 }) }, data.headings)
+  end)
+
+  it("H3 opens a §N.M nested scope with its own ¶ counter", function()
+    local data = compute_for({
+      "## §1",
+      "",
+      "Para in §1",
+      "",
+      "### §1.1",
+      "",
+      "Para under §1.1",
+      "",
+      "Another under §1.1",
+      "",
+      "### §1.2",
+      "",
+      "Para under §1.2",
+    })
+    assert.are.same({
+      [3] = b({ 1 }, 1),
+      [7] = b({ 1, 1 }, 1),
+      [9] = b({ 1, 1 }, 2),
+      [13] = b({ 1, 2 }, 1),
+    }, data.blocks)
+    assert.are.same({
+      [1] = h({ 1 }),
+      [5] = h({ 1, 1 }),
+      [11] = h({ 1, 2 }),
+    }, data.headings)
+  end)
+
+  it("resets sibling counters per parent (no cross-H2 leakage)", function()
+    local data = compute_for({
+      "## A",
+      "",
+      "### A.1",
+      "",
+      "### A.2",
+      "",
+      "## B",
+      "",
+      "### B.1",
+    })
+    assert.are.same({
+      [1] = h({ 1 }),
+      [3] = h({ 1, 1 }),
+      [5] = h({ 1, 2 }),
+      [7] = h({ 2 }),
+      [9] = h({ 2, 1 }),
+    }, data.headings)
+  end)
+
+  it("nests H2 → H3 → H4 → H5 → H6", function()
+    local data = compute_for({
+      "## §1",
+      "### §1.1",
+      "#### §1.1.1",
+      "##### §1.1.1.1",
+      "###### §1.1.1.1.1",
+      "",
+      "Deepest paragraph",
+    })
+    assert.are.same({
+      [1] = h({ 1 }),
+      [2] = h({ 1, 1 }),
+      [3] = h({ 1, 1, 1 }),
+      [4] = h({ 1, 1, 1, 1 }),
+      [5] = h({ 1, 1, 1, 1, 1 }),
+    }, data.headings)
+    assert.are.same({ [7] = b({ 1, 1, 1, 1, 1 }, 1) }, data.blocks)
+  end)
+
+  it("level-skipping pads missing components with 0 (§N..K)", function()
+    local data = compute_for({
+      "## A",
+      "",
+      "#### Skip H3",
+      "",
+      "Paragraph under the H4",
+    })
+    assert.are.same({
+      [1] = h({ 1 }),
+      [3] = h({ 1, 0, 1 }),
+    }, data.headings)
+    assert.are.same({ [5] = b({ 1, 0, 1 }, 1) }, data.blocks)
+  end)
+
+  it("paragraph between H2 and its first H3 belongs to the H2 scope", function()
+    local data = compute_for({
+      "## §1",
+      "",
+      "Para in §1 (before any H3)",
+      "",
+      "### §1.1",
+      "",
+      "Para in §1.1",
+    })
+    assert.are.same({
+      [3] = b({ 1 }, 1),
+      [7] = b({ 1, 1 }, 1),
+    }, data.blocks)
   end)
 
   it("skips Setext headings (text + === / ---)", function()
-    local starts = compute_for({
+    local data = compute_for({
       "Title",
       "=====",
       "",
@@ -57,11 +184,11 @@ describe("config.markdown_paragraphs", function()
       "",
       "Paragraph two",
     })
-    assert.are.same({ [4] = 1, [9] = 2 }, starts)
+    assert.are.same({ [4] = b({}, 1), [9] = b({}, 2) }, data.blocks)
   end)
 
-  it("skips fenced code blocks", function()
-    local starts = compute_for({
+  it("counts fenced code blocks as one ¶", function()
+    local data = compute_for({
       "Para one",
       "",
       "```",
@@ -71,58 +198,203 @@ describe("config.markdown_paragraphs", function()
       "",
       "Para two",
     })
-    assert.are.same({ [1] = 1, [8] = 2 }, starts)
+    assert.are.same({ [1] = b({}, 1), [3] = b({}, 2), [8] = b({}, 3) }, data.blocks)
   end)
 
-  it("skips list items", function()
-    local starts = compute_for({
+  it("counts a list separated by blanks as its own ¶", function()
+    local data = compute_for({
       "Para one",
       "",
       "- item a",
       "- item b",
       "",
-      "1. ordered",
+      "Para two",
+    })
+    assert.are.same({ [1] = b({}, 1), [3] = b({}, 2), [6] = b({}, 3) }, data.blocks)
+  end)
+
+  it("counts a list with no preceding blank as part of the prior paragraph", function()
+    local data = compute_for({
+      "Intro line",
+      "- item a",
+      "- item b",
       "",
       "Para two",
     })
-    assert.are.same({ [1] = 1, [8] = 2 }, starts)
+    assert.are.same({ [1] = b({}, 1), [5] = b({}, 2) }, data.blocks)
   end)
 
-  it("skips block quotes", function()
-    local starts = compute_for({
+  it("counts non-scratchpad blockquotes as ¶", function()
+    local data = compute_for({
       "Para one",
       "",
-      "> quoted",
+      "> a regular quote",
       "",
       "Para two",
     })
-    assert.are.same({ [1] = 1, [5] = 2 }, starts)
+    assert.are.same({ [1] = b({}, 1), [3] = b({}, 2), [5] = b({}, 3) }, data.blocks)
   end)
 
-  it("skips tables", function()
-    local starts = compute_for({
+  it("skips scratchpad blockquotes", function()
+    local data = compute_for({
       "Para one",
       "",
-      "| a | b |",
-      "|---|---|",
-      "| 1 | 2 |",
+      "> Mental Note: remember to add an example",
+      "> about the dot-com era.",
       "",
       "Para two",
     })
-    assert.are.same({ [1] = 1, [7] = 2 }, starts)
+    assert.are.same({ [1] = b({}, 1), [6] = b({}, 2) }, data.blocks)
   end)
 
-  it("skips horizontal rules", function()
-    local starts = compute_for({
+  it("recognizes all four scratchpad first-token forms", function()
+    local data = compute_for({
+      "> TODO: do this",
+      "",
+      "> Note to self: foo",
+      "",
+      "> Draft note: bar",
+      "",
+      "> Mental Note: baz",
+      "",
+      "Real paragraph",
+    })
+    assert.are.same({ [9] = b({}, 1) }, data.blocks)
+  end)
+
+  it("treats HTML comments like blank lines", function()
+    local data = compute_for({
+      "Para one",
+      "<!-- comment -->",
+      "Para two",
+    })
+    assert.are.same({ [1] = b({}, 1), [3] = b({}, 2) }, data.blocks)
+  end)
+
+  it("treats multi-line HTML comments like blank lines", function()
+    local data = compute_for({
+      "Para one",
+      "<!--",
+      "  long",
+      "  comment",
+      "-->",
+      "Para two",
+    })
+    assert.are.same({ [1] = b({}, 1), [6] = b({}, 2) }, data.blocks)
+  end)
+
+  it("counts MDX components spanning blanks as a single ¶", function()
+    local data = compute_for({
       "Para one",
       "",
+      "<Aside>",
+      "Inner content that would otherwise be its own ¶",
+      "",
+      "More content inside the component",
+      "</Aside>",
+      "",
+      "Para two",
+    })
+    assert.are.same({ [1] = b({}, 1), [3] = b({}, 2), [9] = b({}, 3) }, data.blocks)
+  end)
+
+  it("counts self-closing MDX as one ¶", function()
+    local data = compute_for({
+      "Para one",
+      "",
+      '<Image src="foo.png" />',
+      "",
+      "Para two",
+    })
+    assert.are.same({ [1] = b({}, 1), [3] = b({}, 2), [5] = b({}, 3) }, data.blocks)
+  end)
+
+  it("continues numbering after a scratchpad inside a section", function()
+    local data = compute_for({
+      "## §1",
+      "",
+      "First paragraph inside §1.",
+      "",
+      "Second paragraph inside §1.",
+      "",
+      "> Mental Note: skipped",
+      "",
+      "Third paragraph in §1.",
+    })
+    assert.are.same({
+      [3] = b({ 1 }, 1),
+      [5] = b({ 1 }, 2),
+      [9] = b({ 1 }, 3),
+    }, data.blocks)
+    assert.are.same({ [1] = h({ 1 }) }, data.headings)
+  end)
+
+  it("matches the spec's worked example", function()
+    local data = compute_for({
+      "---",
+      "title: 'Example post'",
+      "date: '2026-05-16'",
+      "published: false",
       "---",
       "",
-      "***",
+      "First body paragraph, wrapped over",
+      "two physical lines.",
       "",
-      "Para two",
+      "A second body paragraph before any",
+      "H2 heading.",
+      "",
+      "## But why X?",
+      "",
+      "First paragraph inside §1, before any",
+      "H3.",
+      "",
+      "### A subhead",
+      "",
+      "First paragraph under the H3.",
+      "",
+      "Second paragraph under the H3, which",
+      "spans two lines.",
+      "",
+      "> Mental Note: remember to add an example here",
+      "> about the dot-com era.",
+      "",
+      "Third paragraph under §1.1, written",
+      "after the scratchpad.",
+      "",
+      "### Another subhead",
+      "",
+      "First paragraph under the second H3.",
+      "",
+      "## How can you catch up?",
+      "",
+      "First paragraph in §2.",
+      "",
+      "### A subhead in §2",
+      "",
+      "First paragraph here — note the index",
+      "reset; this is §2.1, not §1.3.",
+      "",
+      "> Mental Note: outline only, not",
+      "> written yet.",
     })
-    assert.are.same({ [1] = 1, [7] = 2 }, starts)
+    assert.are.same({
+      [7] = b({}, 1),
+      [10] = b({}, 2),
+      [15] = b({ 1 }, 1),
+      [20] = b({ 1, 1 }, 1),
+      [22] = b({ 1, 1 }, 2),
+      [28] = b({ 1, 1 }, 3),
+      [33] = b({ 1, 2 }, 1),
+      [37] = b({ 2 }, 1),
+      [41] = b({ 2, 1 }, 1),
+    }, data.blocks)
+    assert.are.same({
+      [13] = h({ 1 }),
+      [18] = h({ 1, 1 }),
+      [31] = h({ 1, 2 }),
+      [35] = h({ 2 }),
+      [39] = h({ 2, 1 }),
+    }, data.headings)
   end)
 
   it("sets colorcolumn=81 on the current window", function()
@@ -148,13 +420,85 @@ describe("config.markdown_paragraphs", function()
     assert.is_true(vim.w.markdown_writing_active)
   end)
 
-  it("detach_window restores statuscolumn, clears colorcolumn, and clears the active flag", function()
-    vim.api.nvim_set_current_buf(bufnr)
-    compute_for({ "para" })
-    mp.detach_window()
-    assert.are.equal("", vim.wo.statuscolumn)
-    assert.are.equal("", vim.wo.colorcolumn)
-    assert.is_nil(vim.w.markdown_writing_active)
+  it(
+    "detach_window restores statuscolumn, clears colorcolumn, and clears the active flag",
+    function()
+      vim.api.nvim_set_current_buf(bufnr)
+      compute_for({ "para" })
+      mp.detach_window()
+      assert.are.equal("", vim.wo.statuscolumn)
+      assert.are.equal("", vim.wo.colorcolumn)
+      assert.is_nil(vim.w.markdown_writing_active)
+    end
+  )
+
+  describe("marker", function()
+    it("renders bare ¶N in the pre-section region", function()
+      compute_for({ "para" })
+      vim.g.statusline_winid = vim.api.nvim_get_current_win()
+      vim.api.nvim_set_current_buf(bufnr)
+      vim.v.lnum = 1
+      local s = mp.marker()
+      assert.is_truthy(s:find("¶1", 1, true))
+      assert.is_falsy(s:find("§", 1, true))
+    end)
+
+    it("renders §N¶M for in-section paragraphs", function()
+      compute_for({
+        "## §1",
+        "",
+        "Para in §1",
+      })
+      vim.g.statusline_winid = vim.api.nvim_get_current_win()
+      vim.api.nvim_set_current_buf(bufnr)
+      vim.v.lnum = 3
+      local s = mp.marker()
+      assert.is_truthy(s:find("§1", 1, true))
+      assert.is_truthy(s:find("¶1", 1, true))
+    end)
+
+    it("renders dotted §N.M¶K for nested paragraphs", function()
+      compute_for({
+        "## §1",
+        "",
+        "### §1.1",
+        "",
+        "Para in §1.1",
+      })
+      vim.g.statusline_winid = vim.api.nvim_get_current_win()
+      vim.api.nvim_set_current_buf(bufnr)
+      vim.v.lnum = 5
+      local s = mp.marker()
+      assert.is_truthy(s:find("§1.1", 1, true))
+      assert.is_truthy(s:find("¶1", 1, true))
+    end)
+
+    it("renders the heading's path on the heading line", function()
+      compute_for({
+        "## §1",
+        "",
+        "### §1.1",
+      })
+      vim.g.statusline_winid = vim.api.nvim_get_current_win()
+      vim.api.nvim_set_current_buf(bufnr)
+      vim.v.lnum = 3
+      local s = mp.marker()
+      assert.is_truthy(s:find("§1.1", 1, true))
+      assert.is_falsy(s:find("¶", 1, true))
+    end)
+
+    it("renders blank padding for non-block lines", function()
+      compute_for({
+        "## §1",
+        "",
+        "Para",
+      })
+      vim.g.statusline_winid = vim.api.nvim_get_current_win()
+      vim.api.nvim_set_current_buf(bufnr)
+      vim.v.lnum = 2
+      local s = mp.marker()
+      assert.is_truthy(s:match("^%s+$"))
+    end)
   end)
 
   describe("frontmatter_end", function()
@@ -191,7 +535,7 @@ describe("config.markdown_paragraphs", function()
   end)
 
   it("ignores frontmatter when numbering paragraphs", function()
-    local starts = compute_for({
+    local data = compute_for({
       "---",
       "title: My Post",
       "tags: [nvim, mdx]",
@@ -201,6 +545,6 @@ describe("config.markdown_paragraphs", function()
       "",
       "Second body paragraph.",
     })
-    assert.are.same({ [6] = 1, [8] = 2 }, starts)
+    assert.are.same({ [6] = b({}, 1), [8] = b({}, 2) }, data.blocks)
   end)
 end)
