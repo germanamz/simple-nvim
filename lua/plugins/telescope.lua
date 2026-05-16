@@ -15,6 +15,11 @@ return {
     cmd = "Telescope",
     keys = {
       { "<leader>ff", "<cmd>Telescope find_files<cr>", desc = "Find files" },
+      {
+        "<leader>fi",
+        "<cmd>Telescope find_files no_ignore=true hidden=true<cr>",
+        desc = "Find files (incl. gitignored)",
+      },
       { "<leader>fg", "<cmd>Telescope live_grep<cr>", desc = "Live grep" },
       { "<leader>fb", "<cmd>Telescope buffers<cr>", desc = "Buffers" },
       { "<leader>fh", "<cmd>Telescope help_tags<cr>", desc = "Help tags" },
