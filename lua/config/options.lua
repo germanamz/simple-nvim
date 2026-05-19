@@ -93,7 +93,9 @@ vim.api.nvim_create_autocmd("FileType", {
       -- textwidth. Drop it for the duration of gq so vim's internal formatter
       -- runs and reflows to textwidth=80. Save/restore cursor so the user
       -- isn't dumped at the last formatted line. Skip past YAML frontmatter
-      -- so wrapping never breaks `key: value` lines into invalid YAML.
+      -- so wrapping never breaks `key: value` lines into invalid YAML, and
+      -- skip table blocks (lines starting with `|`) since gq has no concept
+      -- of markdown tables and would rewrap row cells into prose.
       local saved_fe = vim.bo.formatexpr
       local pos = vim.api.nvim_win_get_cursor(0)
       vim.bo.formatexpr = ""
@@ -102,8 +104,30 @@ vim.api.nvim_create_autocmd("FileType", {
       local start_line = math.max(pos[1], fm_end + 1)
       local last_line = vim.api.nvim_buf_line_count(0)
       if start_line <= last_line then
-        pcall(vim.api.nvim_win_set_cursor, 0, { start_line, 0 })
-        vim.cmd("silent! keepjumps normal! gqG")
+        local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, last_line, false)
+        local ranges = {}
+        local chunk_from = nil
+        for i, line in ipairs(lines) do
+          local lnum = start_line + i - 1
+          if line:match("^%s*|") then
+            if chunk_from then
+              table.insert(ranges, { chunk_from, lnum - 1 })
+              chunk_from = nil
+            end
+          elseif not chunk_from then
+            chunk_from = lnum
+          end
+        end
+        if chunk_from then
+          table.insert(ranges, { chunk_from, last_line })
+        end
+        -- Reverse order so line-count shifts from formatting an earlier chunk
+        -- don't invalidate later chunk boundaries.
+        for i = #ranges, 1, -1 do
+          local r = ranges[i]
+          pcall(vim.api.nvim_win_set_cursor, 0, { r[1], 0 })
+          vim.cmd(string.format("silent! keepjumps normal! V%dGgq", r[2]))
+        end
       end
 
       vim.bo.formatexpr = saved_fe

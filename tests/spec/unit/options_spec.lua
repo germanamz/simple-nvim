@@ -112,4 +112,52 @@ describe("config.options", function()
     assert.is_not_nil(found.desc and found.desc:lower():find("rewrap"))
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  it("<leader>w rewraps prose but leaves table rows untouched", function()
+    vim.g.mapleader = " "
+    require("config.options")
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.cmd("new")
+    vim.api.nvim_set_current_buf(buf)
+    vim.bo[buf].filetype = "markdown"
+
+    local long = string.rep("word ", 30)
+    local table_row = "| col1 that is intentionally quite long | col2 also rather lengthy here |"
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+      long,
+      "",
+      table_row,
+      table_row,
+      "",
+      long,
+    })
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+    local cb
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+      if m.lhs == " w" then
+        cb = m.callback
+        break
+      end
+    end
+    assert.is_function(cb)
+    cb()
+
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local saw_table = 0
+    local max_prose_width = 0
+    for _, l in ipairs(lines) do
+      if l == table_row then
+        saw_table = saw_table + 1
+      elseif not l:match("^%s*$") and not l:match("^%s*|") then
+        if #l > max_prose_width then
+          max_prose_width = #l
+        end
+      end
+    end
+    assert.are.equal(2, saw_table)
+    assert.is_true(max_prose_width <= 80, "prose width was " .. max_prose_width)
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
 end)
