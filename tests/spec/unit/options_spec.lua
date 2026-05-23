@@ -160,4 +160,58 @@ describe("config.options", function()
 
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  it("<leader>w leaves fenced code blocks untouched even without a formatter", function()
+    vim.g.mapleader = " "
+    require("config.options")
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.cmd("new")
+    vim.api.nvim_set_current_buf(buf)
+    vim.bo[buf].filetype = "markdown"
+
+    local long = string.rep("word ", 30)
+    -- Use a fence tag with no FORMATTERS entry so the block contents stay
+    -- byte-identical regardless of which formatters happen to be installed.
+    local code = {
+      "```nosuchlang",
+      "x   =   1",
+      "if  x>0  :   pass",
+      "```",
+    }
+    local input = { long, "" }
+    for _, l in ipairs(code) do
+      table.insert(input, l)
+    end
+    table.insert(input, "")
+    table.insert(input, long)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, input)
+    vim.api.nvim_win_set_cursor(0, { 1, 0 })
+
+    local cb
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+      if m.lhs == " w" then
+        cb = m.callback
+        break
+      end
+    end
+    assert.is_function(cb)
+    cb()
+
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local joined = table.concat(lines, "\n")
+    for _, l in ipairs(code) do
+      assert.is_not_nil(joined:find(l, 1, true), "lost code line: " .. l)
+    end
+    -- The two code-body lines must still be on their own lines (i.e. not
+    -- swept into a wrapped prose paragraph).
+    local saw_body_line = 0
+    for _, l in ipairs(lines) do
+      if l == "x   =   1" or l == "if  x>0  :   pass" then
+        saw_body_line = saw_body_line + 1
+      end
+    end
+    assert.are.equal(2, saw_body_line)
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
 end)

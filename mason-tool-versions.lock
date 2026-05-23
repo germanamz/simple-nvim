@@ -1,5 +1,6 @@
 {
   "bash-language-server": "5.6.0",
+  "clang-format": "22.1.5",
   "css-lsp": "4.10.0",
   "gopls": "v0.21.1",
   "html-lsp": "4.10.0",
@@ -7,8 +8,11 @@
   "lua-language-server": "3.18.2",
   "marksman": "2026-02-08",
   "mdx-analyzer": "0.6.3",
+  "prettier": "3.8.3",
   "pyright": "1.1.409",
+  "ruff": "0.15.14",
   "rust-analyzer": "2026-04-13",
+  "shfmt": "v3.13.1",
   "taplo": "0.10.0",
   "typescript-language-server": "5.1.3",
   "yaml-language-server": "1.22.0"
