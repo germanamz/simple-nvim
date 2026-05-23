@@ -49,6 +49,7 @@ Leader = `<Space>` · Local leader = `\`
 | `<Space>?`        | Telescope keymaps (searchable list of *everything*)   |
 | `<Space>K`        | which-key popup (live, grouped)                       |
 | `<Space>k?`       | Open *this* cheatsheet                                |
+| `<Space>e`        | Open netrw file tree in current window                |
 | `gd`              | Go to definition (LSP)                                |
 | `K`               | Hover docs (LSP default)                              |
 | `]c` / `[c`       | Next / previous git hunk                              |
@@ -199,6 +200,12 @@ All window commands start with `<C-w>` (Ctrl-W). `splitbelow` and
 
 Tip: `<Space>fb` is faster than `:ls` and lets you `<C-d>` in insert mode to
 delete the buffer under the cursor.
+
+`<Space>e` opens netrw (`:Explore`) in the current window using the tree
+listing style (`g:netrw_liststyle = 3`) with the banner hidden. The previous
+buffer stays loaded — `<C-^>` or `:b#` returns to it. Inside netrw: `<CR>` on
+a folder expands/collapses it in place, `<CR>` on a file opens it, `-` goes
+up, `D` deletes, `R` renames, `%` creates a file, `d` makes a directory.
 
 ---
 

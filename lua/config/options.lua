@@ -32,6 +32,23 @@ opt.smartcase = true
 opt.hlsearch = true
 opt.incsearch = true
 
+-- netrw: tree-style listing, no banner. g:netrw_treedepthstring doesn't always
+-- take effect (newer netrw caches it), so we also hide the bar character by
+-- setting its highlight foreground to the Normal background. Re-applied on
+-- ColorScheme so :colorscheme changes don't bring the bars back.
+vim.g.netrw_liststyle = 3
+vim.g.netrw_banner = 0
+
+local function hide_netrw_tree_bar()
+  local normal = vim.api.nvim_get_hl(0, { name = "Normal" })
+  local bg = normal and normal.bg
+  if bg then
+    vim.api.nvim_set_hl(0, "netrwTreeBar", { fg = string.format("#%06x", bg) })
+  end
+end
+hide_netrw_tree_bar()
+vim.api.nvim_create_autocmd("ColorScheme", { callback = hide_netrw_tree_bar })
+
 -- Misc quality-of-life
 opt.termguicolors = true
 opt.mouse = "a"

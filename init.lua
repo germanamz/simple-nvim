@@ -28,6 +28,10 @@ vim.keymap.set("n", "<leader>k?", function()
   vim.cmd.edit(vim.fn.stdpath("config") .. "/docs/keybindings.md")
 end, { desc = "Open keybindings cheatsheet" })
 
+-- Open netrw in the current window. Buffers stay loaded (just hidden);
+-- `:b#` or <C-^> jumps back to the previous buffer.
+vim.keymap.set("n", "<leader>e", "<cmd>Explore<cr>", { desc = "Open file tree (netrw)" })
+
 if vim.env.NVIM_BOOTSTRAP ~= "0" then
   require("lazy").setup("plugins")
 end
