@@ -26,8 +26,7 @@ return {
       { "<leader>fr", "<cmd>Telescope oldfiles<cr>", desc = "Recent files" },
       { "<leader>fs", "<cmd>Telescope grep_string<cr>", desc = "Grep word under cursor" },
       { "<leader>fd", "<cmd>Telescope diagnostics<cr>", desc = "Diagnostics" },
-      { "<leader>fk", "<cmd>Telescope keymaps<cr>", desc = "Keymaps" },
-      { "<leader>?", "<cmd>Telescope keymaps<cr>", desc = "Keymaps reference" },
+      { "<leader>?", "<cmd>Telescope keymaps<cr>", desc = "Keymaps" },
       { "<leader>fc", "<cmd>Telescope commands<cr>", desc = "Commands" },
       {
         "<leader>f/",

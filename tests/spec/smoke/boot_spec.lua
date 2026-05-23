@@ -56,7 +56,6 @@ describe("smoke: boot", function()
       "Grep word under cursor",
       "Diagnostics",
       "Keymaps",
-      "Keymaps reference",
       "Commands",
       "Fuzzy find in buffer",
       "Git changed files",

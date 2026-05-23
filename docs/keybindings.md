@@ -48,7 +48,7 @@ Leader = `<Space>` · Local leader = `\`
 | `<Space>f/`       | Fuzzy find inside current buffer                      |
 | `<Space>?`        | Telescope keymaps (searchable list of *everything*)   |
 | `<Space>K`        | which-key popup (live, grouped)                       |
-| `<Space>fK`       | Open *this* cheatsheet                                |
+| `<Space>k?`       | Open *this* cheatsheet                                |
 | `gd`              | Go to definition (LSP)                                |
 | `K`               | Hover docs (LSP default)                              |
 | `]c` / `[c`       | Next / previous git hunk                              |
@@ -69,8 +69,7 @@ Use these when you forget anything else in this doc.
 | Keys           | Action                                                        |
 | -------------- | ------------------------------------------------------------- |
 | `<Space>?`     | Telescope `keymaps` — fuzzy-searchable list of every binding  |
-| `<Space>fk`    | Same as above (alias)                                         |
-| `<Space>fK`    | Open `docs/keybindings.md` (this file) from anywhere          |
+| `<Space>k?`    | Open `docs/keybindings.md` (this file) from anywhere          |
 | `<Space>K`     | which-key global popup (browse by prefix)                     |
 | `<Space>fc`    | Telescope `commands` — all `:Ex` commands                     |
 | `<Space>fh`    | Telescope `help_tags` — fuzzy across `:help`                  |
@@ -434,10 +433,9 @@ All under `<Space>f` (group: "find").
 | `<Space>fr`    | Recent files (`oldfiles`)                       |
 | `<Space>fh`    | Help tags                                       |
 | `<Space>fd`    | Diagnostics across project                      |
-| `<Space>fk`    | Keymaps (same as `<Space>?`)                    |
+| `<Space>?`     | Keymaps                                         |
 | `<Space>fc`    | Commands                                        |
 | `<Space>f/`    | Fuzzy find inside current buffer                |
-| `<Space>?`     | Keymaps (alias)                                 |
 
 ### Inside the picker (insert mode)
 

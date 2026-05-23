@@ -1,34 +1,15 @@
 # Handoff: keymap overlaps surfaced while writing the cheatsheet
 
-Only one item remains. The `<leader>e` double-meaning and the three-way `gd`
-overlap were both resolved by removing `mini.files` and `diffview.nvim` — see
-the commit that removed those plugin specs.
+All items in this doc have been resolved.
 
-## `<leader>fk` vs `<leader>fK` vs `<leader>?` vs `<leader>K`
+- The `<leader>e` double-meaning was resolved by removing `mini.files`
+  and dropping the LSP override.
+- The three-way `gd` overlap was resolved by removing `diffview.nvim`
+  (which installed the netrw `gd` hijack); only the LSP `gd` and its
+  ts_ls source-definition variant remain.
+- The `<leader>fk` / `<leader>?` / `<leader>K` / `<leader>fK` cluster
+  was resolved by dropping `<leader>fk` (alias of `<leader>?`) and
+  moving the cheatsheet from `<leader>fK` to `<leader>k?` so it no
+  longer sits case-distinct next to `<leader>K` (which-key).
 
-**Where:**
-
-- `lua/plugins/telescope.lua:29` — `<leader>fk` = Telescope keymaps.
-- `lua/plugins/telescope.lua:30` — `<leader>?` = Telescope keymaps (alias).
-- `lua/plugins/which-key.lua:14` — `<leader>K` = which-key global popup.
-- `init.lua:27` — `<leader>fK` = open the cheatsheet.
-
-**Why this matters:** four near-identical keys do three different things.
-A future-self looking at the keymap list will likely guess wrong at least
-once.
-
-**Things to consider:**
-
-- Drop one of `<leader>fk` / `<leader>?`. They're literal aliases.
-- Consider whether `<leader>K` (which-key) and `<leader>fK` (open doc)
-  being case-distinct neighbors is delightful or treacherous. A safer
-  alternative for the doc: `<leader>fH` ("find Help doc") or `<leader>hK`.
-
-Recommendation: low priority — leaving as-is is fine. If you ever shrink
-the keymap surface, drop `<leader>fk` since `<leader>?` is shorter and
-already there for the same purpose.
-
-## Out of scope for this handoff
-
-The `<leader>h*` gitsigns prefix overlapping with which-key's group
-conventions is fine — gitsigns is the only thing under `h`.
+This file can be deleted when convenient.
