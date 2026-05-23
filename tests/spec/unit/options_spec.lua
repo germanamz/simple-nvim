@@ -8,10 +8,6 @@ describe("config.options", function()
     pcall(vim.api.nvim_clear_autocmds, { event = "OptionSet", pattern = "diff" })
     pcall(vim.api.nvim_clear_autocmds, {
       event = "FileType",
-      pattern = { "DiffviewFiles", "DiffviewFileHistory" },
-    })
-    pcall(vim.api.nvim_clear_autocmds, {
-      event = "FileType",
       pattern = { "markdown", "mdx" },
     })
   end)

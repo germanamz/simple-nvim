@@ -49,7 +49,7 @@ tests/
 │   ├── nvim_env.lua      — isolated XDG dirs; symlinks the host's lazy cache
 │   ├── wait.lua          — vim.wait wrappers (wait_for, wait_for_buffer, wait_for_event)
 │   ├── keymap_probe.lua  — resolve a keymap to its callback/rhs without firing it
-│   └── git_fixture.lua   — build deterministic temp git repos for gitsigns/diffview tests
+│   └── git_fixture.lua   — build deterministic temp git repos for gitsigns tests
 └── spec/
     ├── unit/             — pure-lua unit tests; no plugin loading
     ├── smoke/            — full init loads cleanly; commands and keymaps registered

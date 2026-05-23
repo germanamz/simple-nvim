@@ -9,7 +9,7 @@ Personal Neovim configuration for Neovim **0.11+**. Uses `lazy.nvim` for plugin 
 | Tool | Why |
 | --- | --- |
 | **Neovim ≥ 0.11** | Native `vim.lsp.config` API and the `main` branch of `nvim-treesitter` both require it. |
-| **git** | Used by `lazy.nvim` to clone plugins and by `gitsigns` / `diffview`. |
+| **git** | Used by `lazy.nvim` to clone plugins and by `gitsigns`. |
 | **A C compiler** (`cc` / `clang` / `gcc`) | Treesitter parsers compile to native shared objects on install. |
 | **make** | Builds the `telescope-fzf-native` extension. Without it, Telescope still works but falls back to the slower Lua sorter. |
 | **ripgrep** (`rg`) | Required by Telescope's `live_grep` and `grep_string`. |
@@ -19,7 +19,6 @@ Personal Neovim configuration for Neovim **0.11+**. Uses `lazy.nvim` for plugin 
 
 | Tool | Why |
 | --- | --- |
-| **A Nerd Font** (e.g. JetBrainsMono Nerd Font) | `nvim-web-devicons` (used by Diffview's file panel) renders glyphs that require one. Set your terminal font accordingly. |
 | **fd** | Faster file discovery for Telescope. |
 | **Go toolchain** | Needed at runtime by `gopls` if you edit Go files. |
 | **Rust toolchain** (`rustup` / `cargo`) | Needed at runtime by `rust_analyzer` if you edit Rust files. |
@@ -89,7 +88,7 @@ sudo apt install -y neovim git build-essential ripgrep fd-find nodejs npm golang
 - **Treesitter:** `nvim-treesitter` (main branch) + `nvim-treesitter-context` for sticky scope headers
 - **Fuzzy finder:** `telescope.nvim` + `telescope-fzf-native`
 - **LSP:** native `vim.lsp` + `mason.nvim` + `mason-lspconfig.nvim` + `nvim-lspconfig` (defaults only)
-- **Git:** `gitsigns.nvim` (signs, blame, hunk navigation, review-base diffing) + `diffview.nvim` (full diff UI, `diff3_mixed` merge layout)
+- **Git:** `gitsigns.nvim` (signs, blame, hunk navigation, review-base diffing)
 - **Markdown:** `render-markdown.nvim` (in-buffer rendering for `.md` and `.mdx`)
 - **Discoverability:** `which-key.nvim` (`<leader>K` shows every mapping)
 
@@ -101,12 +100,9 @@ Leader is `<Space>`; local leader is `\`. Press `<Space>?` (Telescope keymaps) o
 | --- | --- |
 | `<Space><Space>` | Files (changed first) |
 | `<Space>ff` / `<Space>fg` | Find files / live grep |
-| `<Space>gd` | Diffview: working tree vs index |
-| `<Space>gm` | Diffview: branch vs `origin/main` |
 | `<Space>gB` | Pick a review base branch (drives gitsigns + Telescope sort) |
 | `]c` / `[c` | Next / previous git hunk |
 | `gd` | LSP go-to-definition (or `_typescript.goToSourceDefinition` in TS buffers) |
-| `<Space>e` | Show diagnostics in a float |
 
 ## Layout
 

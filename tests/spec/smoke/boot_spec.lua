@@ -62,15 +62,7 @@ describe("smoke: boot", function()
       "Git changed files",
       "Review base: pick branch (auto-opens files)",
       "Review base: clear",
-      "Diffview: open working tree vs index",
-      "Diffview: close",
-      "Diffview: repo file history",
-      "Diffview: current file history",
-      "Diffview: branch vs origin/main",
-      "Diffview: toggle file panel",
       "Files (changed first)",
-      "File explorer (current file)",
-      "File explorer (cwd)",
       "All keymaps (which-key)",
     }
 

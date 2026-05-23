@@ -7,7 +7,7 @@ Leader = `<Space>` · Local leader = `\`
 
 > **Jumping to a section:** put the cursor on a TOC entry and press `gd`
 > (marksman LSP follows the markdown link), or just type `/## N` where `N`
-> is the section number (e.g. `/## 14` → Telescope). `]]` / `[[` step
+> is the section number (e.g. `/## 13` → Telescope). `]]` / `[[` step
 > between headings; `gg` returns to the top.
 
 ## Table of contents
@@ -24,18 +24,16 @@ Leader = `<Space>` · Local leader = `\`
 10. [Visual mode & text objects](#10-visual-mode--text-objects)
 11. [Registers (yank / paste)](#11-registers-yank--paste)
 12. [Folds](#12-folds)
-13. [Files & explorer](#13-files--explorer)
-14. [Telescope (find)](#14-telescope-find)
-15. [LSP](#15-lsp)
-16. [Diagnostics](#16-diagnostics)
-17. [Git: gitsigns hunks](#17-git-gitsigns-hunks)
-18. [Git: diffview](#18-git-diffview)
-19. [Git: review base](#19-git-review-base)
-20. [Markdown / MDX](#20-markdown--mdx)
-21. [Formatting](#21-formatting)
-22. [Treesitter context](#22-treesitter-context)
-23. [Command-line tricks](#23-command-line-tricks)
-24. [Known conflicts](#24-known-conflicts)
+13. [Telescope (find)](#13-telescope-find)
+14. [LSP](#14-lsp)
+15. [Diagnostics](#15-diagnostics)
+16. [Git: gitsigns hunks](#16-git-gitsigns-hunks)
+17. [Git: review base](#17-git-review-base)
+18. [Markdown / MDX](#18-markdown--mdx)
+19. [Formatting](#19-formatting)
+20. [Treesitter context](#20-treesitter-context)
+21. [Command-line tricks](#21-command-line-tricks)
+22. [Known conflicts](#22-known-conflicts)
 
 ---
 
@@ -51,15 +49,12 @@ Leader = `<Space>` · Local leader = `\`
 | `<Space>?`        | Telescope keymaps (searchable list of *everything*)   |
 | `<Space>K`        | which-key popup (live, grouped)                       |
 | `<Space>fK`       | Open *this* cheatsheet                                |
-| `<Space>e`        | File explorer at current file (LSP buf: diag float)   |
-| `<Space>E`        | File explorer at cwd                                  |
-| `gd`              | Go to definition (LSP) / Diffview in netrw            |
+| `gd`              | Go to definition (LSP)                                |
 | `K`               | Hover docs (LSP default)                              |
 | `]c` / `[c`       | Next / previous git hunk                              |
 | `]d` / `[d`       | Next / previous diagnostic (Nvim 0.11 default)        |
 | `]r` / `[r`       | Next / previous LSP reference in current buffer       |
-| `<Space>gd`       | Diffview: working tree vs index                       |
-| `<Space>gm`       | Diffview: branch vs `origin/main`                     |
+| `<Space>gB`       | Pick a review base branch                             |
 | `<Space>w`        | (markdown) re-wrap cursor → EOF using textwidth=80    |
 | `<Space>F`        | Format buffer (or selection)                          |
 | `<C-w>` then `hjkl` | Move between split windows                          |
@@ -424,30 +419,7 @@ File opens fully unfolded (`foldlevelstart=99`). `foldcolumn=1` shows fold marke
 
 ---
 
-## 13. Files & explorer
-
-`mini.files` is the default file explorer (replaces netrw).
-
-| Keys         | Action                                          |
-| ------------ | ----------------------------------------------- |
-| `<Space>e`   | open mini.files at current file's directory     |
-| `<Space>E`   | open mini.files at cwd                          |
-| (in mini.files) `q` / `<Esc>` | close                          |
-| (in mini.files) `l` / `<CR>`  | enter directory / open file    |
-| (in mini.files) `h`           | parent directory               |
-
-In netrw (rare — most things use mini.files): `gd` is hijacked to open
-Diffview against the index.
-
-To **edit files** in mini.files: just edit the buffer (rename, delete by
-removing lines, add by typing new names) and write with `:w`.
-
-> Note: in LSP buffers, `<Space>e` is *re-mapped* to "show diagnostic float".
-> See [§24 Known conflicts](#24-known-conflicts).
-
----
-
-## 14. Telescope (find)
+## 13. Telescope (find)
 
 All under `<Space>f` (group: "find").
 
@@ -483,7 +455,7 @@ All under `<Space>f` (group: "find").
 
 ---
 
-## 15. LSP
+## 14. LSP
 
 Buffer-local — these only exist in buffers with an attached LSP client.
 
@@ -499,7 +471,7 @@ Buffer-local — these only exist in buffers with an attached LSP client.
 | `<C-s>` (insert) | signature help (Nvim 0.11 default)                  |
 | `]r` / `[r`  | next / previous LSP **reference** in this buffer        |
 | `]d` / `[d`  | next / previous **diagnostic** (Nvim 0.11 default)      |
-| `<Space>e`   | show diagnostic float (overrides the global mapping)    |
+| `<C-w>d`     | show diagnostic float (Nvim 0.11 default)               |
 
 Statusline shows `⇄N` when the cursor is on a symbol with `N` references in
 the current buffer.
@@ -521,18 +493,18 @@ html, cssls, marksman, mdx_analyzer. Each attaches only on its `filetypes`.
 
 ---
 
-## 16. Diagnostics
+## 15. Diagnostics
 
 | Keys          | Action                                  |
 | ------------- | --------------------------------------- |
 | `]d` / `[d`   | next / previous diagnostic              |
-| `<Space>e`    | show diagnostic float at cursor (LSP buf) |
+| `<C-w>d`      | show diagnostic float at cursor          |
 | `<Space>fd`   | Telescope: all diagnostics              |
 | `:diagnostic` | core API; see also `vim.diagnostic.*`    |
 
 ---
 
-## 17. Git: gitsigns hunks
+## 16. Git: gitsigns hunks
 
 Active on every loaded buffer. Word-level inline diff is rendered with
 background highlights (no sign column — `signcolumn=false`).
@@ -553,32 +525,7 @@ Statusline: ` +A ~C -D ↑above ↓below ` summary.
 
 ---
 
-## 18. Git: diffview
-
-| Keys         | Action                                          |
-| ------------ | ----------------------------------------------- |
-| `<Space>gd`  | working tree vs index                           |
-| `<Space>gD`  | close diffview                                  |
-| `<Space>gm`  | current branch vs `origin/main`                 |
-| `<Space>gh`  | repo-wide file history                          |
-| `<Space>gf`  | current file's history                          |
-| `<Space>gt`  | toggle file panel                               |
-| `<Space>gs`  | Telescope git status (changed files)            |
-
-### Inside diffview
-
-| Keys         | Action                                    |
-| ------------ | ----------------------------------------- |
-| `q`          | close diffview                            |
-| `<Tab>` / `<S-Tab>` | next / prev file                   |
-| (panel) `j` / `k`   | next / prev entry                  |
-| (panel) `<CR>`      | open file under cursor             |
-
-Merge layout is `diff3_mixed`. Diagnostics are disabled in the merge tool.
-
----
-
-## 19. Git: review base
+## 17. Git: review base
 
 Per-repo "review base" ref: gitsigns diffs against it (instead of HEAD), and
 the smart files picker surfaces files changed since it.
@@ -592,7 +539,7 @@ Stored per repo on disk; auto-applies on buffer attach.
 
 ---
 
-## 20. Markdown / MDX
+## 18. Markdown / MDX
 
 Active in `markdown` and `mdx` buffers. `textwidth=80`; `formatoptions+=t` so
 auto-wrap fires while typing. `colorcolumn=81` shows the ruler.
@@ -620,7 +567,7 @@ comments are not numbered.
 
 ---
 
-## 21. Formatting
+## 19. Formatting
 
 `conform.nvim` drives formatting. `formatexpr` is set to conform's globally,
 so `gq{motion}` uses the configured formatter. Falls back to LSP for
@@ -636,7 +583,7 @@ No format-on-save — always explicit.
 
 ---
 
-## 22. Treesitter context
+## 20. Treesitter context
 
 Sticky scope headers at the top of the window (function / class / heading).
 
@@ -646,7 +593,7 @@ Sticky scope headers at the top of the window (function / class / heading).
 
 ---
 
-## 23. Command-line tricks
+## 21. Command-line tricks
 
 In `:` command-line mode:
 
@@ -674,16 +621,7 @@ Other helpful Ex bits:
 
 ---
 
-## 24. Known conflicts
-
-### `<Space>e` — double-meaning
-
-- **Global** (any buffer without LSP attached): opens mini.files at current
-  file's directory.
-- **LSP buffer** (overrides on `LspAttach`): opens the diagnostic float.
-
-If you want the file explorer in an LSP buffer, use `<Space>E` (cwd) — it is
-not overridden — or call `<cmd>lua require('mini.files').open(vim.api.nvim_buf_get_name(0))<cr>`.
+## 22. Known conflicts
 
 ### `gd` — depends on filetype
 
@@ -691,13 +629,6 @@ not overridden — or call `<cmd>lua require('mini.files').open(vim.api.nvim_buf
 - **TypeScript buffers (ts_ls):** custom "go to source definition" that
   follows imports through, falling back to standard `definition` if the
   command returns nothing.
-- **netrw buffers:** opens Diffview (overrides netrw's `NetrwForceChgDir`).
-
-### `q` — closes things
-
-In mini.files, all diffview panels, and the file history panel, `q` is
-bound to close. In a normal buffer, `q{r}` still starts macro recording —
-the override is buffer-local.
 
 ### `<Esc>` in Telescope
 

@@ -51,9 +51,8 @@ local servers = {
   },
 }
 
--- Buffer-local LSP keymaps. `gd` overrides netrw's `gd` only where LSP attaches.
--- `]d` / `[d` come free from Neovim 0.11 defaults, so only the non-default
--- mappings are declared here.
+-- Buffer-local LSP keymaps. `]d` / `[d` come free from Neovim 0.11 defaults,
+-- so only the non-default mappings are declared here.
 --
 -- TypeScript note: plain `textDocument/definition` on an imported symbol lands
 -- on the import binding, not the real source. ts_ls exposes a custom command
@@ -88,7 +87,6 @@ vim.api.nvim_create_autocmd("LspAttach", {
     else
       map("gd", vim.lsp.buf.definition, "Goto definition")
     end
-    map("<leader>e", vim.diagnostic.open_float, "Show diagnostic float")
 
     local lsp_refs = require("config.lsp_refs")
     map("]r", lsp_refs.next, "Next LSP reference")

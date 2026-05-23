@@ -63,7 +63,7 @@ opt.linebreak = true -- wrap at word boundaries, not mid-word
 opt.breakindent = true -- wrapped lines keep indent
 opt.showbreak = "↪ "
 
--- Force wrap inside diff mode (vim disables it by default, diffview inherits)
+-- Force wrap inside diff mode (vim disables it by default)
 vim.api.nvim_create_autocmd({ "OptionSet" }, {
   pattern = "diff",
   callback = function()
@@ -71,13 +71,6 @@ vim.api.nvim_create_autocmd({ "OptionSet" }, {
       vim.opt_local.wrap = true
       vim.opt_local.linebreak = true
     end
-  end,
-})
-vim.api.nvim_create_autocmd({ "FileType" }, {
-  pattern = { "DiffviewFiles", "DiffviewFileHistory" },
-  callback = function()
-    vim.opt_local.wrap = true
-    vim.opt_local.linebreak = true
   end,
 })
 
