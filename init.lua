@@ -24,6 +24,10 @@ vim.filetype.add({ extension = { mdx = "mdx" } })
 require("config.options")
 require("config.lsp_refs").setup()
 
+vim.keymap.set("n", "<leader>fK", function()
+  vim.cmd.edit(vim.fn.stdpath("config") .. "/docs/keybindings.md")
+end, { desc = "Open keybindings cheatsheet" })
+
 if vim.env.NVIM_BOOTSTRAP ~= "0" then
   require("lazy").setup("plugins")
 end
