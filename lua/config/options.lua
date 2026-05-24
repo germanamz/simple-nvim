@@ -32,12 +32,22 @@ opt.smartcase = true
 opt.hlsearch = true
 opt.incsearch = true
 
--- netrw: tree-style listing, no banner. g:netrw_treedepthstring doesn't always
+-- netrw: tree-style listing with banner. g:netrw_treedepthstring doesn't always
 -- take effect (newer netrw caches it), so we also hide the bar character by
 -- setting its highlight foreground to the Normal background. Re-applied on
 -- ColorScheme so :colorscheme changes don't bring the bars back.
 vim.g.netrw_liststyle = 3
-vim.g.netrw_banner = 0
+
+-- Bundled netrw maps quickhelp to <F1>, not ?. Restore the familiar ? binding.
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "netrw",
+  callback = function(args)
+    vim.keymap.set("n", "?", "<cmd>help netrw-quickmap<cr>", {
+      buffer = args.buf,
+      desc = "netrw quickmap help",
+    })
+  end,
+})
 
 local function hide_netrw_tree_bar()
   local normal = vim.api.nvim_get_hl(0, { name = "Normal" })
