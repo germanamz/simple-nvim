@@ -150,6 +150,7 @@ vim.api.nvim_create_autocmd("FileType", {
   callback = function(args)
     vim.opt_local.textwidth = 80
     vim.opt_local.formatoptions:append("t") -- auto-wrap text using textwidth
+    vim.opt_local.wrap = false -- prose is hard-wrapped; long table rows scroll horizontally instead of soft-wrapping ugly
     vim.keymap.set("n", "<leader>w", function()
       -- LSP attach sets formatexpr to vim.lsp.formatexpr, which doesn't honor
       -- textwidth. Drop it for the duration of gq so vim's internal formatter
