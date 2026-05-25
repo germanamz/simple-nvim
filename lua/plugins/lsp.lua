@@ -9,6 +9,7 @@ local servers = {
   pyright = { filetypes = { "python" } },
   gopls = { filetypes = { "go", "gomod" } },
   rust_analyzer = { filetypes = { "rust" } },
+  clangd = { filetypes = { "c", "cpp", "objc", "objcpp", "cuda", "proto" } },
   lua_ls = {
     filetypes = { "lua" },
     settings = {
