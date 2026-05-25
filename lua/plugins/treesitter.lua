@@ -39,6 +39,7 @@ return {
         "regex",
         "diff",
         "git_config",
+        "latex",
       }
 
       -- Pin parsers to lockfile revisions before install. See
