@@ -133,6 +133,7 @@ function M._git_changes(root, base)
     staged = 0,
     unstaged = 0,
     committed = 0,
+    base = { added = 0, modified = 0, deleted = 0, renamed = 0 },
   }
 
   local status = vim.fn.systemlist({ "git", "-C", root, "status", "--porcelain" })
@@ -185,6 +186,15 @@ function M._git_changes(root, base)
           end
           if path and path ~= "" then
             counts.committed = counts.committed + 1
+            if status_char == "A" then
+              counts.base.added = counts.base.added + 1
+            elseif status_char == "M" or status_char == "T" then
+              counts.base.modified = counts.base.modified + 1
+            elseif status_char == "D" then
+              counts.base.deleted = counts.base.deleted + 1
+            elseif status_char == "R" or status_char == "C" then
+              counts.base.renamed = counts.base.renamed + 1
+            end
             if not codes[path] then
               codes[path] = "b" .. status_char
             end
@@ -292,7 +302,13 @@ local function append_segment(text, ranges, seg, separator)
   if seg.icon and seg.icon ~= "" then
     local s = #text
     text = text .. seg.icon
-    table.insert(ranges, { seg.icon_hl or "SmartFilesLegend", s, #text })
+    if seg.icon_hls then
+      for _, h in ipairs(seg.icon_hls) do
+        table.insert(ranges, { h[3], s + h[1], s + h[2] })
+      end
+    else
+      table.insert(ranges, { seg.icon_hl or "SmartFilesLegend", s, #text })
+    end
   end
   if seg.count ~= nil then
     if seg.icon and seg.icon ~= "" then
@@ -355,24 +371,30 @@ local function open_legend(prompt_bufnr, counts, base)
     return
   end
 
-  local type_segments = {
+  local function b_icon(letter, type_hl)
+    return {
+      icon = "b" .. letter,
+      icon_hls = { { 0, 1, "SmartFilesBase" }, { 1, 2, type_hl } },
+    }
+  end
+
+  local worktree_segments = {
     { icon = "A", icon_hl = "SmartFilesAdded", count = counts.added, label = "added" },
     { icon = "M", icon_hl = "SmartFilesModified", count = counts.modified, label = "modified" },
     { icon = "D", icon_hl = "SmartFilesDeleted", count = counts.deleted, label = "deleted" },
     { icon = "R", icon_hl = "SmartFilesRenamed", count = counts.renamed, label = "renamed" },
     { icon = "?*", icon_hl = "SmartFilesUntracked", count = counts.untracked, label = "untracked" },
-  }
-  local scope_segments = {
-    { count = counts.staged, label = "staged" },
     { icon = "*", icon_hl = "SmartFilesUnstaged", count = counts.unstaged, label = "unstaged" },
   }
+  local base_segments = {}
   if base then
-    table.insert(scope_segments, {
-      icon = "b",
-      icon_hl = "SmartFilesBase",
-      count = counts.committed,
-      label = "vs " .. base,
-    })
+    local b = counts.base or {}
+    base_segments = {
+      vim.tbl_extend("force", b_icon("A", "SmartFilesAdded"), { count = b.added, label = "added" }),
+      vim.tbl_extend("force", b_icon("M", "SmartFilesModified"), { count = b.modified, label = "modified" }),
+      vim.tbl_extend("force", b_icon("D", "SmartFilesDeleted"), { count = b.deleted, label = "deleted" }),
+      vim.tbl_extend("force", b_icon("R", "SmartFilesRenamed"), { count = b.renamed, label = "renamed" }),
+    }
   end
 
   local function nonzero(segs)
@@ -384,9 +406,12 @@ local function open_legend(prompt_bufnr, counts, base)
     end
     return out
   end
-  local types = nonzero(type_segments)
-  local scopes = nonzero(scope_segments)
-  if #types == 0 and #scopes == 0 then
+  local worktree = nonzero(worktree_segments)
+  local base_list = nonzero(base_segments)
+  if base and #base_list > 0 then
+    table.insert(base_list, { label = "vs " .. base })
+  end
+  if #worktree == 0 and #base_list == 0 then
     return
   end
 
@@ -394,34 +419,18 @@ local function open_legend(prompt_bufnr, counts, base)
   local width = vim.api.nvim_win_get_width(results_win)
   local height = vim.api.nvim_win_get_height(results_win)
 
-  -- Try single-line first; fall back to two lines if it overflows.
   local lines, ranges_by_line = {}, {}
-  local all = {}
-  for _, t in ipairs(types) do
-    table.insert(all, t)
-  end
-  for _, s in ipairs(scopes) do
-    table.insert(all, s)
-  end
-  local combo_text, combo_ranges = render_segments(all, "    ")
-  if vim.api.nvim_strwidth(combo_text) <= width then
-    combo_text, combo_ranges = fit_line(combo_text, combo_ranges, width)
-    table.insert(lines, combo_text)
-    table.insert(ranges_by_line, combo_ranges)
-  else
-    if #types > 0 then
-      local t, r = render_segments(types, "   ")
-      t, r = fit_line(t, r, width)
-      table.insert(lines, t)
-      table.insert(ranges_by_line, r)
+  local function push(segs)
+    if #segs == 0 then
+      return
     end
-    if #scopes > 0 then
-      local t, r = render_segments(scopes, "   ")
-      t, r = fit_line(t, r, width)
-      table.insert(lines, t)
-      table.insert(ranges_by_line, r)
-    end
+    local text, ranges = render_segments(segs, "   ")
+    text, ranges = fit_line(text, ranges, width)
+    table.insert(lines, text)
+    table.insert(ranges_by_line, ranges)
   end
+  push(worktree)
+  push(base_list)
 
   if #lines == 0 or #lines > height then
     return
