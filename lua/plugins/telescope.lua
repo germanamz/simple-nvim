@@ -33,7 +33,13 @@ return {
         "<cmd>Telescope current_buffer_fuzzy_find<cr>",
         desc = "Fuzzy find in buffer",
       },
-      { "<leader>gs", "<cmd>Telescope git_status<cr>", desc = "Git changed files" },
+      {
+        "<leader>gs",
+        function()
+          require("config.telescope_smart").smart_files_changed()
+        end,
+        desc = "Changed files (worktree + vs base)",
+      },
       {
         "<leader>gB",
         function()
@@ -115,6 +121,7 @@ return {
       local telescope = require("telescope")
       telescope.setup(opts)
       pcall(telescope.load_extension, "fzf")
+      require("config.telescope_smart").setup()
     end,
   },
 }

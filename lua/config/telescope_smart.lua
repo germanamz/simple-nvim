@@ -1,50 +1,49 @@
--- Smart file picker with git-status-aware prefixes.
+-- Smart file pickers with git-status-aware prefixes.
 --
--- Each file in the picker gets a 2-character prefix that mirrors
--- `git status --porcelain` exactly, so what you see in the picker is what
--- you would see at the command line:
+-- After `M.setup()` runs, telescope's `make_entry.gen_from_file` is wrapped
+-- so the same prefixes appear in every file-listing picker (find_files,
+-- oldfiles, the smart pickers, etc.). Codes are cached per-cwd for ~500ms
+-- so successive picker opens don't re-shell out to git.
 --
---     X = staged status (index slot)
---     Y = worktree status
---     space ' ' = no change in that slot
+-- Prefix scheme (single dominant letter + color):
+--     A   added       (green)
+--     M   modified    (blue)
+--     D   deleted     (gray)
+--     R   renamed     (teal)
+--     ?   untracked   (brown)
 --
--- Letter meanings (any slot):
---     A — added     (green)
---     M — modified  (blue)
---     D — deleted   (gray)
---     R — renamed   (teal)
---     ? — untracked (brown; only ever appears as "??")
---
--- Common combinations:
---     'A '   staged add
---     ' M'   worktree modification (unstaged)
---     'M '   staged modification
---     'MM'   staged then further worktree modification (hybrid)
---     'AM'   staged add then worktree modification (hybrid)
---     ' D'   worktree delete (unstaged)
---     'D '   staged delete
---     'R '   staged rename
---     '??'   untracked
+-- A trailing '*' marks the file as having unstaged worktree changes.
+-- Absence of '*' means the change is fully staged:
+--     A     staged add
+--     M     staged modification
+--     M*    worktree modification (unstaged or staged+further edits)
+--     D     staged delete
+--     D*    worktree delete
+--     ?*    untracked (always shown with '*')
+--     R     staged rename
 --
 -- When a review base is set (see config.review_base), files that differ
--- from the base branch but have no current uncommitted change get a 'b'
--- prefix in the index slot:
---
---     'bA'   added in a commit since base
---     'bM'   modified in a commit since base
---     'bD'   deleted in a commit since base
---     'bR'   renamed in a commit since base
---
--- For hybrid states (e.g. 'AM'), the prefix color reflects the index slot
--- letter, matching IntelliJ's convention. Files with no change have a
--- blank 2-character pad ('  ') so filename columns stay aligned.
+-- from the base in committed history but have no current worktree change
+-- get a leading 'b' (purple), with the type letter retaining its color:
+--     bA   added in a commit since base
+--     bM   modified in a commit since base
+--     bD   deleted in a commit since base
+--     bR   renamed in a commit since base
 
 local M = {}
 
 local review_base = require("config.review_base")
 
-local function git_root()
-  local out = vim.fn.systemlist({ "git", "rev-parse", "--show-toplevel" })
+-- ===================== helpers =====================
+
+local function git_root_at(cwd)
+  local out = vim.fn.systemlist({
+    "git",
+    "-C",
+    cwd or vim.fn.getcwd(),
+    "rev-parse",
+    "--show-toplevel",
+  })
   if vim.v.shell_error ~= 0 then
     return nil
   end
@@ -73,19 +72,55 @@ local function hl_for_letter(c)
   end
 end
 
-local function hl_for_code(code)
+-- format_prefix: turn an XY porcelain code (or 'b<letter>' for base-only)
+-- into a 2-char text prefix plus a list of {range, hl} tuples.
+local function format_prefix(code)
+  if not code or code == "" then
+    return "  ", {}
+  end
   if code == "??" then
-    return "SmartFilesUntracked"
+    return "?*", { { { 0, 2 }, "SmartFilesUntracked" } }
   end
   if code:sub(1, 1) == "b" then
-    return hl_for_letter(code:sub(2, 2))
+    local letter = code:sub(2, 2)
+    local lhl = hl_for_letter(letter)
+    local hls = { { { 0, 1 }, "SmartFilesBase" } }
+    if lhl then
+      table.insert(hls, { { 1, 2 }, lhl })
+    end
+    return "b" .. letter, hls
   end
   local x = code:sub(1, 1)
-  if x ~= " " then
-    return hl_for_letter(x)
+  local y = code:sub(2, 2)
+  local dominant = (x ~= " " and x ~= "?") and x or y
+  if dominant == "" or dominant == " " then
+    return "  ", {}
   end
-  return hl_for_letter(code:sub(2, 2))
+  local marker = (y ~= " " and y ~= "?") and "*" or " "
+  local dhl = hl_for_letter(dominant)
+  local hls = {}
+  if dhl then
+    table.insert(hls, { { 0, 1 }, dhl })
+  end
+  if marker == "*" then
+    table.insert(hls, { { 1, 2 }, "SmartFilesUnstaged" })
+  end
+  return dominant .. marker, hls
 end
+
+local function relpath(abs, base)
+  abs = vim.fn.fnamemodify(abs, ":p")
+  base = vim.fn.fnamemodify(base, ":p")
+  if base:sub(-1) ~= "/" then
+    base = base .. "/"
+  end
+  if abs:sub(1, #base) == base then
+    return abs:sub(#base + 1)
+  end
+  return abs
+end
+
+-- ===================== git status / counts =====================
 
 function M._git_changes(root, base)
   local codes = {}
@@ -190,6 +225,42 @@ function M._merge_results(codes, all_files)
   return results
 end
 
+-- ===================== codes cache (per-cwd, short TTL) =====================
+
+local cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = nil, time = 0 }
+
+local function ms_now()
+  return vim.loop.hrtime() / 1e6
+end
+
+local function refresh_codes(cwd, force)
+  cwd = cwd or vim.fn.getcwd()
+  local now = ms_now()
+  if not force and cache.cwd == cwd and (now - cache.time) < 500 then
+    return cache.codes, cache.counts, cache.base, cache.root
+  end
+  local root = git_root_at(cwd)
+  if not root then
+    cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = cwd, time = now }
+    return cache.codes, cache.counts, cache.base, cache.root
+  end
+  local base = review_base.get(root)
+  local raw_codes, counts = M._git_changes(root, base)
+  local codes = {}
+  for p, c in pairs(raw_codes) do
+    local abs = root .. "/" .. p
+    codes[relpath(abs, cwd)] = c
+  end
+  cache = { codes = codes, counts = counts, base = base, root = root, cwd = cwd, time = now }
+  return codes, counts, base, root
+end
+
+function M._refresh(cwd, force)
+  return refresh_codes(cwd, force)
+end
+
+-- ===================== highlights & legend =====================
+
 local function set_legend_highlights()
   vim.api.nvim_set_hl(0, "SmartFilesAdded", { fg = "#6cc070", bold = true, default = true })
   vim.api.nvim_set_hl(0, "SmartFilesUntracked", { fg = "#c08850", bold = true, default = true })
@@ -197,6 +268,7 @@ local function set_legend_highlights()
   vim.api.nvim_set_hl(0, "SmartFilesDeleted", { fg = "#9a9a9a", bold = true, default = true })
   vim.api.nvim_set_hl(0, "SmartFilesRenamed", { fg = "#4cb0a0", bold = true, default = true })
   vim.api.nvim_set_hl(0, "SmartFilesBase", { fg = "#b58fd4", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesUnstaged", { fg = "#888888", default = true })
   vim.api.nvim_set_hl(0, "SmartFilesLegend", { fg = "#888888", default = true })
   vim.api.nvim_set_hl(0, "SmartFilesLegendCount", { fg = "#cccccc", bold = true, default = true })
 end
@@ -214,7 +286,7 @@ local function close_legend()
 end
 
 local function append_segment(text, ranges, seg, separator)
-  if separator and #text > 1 then
+  if separator and #text > 0 then
     text = text .. separator
   end
   if seg.icon and seg.icon ~= "" then
@@ -239,24 +311,64 @@ local function append_segment(text, ranges, seg, separator)
   return text
 end
 
-local function open_legend(counts, base)
+local function render_segments(segs, separator)
+  local text, ranges = "", {}
+  for i, seg in ipairs(segs) do
+    text = append_segment(text, ranges, seg, i > 1 and separator or nil)
+  end
+  return text, ranges
+end
+
+local function fit_line(text, ranges, width)
+  local w = vim.api.nvim_strwidth(text)
+  if w < width then
+    local pad = math.floor((width - w) / 2)
+    if pad > 0 then
+      text = string.rep(" ", pad) .. text
+      for _, r in ipairs(ranges) do
+        r[2] = r[2] + pad
+        r[3] = r[3] + pad
+      end
+    end
+    local extra = width - vim.api.nvim_strwidth(text)
+    if extra > 0 then
+      text = text .. string.rep(" ", extra)
+    end
+  end
+  return text, ranges
+end
+
+local function open_legend(prompt_bufnr, counts, base)
   close_legend()
   set_legend_highlights()
+  if not counts then
+    return
+  end
+
+  local ok, action_state = pcall(require, "telescope.actions.state")
+  if not ok then
+    return
+  end
+  local picker = action_state.get_current_picker(prompt_bufnr)
+  local results_win = picker and picker.results_win
+  if not results_win or not vim.api.nvim_win_is_valid(results_win) then
+    return
+  end
 
   local type_segments = {
     { icon = "A", icon_hl = "SmartFilesAdded", count = counts.added, label = "added" },
     { icon = "M", icon_hl = "SmartFilesModified", count = counts.modified, label = "modified" },
     { icon = "D", icon_hl = "SmartFilesDeleted", count = counts.deleted, label = "deleted" },
     { icon = "R", icon_hl = "SmartFilesRenamed", count = counts.renamed, label = "renamed" },
-    { icon = "??", icon_hl = "SmartFilesUntracked", count = counts.untracked, label = "untracked" },
+    { icon = "?*", icon_hl = "SmartFilesUntracked", count = counts.untracked, label = "untracked" },
   }
   local scope_segments = {
-    { icon = "X ", icon_hl = "SmartFilesLegend", count = counts.staged, label = "staged" },
-    { icon = " X", icon_hl = "SmartFilesLegend", count = counts.unstaged, label = "unstaged" },
+    { count = counts.staged, label = "staged" },
+    { icon = "*", icon_hl = "SmartFilesUnstaged", count = counts.unstaged, label = "unstaged" },
   }
   if base then
     table.insert(scope_segments, {
-      icon = "bX",
+      icon = "b",
       icon_hl = "SmartFilesBase",
       count = counts.committed,
       label = "vs " .. base,
@@ -278,23 +390,40 @@ local function open_legend(counts, base)
     return
   end
 
-  local lines, ranges_by_line = {}, {}
-  local function push(segs)
-    if #segs == 0 then
-      return
-    end
-    local text, ranges = " ", {}
-    for i, seg in ipairs(segs) do
-      text = append_segment(text, ranges, seg, i > 1 and "   " or nil)
-    end
-    text = text .. " "
-    table.insert(lines, text)
-    table.insert(ranges_by_line, ranges)
-  end
-  push(types)
-  push(scopes)
+  local pos = vim.api.nvim_win_get_position(results_win)
+  local width = vim.api.nvim_win_get_width(results_win)
+  local height = vim.api.nvim_win_get_height(results_win)
 
-  if #lines == 0 then
+  -- Try single-line first; fall back to two lines if it overflows.
+  local lines, ranges_by_line = {}, {}
+  local all = {}
+  for _, t in ipairs(types) do
+    table.insert(all, t)
+  end
+  for _, s in ipairs(scopes) do
+    table.insert(all, s)
+  end
+  local combo_text, combo_ranges = render_segments(all, "    ")
+  if vim.api.nvim_strwidth(combo_text) <= width then
+    combo_text, combo_ranges = fit_line(combo_text, combo_ranges, width)
+    table.insert(lines, combo_text)
+    table.insert(ranges_by_line, combo_ranges)
+  else
+    if #types > 0 then
+      local t, r = render_segments(types, "   ")
+      t, r = fit_line(t, r, width)
+      table.insert(lines, t)
+      table.insert(ranges_by_line, r)
+    end
+    if #scopes > 0 then
+      local t, r = render_segments(scopes, "   ")
+      t, r = fit_line(t, r, width)
+      table.insert(lines, t)
+      table.insert(ranges_by_line, r)
+    end
+  end
+
+  if #lines == 0 or #lines > height then
     return
   end
 
@@ -307,28 +436,22 @@ local function open_legend(counts, base)
     end
   end
 
-  local width = 0
-  for _, t in ipairs(lines) do
-    local w = vim.api.nvim_strwidth(t)
-    if w > width then
-      width = w
-    end
-  end
   legend_win = vim.api.nvim_open_win(legend_buf, false, {
     relative = "editor",
-    row = vim.o.lines - #lines - 3,
-    col = math.floor((vim.o.columns - width - 2) / 2),
+    row = pos[1] + height - #lines,
+    col = pos[2],
     width = width,
     height = #lines,
     style = "minimal",
-    border = "rounded",
     focusable = false,
     noautocmd = true,
     zindex = 250,
   })
 end
 
-function M.smart_files()
+-- ===================== picker core =====================
+
+local function open_picker(opts)
   local pickers = require("telescope.pickers")
   local finders = require("telescope.finders")
   local conf = require("telescope.config").values
@@ -336,67 +459,19 @@ function M.smart_files()
 
   set_legend_highlights()
 
-  local root = git_root()
-  local base = root and review_base.get(root) or nil
-  local codes, counts = {}, {
-    added = 0,
-    modified = 0,
-    deleted = 0,
-    renamed = 0,
-    untracked = 0,
-    staged = 0,
-    unstaged = 0,
-    committed = 0,
-  }
-  if root then
-    codes, counts = M._git_changes(root, base)
-  end
-
-  local all = M._list_all()
-  if vim.v.shell_error ~= 0 then
-    all = {}
-  end
-  local results = M._merge_results(codes, all)
-
-  local entry_maker = make_entry.gen_from_file({ cwd = vim.fn.getcwd() })
-
   pickers
     .new({}, {
-      prompt_title = base and ("Files (base: " .. base .. ")") or "Files",
+      prompt_title = opts.title,
       finder = finders.new_table({
-        results = results,
-        entry_maker = function(line)
-          local e = entry_maker(line)
-          local code = codes[line]
-          local prefix = (code or "  ") .. " "
-          local prefix_len = #prefix
-          local code_hl = code and hl_for_code(code) or nil
-          local base_display = e.display
-          e.display = function(entry)
-            local d, base_hl
-            if type(base_display) == "function" then
-              d, base_hl = base_display(entry)
-            else
-              d = base_display or entry.value
-            end
-            local text = prefix .. d
-            local hls = {}
-            if code and code_hl then
-              table.insert(hls, { { 0, #code }, code_hl })
-            end
-            if base_hl then
-              for _, h in ipairs(base_hl) do
-                table.insert(hls, { { h[1][1] + prefix_len, h[1][2] + prefix_len }, h[2] })
-              end
-            end
-            return text, hls
-          end
-          return e
-        end,
+        results = opts.results,
+        entry_maker = make_entry.gen_from_file({ cwd = opts.cwd }),
       }),
       sorter = conf.file_sorter({}),
       previewer = conf.file_previewer({}),
       attach_mappings = function(prompt_bufnr, _)
+        vim.schedule(function()
+          open_legend(prompt_bufnr, opts.counts, opts.base)
+        end)
         vim.api.nvim_create_autocmd({ "BufWipeout", "BufLeave" }, {
           buffer = prompt_bufnr,
           once = true,
@@ -406,8 +481,106 @@ function M.smart_files()
       end,
     })
     :find()
+end
 
-  open_legend(counts, base)
+function M.smart_files()
+  local cwd = vim.fn.getcwd()
+  local codes, counts, base = refresh_codes(cwd, true)
+  local all = M._list_all()
+  if vim.v.shell_error ~= 0 then
+    all = {}
+  end
+  local results = M._merge_results(codes, all)
+  open_picker({
+    title = base and ("Files (base: " .. base .. ")") or "Files",
+    results = results,
+    cwd = cwd,
+    counts = counts,
+    base = base,
+  })
+end
+
+function M.smart_files_changed()
+  local cwd = vim.fn.getcwd()
+  local codes, counts, base, root = refresh_codes(cwd, true)
+  if not root then
+    vim.notify("Not a git repo", vim.log.levels.WARN)
+    return
+  end
+  local results = {}
+  for f in pairs(codes) do
+    table.insert(results, f)
+  end
+  table.sort(results)
+  if #results == 0 then
+    vim.notify("No changes vs " .. (base or "index"), vim.log.levels.INFO)
+    return
+  end
+  open_picker({
+    title = base and ("Changed files (base: " .. base .. ")") or "Changed files",
+    results = results,
+    cwd = cwd,
+    counts = counts,
+    base = base,
+  })
+end
+
+-- ===================== telescope integration =====================
+
+local patched = false
+
+function M.setup()
+  if patched then
+    return
+  end
+  set_legend_highlights()
+  local ok, make_entry = pcall(require, "telescope.make_entry")
+  if not ok then
+    return
+  end
+  local original = make_entry.gen_from_file
+  make_entry.gen_from_file = function(opts)
+    opts = opts or {}
+    local cwd = opts.cwd or vim.fn.getcwd()
+    local codes = refresh_codes(cwd)
+    local base_maker = original(opts)
+    return function(line)
+      local e = base_maker(line)
+      if not e then
+        return nil
+      end
+      local path = e.value
+      if type(path) == "string" then
+        path = path:gsub("^%./", "")
+      end
+      local code = codes[path]
+      local prefix_text, prefix_hls = format_prefix(code)
+      local pad = prefix_text .. " "
+      local plen = #pad
+      local base_display = e.display
+      e.display = function(entry)
+        local d, base_hl
+        if type(base_display) == "function" then
+          d, base_hl = base_display(entry)
+        else
+          d = base_display or entry.value
+        end
+        local text = pad .. (d or "")
+        local hls = {}
+        for _, ph in ipairs(prefix_hls) do
+          table.insert(hls, ph)
+        end
+        if base_hl then
+          for _, h in ipairs(base_hl) do
+            table.insert(hls, { { h[1][1] + plen, h[1][2] + plen }, h[2] })
+          end
+        end
+        return text, hls
+      end
+      return e
+    end
+  end
+  patched = true
 end
 
 return M
