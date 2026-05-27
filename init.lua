@@ -23,6 +23,7 @@ vim.filetype.add({ extension = { mdx = "mdx" } })
 
 require("config.options")
 require("config.lsp_refs").setup()
+require("config.statusline").setup()
 
 vim.keymap.set("n", "<leader>k?", function()
   vim.cmd.edit(vim.fn.stdpath("config") .. "/docs/keybindings.md")
