@@ -84,6 +84,32 @@ return {
 
     local ns = vim.api.nvim_create_namespace("gs_custom")
 
+    -- When a review base is set but the file doesn't exist in that ref (added
+    -- in the current branch), gitsigns has nothing to diff against and emits
+    -- zero hunks — so numhl/linehl never show, leaving the buffer looking
+    -- pristine even though it's entirely new work. Detect that case and paint
+    -- the whole buffer with the "add" highlight.
+    local function file_new_vs_base(bufnr)
+      local fname = vim.api.nvim_buf_get_name(bufnr)
+      if fname == "" then
+        return false
+      end
+      local root = review_base.git_root(vim.fn.fnamemodify(fname, ":h"))
+      if not root then
+        return false
+      end
+      local ref = review_base.get(root)
+      if not ref then
+        return false
+      end
+      local relpath = fname:sub(#root + 2)
+      if relpath == "" then
+        return false
+      end
+      vim.fn.system({ "git", "-C", root, "cat-file", "-e", ref .. ":" .. relpath })
+      return vim.v.shell_error ~= 0
+    end
+
     local function mark_hunks(bufnr)
       if not vim.api.nvim_buf_is_valid(bufnr) then
         return
@@ -95,6 +121,22 @@ return {
       end
       local hunks = gs.get_hunks(bufnr) or {}
       local line_count = vim.api.nvim_buf_line_count(bufnr)
+
+      local new_vs_base = #hunks == 0 and file_new_vs_base(bufnr)
+      vim.b[bufnr].gs_new_vs_base = new_vs_base
+      if new_vs_base then
+        for row = 0, line_count - 1 do
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, 0, {
+            end_row = row + 1,
+            end_col = 0,
+            hl_group = "GitSignsAddLn",
+            number_hl_group = "GitSignsAddNr",
+            hl_eol = true,
+            priority = 1,
+          })
+        end
+        return
+      end
 
       local function line_bg(row, hl)
         if row < 0 or row >= line_count then
@@ -171,6 +213,9 @@ return {
       local bufnr = vim.api.nvim_get_current_buf()
       local hunks = gs.get_hunks(bufnr)
       if not hunks or #hunks == 0 then
+        if vim.b[bufnr].gs_new_vs_base then
+          return " [new vs base] "
+        end
         return ""
       end
       local cursor = vim.api.nvim_win_get_cursor(0)[1]
