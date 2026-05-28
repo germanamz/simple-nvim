@@ -1,0 +1,40 @@
+-- File-tree explorer with reveal-to-current-file. netrw is left intact
+-- (see init.lua <leader>E) — nvim-tree neither disables nor hijacks it.
+return {
+  "nvim-tree/nvim-tree.lua",
+  dependencies = { "nvim-tree/nvim-web-devicons" },
+  cmd = { "NvimTreeToggle", "NvimTreeFindFile", "NvimTreeFindFileToggle" },
+  keys = {
+    {
+      "<leader>e",
+      "<cmd>NvimTreeFindFileToggle<cr>",
+      desc = "File tree (reveal current file)",
+    },
+  },
+  opts = {
+    -- Leave netrw alone; nvim-tree is opt-in via <leader>e.
+    disable_netrw = false,
+    hijack_netrw = false,
+    -- Expand the tree to highlight whatever buffer is focused.
+    update_focused_file = { enable = true },
+    view = { width = 35 },
+    filters = {
+      dotfiles = false, -- show dotfiles (toggle with H)
+      git_ignored = true, -- hide gitignored, e.g. node_modules (toggle with I)
+    },
+  },
+  config = function(_, opts)
+    require("nvim-tree").setup(opts)
+    -- Pin a one-line hint to the top of the tree window. nvim-tree sets the
+    -- buffer's filetype in a scratch window before moving it to the side
+    -- window, so a FileType hook targets the wrong window — use TreeOpen,
+    -- which fires once the real window exists.
+    local api = require("nvim-tree.api")
+    api.events.subscribe(api.events.Event.TreeOpen, function()
+      local win = require("nvim-tree.view").get_winnr()
+      if win and vim.api.nvim_win_is_valid(win) then
+        vim.api.nvim_set_option_value("winbar", "%#Comment#  g? — all mappings%*", { win = win })
+      end
+    end)
+  end,
+}

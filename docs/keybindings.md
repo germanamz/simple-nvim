@@ -49,7 +49,8 @@ Leader = `<Space>` · Local leader = `\`
 | `<Space>?`        | Telescope keymaps (searchable list of *everything*)   |
 | `<Space>K`        | which-key popup (live, grouped)                       |
 | `<Space>k?`       | Open *this* cheatsheet                                |
-| `<Space>e`        | Open netrw file tree in current window                |
+| `<Space>e`        | nvim-tree file tree (reveals current file)            |
+| `<Space>E`        | Open netrw file tree in current window                |
 | `gd`              | Go to definition (LSP)                                |
 | `K`               | Hover docs (LSP default)                              |
 | `]c` / `[c`       | Next / previous git hunk                              |
@@ -201,7 +202,15 @@ All window commands start with `<C-w>` (Ctrl-W). `splitbelow` and
 Tip: `<Space>fb` is faster than `:ls` and lets you `<C-d>` in insert mode to
 delete the buffer under the cursor.
 
-`<Space>e` opens netrw (`:Explore`) in the current window using the tree
+`<Space>e` opens nvim-tree and reveals the current file, expanding the whole
+ancestry from the project root down to it (and tracking the focused buffer as
+you switch). Press `<Space>e` again to close it. Inside the tree: `<CR>` opens
+a file / toggles a folder, `a` creates a file (type `foo/bar.lua` to make the
+intermediate dirs too; trailing `/` makes a directory), `d` deletes, `r`
+renames, `H` toggles dotfiles, `I` toggles gitignored files, `g?` shows all
+mappings.
+
+`<Space>E` opens netrw (`:Explore`) in the current window using the tree
 listing style (`g:netrw_liststyle = 3`) with the banner hidden. The previous
 buffer stays loaded — `<C-^>` or `:b#` returns to it. Inside netrw: `<CR>` on
 a folder expands/collapses it in place, `<CR>` on a file opens it, `-` goes
