@@ -48,21 +48,29 @@ describe("config.telescope_smart", function()
   end)
 
   describe("_git_changes", function()
-    it("classifies staged, modified, untracked with empty committed against HEAD base", function()
+    it("returns porcelain codes and counts for staged, modified, untracked", function()
       local repo = git_fixture.repo({
         commits = { { files = { ["a.lua"] = "x", ["b.lua"] = "y" } } },
         modified = { ["a.lua"] = "x2" },
         staged = { ["s.lua"] = "..." },
         untracked = { ["u.lua"] = "..." },
       })
-      local staged, modified, untracked, committed = M._git_changes(repo, "main")
-      assert.are.same({ ["s.lua"] = true }, staged)
-      assert.are.same({ ["a.lua"] = true }, modified)
-      assert.are.same({ ["u.lua"] = true }, untracked)
-      assert.are.same({}, committed)
+      local codes, counts = M._git_changes(repo, "main")
+      assert.are.equal(" M", codes["a.lua"])
+      assert.are.equal("A ", codes["s.lua"])
+      assert.are.equal("??", codes["u.lua"])
+      assert.is_nil(codes["b.lua"])
+
+      assert.are.equal(1, counts.modified)
+      assert.are.equal(1, counts.added)
+      assert.are.equal(1, counts.untracked)
+      assert.are.equal(1, counts.staged)
+      -- worktree modification + untracked both count as unstaged
+      assert.are.equal(2, counts.unstaged)
+      assert.are.equal(0, counts.committed)
     end)
 
-    it("captures committed files on a feature branch ahead of base", function()
+    it("tags base-only committed files with a 'b' code and counts them", function()
       local repo = git_fixture.repo({
         commits = {
           { files = { ["a.lua"] = "x", ["b.lua"] = "y" }, message = "init" },
@@ -77,25 +85,101 @@ describe("config.telescope_smart", function()
       write_file(repo, "d.lua", "ddd")
       git_commit(repo, "add d")
 
-      local _, _, _, committed = M._git_changes(repo, "main")
-      assert.are.same({ ["c.lua"] = true, ["d.lua"] = true }, committed)
+      local codes, counts = M._git_changes(repo, "main")
+      assert.are.equal("bA", codes["c.lua"])
+      assert.are.equal("bA", codes["d.lua"])
+      assert.are.equal(2, counts.committed)
+      assert.are.equal(2, counts.base.added)
+    end)
+
+    it("does not consult the base when it does not resolve", function()
+      local repo = git_fixture.repo({
+        commits = { { files = { ["a.lua"] = "x" } } },
+        untracked = { ["u.lua"] = "..." },
+      })
+      local codes, counts = M._git_changes(repo, "no-such-ref")
+      assert.are.equal("??", codes["u.lua"])
+      assert.are.equal(0, counts.committed)
     end)
   end)
 
   describe("_merge_results", function()
-    it(
-      "dedupes across categories and orders staged, modified, untracked, committed, others",
-      function()
-        local staged = { ["a.lua"] = true }
-        local modified = { ["b.lua"] = true }
-        local untracked = { ["c.lua"] = true }
-        local committed = { ["a.lua"] = true, ["d.lua"] = true }
-        local all_files = { "./b.lua", "e.lua", "a.lua" }
+    it("lists code-tagged files first then dedupes the full file list", function()
+      local codes = { ["a.lua"] = " M", ["d.lua"] = "bA" }
+      local all_files = { "./b.lua", "e.lua", "a.lua" }
 
-        local result = M._merge_results(staged, modified, untracked, committed, all_files)
-        assert.are.same({ "a.lua", "b.lua", "c.lua", "d.lua", "e.lua" }, result)
-      end
-    )
+      local result = M._merge_results(codes, all_files)
+      table.sort(result)
+      assert.are.same({ "a.lua", "b.lua", "d.lua", "e.lua" }, result)
+    end)
+
+    it("strips a leading ./ from listed files before deduping", function()
+      local codes = { ["a.lua"] = " M" }
+      local result = M._merge_results(codes, { "./a.lua" })
+      assert.are.same({ "a.lua" }, result)
+    end)
+  end)
+
+  describe("_parse_status_path", function()
+    it("returns a plain path unchanged", function()
+      assert.are.equal("a.lua", M._parse_status_path("a.lua"))
+    end)
+
+    it("returns the destination of a rename", function()
+      assert.are.equal("new.lua", M._parse_status_path("old.lua -> new.lua"))
+    end)
+
+    it("unquotes a path containing spaces", function()
+      assert.are.equal("a b.lua", M._parse_status_path('"a b.lua"'))
+    end)
+  end)
+
+  describe("_format_prefix", function()
+    local function text(code)
+      local t = M._format_prefix(code)
+      return t
+    end
+
+    it("renders nothing for nil or empty codes", function()
+      assert.are.equal("  ", text(nil))
+      assert.are.equal("  ", text(""))
+      assert.are.equal("  ", text("  "))
+    end)
+
+    it("renders untracked as ?* with one highlight", function()
+      local t, hls = M._format_prefix("??")
+      assert.are.equal("?*", t)
+      assert.are.same({ { { 0, 2 }, "SmartFilesUntracked" } }, hls)
+    end)
+
+    it("renders a staged add without an unstaged marker", function()
+      local t, hls = M._format_prefix("A ")
+      assert.are.equal("A ", t)
+      assert.are.same({ { { 0, 1 }, "SmartFilesAdded" } }, hls)
+    end)
+
+    it("renders a worktree modification with the unstaged marker", function()
+      local t, hls = M._format_prefix(" M")
+      assert.are.equal("M*", t)
+      assert.are.same({
+        { { 0, 1 }, "SmartFilesModified" },
+        { { 1, 2 }, "SmartFilesUnstaged" },
+      }, hls)
+    end)
+
+    it("prefers the staged (X) letter as dominant when both are set", function()
+      local t = M._format_prefix("MM")
+      assert.are.equal("M*", t)
+    end)
+
+    it("renders a base-only code with the base highlight on the leading b", function()
+      local t, hls = M._format_prefix("bD")
+      assert.are.equal("bD", t)
+      assert.are.same({
+        { { 0, 1 }, "SmartFilesBase" },
+        { { 1, 2 }, "SmartFilesDeleted" },
+      }, hls)
+    end)
   end)
 
   describe("_list_all fallback", function()

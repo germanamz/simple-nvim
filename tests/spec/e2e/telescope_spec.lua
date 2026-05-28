@@ -96,7 +96,7 @@ describe("e2e: telescope", function()
   end)
 
   describe("<leader><space> (smart_files)", function()
-    it("orders results: staged, modified, untracked, committed, others", function()
+    it("prefixes each file with its git-status code (worktree + vs base)", function()
       local repo = git_fixture.repo({
         commits = {
           {
@@ -142,48 +142,34 @@ describe("e2e: telescope", function()
 
       local lines = non_empty_lines()
 
-      local function find_index(name)
-        for i, line in ipairs(lines) do
+      local function line_for(name)
+        for _, line in ipairs(lines) do
           if line:find(name, 1, true) then
-            return i
+            return line
           end
         end
         return nil
       end
 
-      local staged_idx = find_index("staged.lua")
-      local modified_idx = find_index("modified.lua")
-      local untracked_idx = find_index("untracked.lua")
-      local committed_idx = find_index("committed.lua")
-      local base_idx = find_index("base.lua")
+      -- Each row is rendered as: <2-cell telescope gutter><2-char prefix>...
+      -- The gutter is the selection caret ("▶ ") on the active row and two
+      -- spaces otherwise. Strip it, then the prefix is the leading two chars.
+      local function assert_prefix(name, prefix)
+        local line = line_for(name)
+        assert.is_not_nil(line, name .. " missing from results: " .. vim.inspect(lines))
+        local body = line:gsub("^▶ ", ""):gsub("^  ", "")
+        assert.are.equal(
+          prefix,
+          body:sub(1, 2),
+          name .. " expected prefix '" .. prefix .. "', got line: " .. vim.inspect(line)
+        )
+      end
 
-      assert.is_not_nil(staged_idx, "staged.lua missing from results: " .. vim.inspect(lines))
-      assert.is_not_nil(modified_idx, "modified.lua missing from results: " .. vim.inspect(lines))
-      assert.is_not_nil(untracked_idx, "untracked.lua missing from results: " .. vim.inspect(lines))
-      assert.is_not_nil(committed_idx, "committed.lua missing from results: " .. vim.inspect(lines))
-      assert.is_not_nil(base_idx, "base.lua missing from results: " .. vim.inspect(lines))
-
-      assert.is_true(
-        staged_idx < modified_idx,
-        "expected staged before modified: " .. vim.inspect(lines)
-      )
-      assert.is_true(
-        modified_idx < untracked_idx,
-        "expected modified before untracked: " .. vim.inspect(lines)
-      )
-      assert.is_true(
-        untracked_idx < committed_idx,
-        "expected untracked before committed: " .. vim.inspect(lines)
-      )
-      assert.is_true(
-        committed_idx < base_idx,
-        "expected committed before others: " .. vim.inspect(lines)
-      )
-
-      assert.is_truthy(lines[staged_idx]:find("◆", 1, true), "staged row missing ◆ icon")
-      assert.is_truthy(lines[modified_idx]:find("●", 1, true), "modified row missing ● icon")
-      assert.is_truthy(lines[untracked_idx]:find("○", 1, true), "untracked row missing ○ icon")
-      assert.is_truthy(lines[committed_idx]:find("◈", 1, true), "committed row missing ◈ icon")
+      assert_prefix("staged.lua", "A ") -- staged add
+      assert_prefix("modified.lua", "M*") -- unstaged worktree modification
+      assert_prefix("untracked.lua", "?*") -- untracked
+      assert_prefix("committed.lua", "bA") -- added in a commit since base
+      assert_prefix("base.lua", "  ") -- unchanged, no status
 
       close_picker()
       require("config.review_base").clear(canonical)

@@ -122,6 +122,9 @@ end
 
 -- ===================== git status / counts =====================
 
+M._parse_status_path = parse_status_path
+M._format_prefix = format_prefix
+
 function M._git_changes(root, base)
   local codes = {}
   local counts = {
@@ -391,9 +394,21 @@ local function open_legend(prompt_bufnr, counts, base)
     local b = counts.base or {}
     base_segments = {
       vim.tbl_extend("force", b_icon("A", "SmartFilesAdded"), { count = b.added, label = "added" }),
-      vim.tbl_extend("force", b_icon("M", "SmartFilesModified"), { count = b.modified, label = "modified" }),
-      vim.tbl_extend("force", b_icon("D", "SmartFilesDeleted"), { count = b.deleted, label = "deleted" }),
-      vim.tbl_extend("force", b_icon("R", "SmartFilesRenamed"), { count = b.renamed, label = "renamed" }),
+      vim.tbl_extend(
+        "force",
+        b_icon("M", "SmartFilesModified"),
+        { count = b.modified, label = "modified" }
+      ),
+      vim.tbl_extend(
+        "force",
+        b_icon("D", "SmartFilesDeleted"),
+        { count = b.deleted, label = "deleted" }
+      ),
+      vim.tbl_extend(
+        "force",
+        b_icon("R", "SmartFilesRenamed"),
+        { count = b.renamed, label = "renamed" }
+      ),
     }
   end
 
