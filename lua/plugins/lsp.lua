@@ -114,7 +114,7 @@ return {
   {
     "mason-org/mason-lspconfig.nvim",
     lazy = false,
-    dependencies = { "mason-org/mason.nvim", "neovim/nvim-lspconfig" },
+    dependencies = { "mason-org/mason.nvim", "neovim/nvim-lspconfig", "saghen/blink.cmp" },
     config = function()
       -- Tool installs are owned by mason-tool-installer (reads
       -- mason-tool-versions.lock); mason-lspconfig is kept only for
@@ -124,7 +124,12 @@ return {
         automatic_installation = false,
       })
 
+      -- Advertise blink.cmp's completion capabilities (snippet support,
+      -- additionalTextEdits for auto-imports, documentation resolve) to every
+      -- server. Listed as a dependency above so blink is loaded by now.
+      local blink = require("blink.cmp")
       for name, cfg in pairs(servers) do
+        cfg.capabilities = blink.get_lsp_capabilities(cfg.capabilities)
         vim.lsp.config(name, cfg)
         vim.lsp.enable(name)
       end
