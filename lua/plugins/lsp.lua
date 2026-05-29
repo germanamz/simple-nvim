@@ -74,6 +74,18 @@ local function ts_goto_source_definition(client, bufnr)
   end, bufnr)
 end
 
+-- Show the diagnostic under the cursor in a floating window after the cursor
+-- sits still for `updatetime` (250ms, set in options.lua). Virtual text is off
+-- by default, so this is how full messages surface inline. `focus = false`
+-- keeps the cursor in the buffer; `scope = "cursor"` limits the float to the
+-- diagnostic on the exact cursor position, so when a line has several you can
+-- move the cursor across each token to read them one at a time.
+vim.api.nvim_create_autocmd("CursorHold", {
+  callback = function()
+    vim.diagnostic.open_float(nil, { focus = false, scope = "cursor" })
+  end,
+})
+
 vim.api.nvim_create_autocmd("LspAttach", {
   callback = function(args)
     local client = vim.lsp.get_client_by_id(args.data.client_id)
