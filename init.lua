@@ -1,6 +1,10 @@
 -- Bootstrap lazy.nvim
 local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not (vim.uv or vim.loop).fs_stat(lazypath) then
+-- True on a fresh machine where lazy.nvim is not yet present. lazy.nvim
+-- auto-installs missing plugins at branch HEAD (it ignores lazy-lock.json on
+-- first install), so we restore to the locked commits afterwards.
+local fresh_install = not (vim.uv or vim.loop).fs_stat(lazypath)
+if fresh_install then
   local lazyrepo = "https://github.com/folke/lazy.nvim.git"
   local out =
     vim.fn.system({ "git", "clone", "--filter=blob:none", "--branch=stable", lazyrepo, lazypath })
@@ -35,4 +39,10 @@ vim.keymap.set("n", "<leader>E", "<cmd>Explore<cr>", { desc = "Open file tree (n
 
 if vim.env.NVIM_BOOTSTRAP ~= "0" then
   require("lazy").setup("plugins")
+
+  -- On a fresh machine, snap every plugin to the commit pinned in
+  -- lazy-lock.json so all computers load identical versions.
+  if fresh_install then
+    require("lazy").restore({ wait = true })
+  end
 end

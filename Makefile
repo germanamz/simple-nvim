@@ -1,9 +1,10 @@
 .DEFAULT_GOAL := help
-.PHONY: help warm update lint fmt test test-unit test-smoke test-e2e test-lsp
+.PHONY: help sync warm update lint fmt test test-unit test-smoke test-e2e test-lsp
 
 help:
 	@echo "Targets:"
-	@echo "  warm       Populate the deterministic plugin cache (run once after clone)"
+	@echo "  sync       Restore plugins, parsers, and mason tools to pinned versions"
+	@echo "  warm       Alias for sync (run once after clone)"
 	@echo "  update     Bump all pin files (lazy-lock, mason-tool-versions, parser-revisions)"
 	@echo "  lint       Run stylua --check"
 	@echo "  fmt        Run stylua --write"
@@ -13,7 +14,10 @@ help:
 	@echo "  test-e2e   Run end-to-end tests (full init)"
 	@echo "  test-lsp   Run slow LSP end-to-end tests"
 
-warm:
+# Make this machine match the committed pins: plugins (lazy-lock.json),
+# treesitter parsers (parser-revisions.lock), and mason tools
+# (mason-tool-versions.lock). Idempotent — safe to re-run.
+sync warm:
 	@./scripts/warm-cache.sh
 
 update:
