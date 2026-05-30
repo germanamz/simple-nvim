@@ -10,9 +10,9 @@
 --     conform.format() falls back to LSP for filetypes without a conform
 --     entry.
 --   • <leader>F formats the current buffer (or visual selection) on demand.
---   • No format-on-save: this matches the explicit-trigger workflow (<leader>w
---     for markdown, <leader>F here). Add `format_on_save = { ... }` if you
---     change your mind.
+--   • Format-on-save: BufWritePre runs conform synchronously (500ms cap, then
+--     the write proceeds anyway). lsp_format = "fallback" means filetypes
+--     without a conform entry are formatted by their LSP server instead.
 return {
   "stevearc/conform.nvim",
   event = { "BufReadPre", "BufNewFile" },
@@ -23,6 +23,7 @@ return {
       formatters_by_ft = formatters.by_ft,
       default_format_opts = { lsp_format = "fallback" },
       notify_on_error = true,
+      format_on_save = { timeout_ms = 500, lsp_format = "fallback" },
     })
 
     vim.o.formatexpr = "v:lua.require'conform'.formatexpr()"
