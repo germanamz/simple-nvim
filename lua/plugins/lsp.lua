@@ -104,6 +104,17 @@ vim.api.nvim_create_autocmd("LspAttach", {
     local lsp_refs = require("config.lsp_refs")
     map("]r", lsp_refs.next, "Next LSP reference")
     map("[r", lsp_refs.prev, "Prev LSP reference")
+
+    -- Restart the LSP client(s) on this buffer and re-attach. Handy after a
+    -- file rename confuses the server (e.g. ts_ls "Already included file name
+    -- ... only in casing"): stopping drops the stale in-memory project, and
+    -- `:edit` reloads the buffer so vim.lsp.enable spins up a fresh client.
+    map("<leader>lr", function()
+      for _, c in ipairs(vim.lsp.get_clients({ bufnr = args.buf })) do
+        c:stop()
+      end
+      vim.cmd("edit")
+    end, "Restart LSP on buffer")
   end,
 })
 
@@ -139,9 +150,17 @@ return {
       -- Advertise blink.cmp's completion capabilities (snippet support,
       -- additionalTextEdits for auto-imports, documentation resolve) to every
       -- server. Listed as a dependency above so blink is loaded by now.
+      --
+      -- Layered on top: nvim-lsp-file-operations' capabilities, so every
+      -- server is told it supports workspace/willRenameFiles from client init.
+      -- This is just a static table (no nvim-tree load); the event subscription
+      -- that actually fires the requests lives in nvim-tree's config.
       local blink = require("blink.cmp")
+      local file_ops_caps = require("lsp-file-operations").default_capabilities()
       for name, cfg in pairs(servers) do
-        cfg.capabilities = blink.get_lsp_capabilities(cfg.capabilities)
+        cfg.capabilities = blink.get_lsp_capabilities(
+          vim.tbl_deep_extend("force", file_ops_caps, cfg.capabilities or {})
+        )
         vim.lsp.config(name, cfg)
         vim.lsp.enable(name)
       end
