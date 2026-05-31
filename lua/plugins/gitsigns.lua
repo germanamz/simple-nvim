@@ -47,6 +47,9 @@ return {
         map("n", "<leader>hd", gs.diffthis, "Diff against index")
         map("n", "<leader>ht", gs.toggle_deleted, "Toggle deleted lines inline")
         map("n", "<leader>hi", gs.preview_hunk_inline, "Inline preview hunk")
+        map("n", "<leader>hh", function()
+          _G.gitsigns_toggle_hunks()
+        end, "Toggle hunk highlights")
       end,
     }
   end,
@@ -83,6 +86,11 @@ return {
     vim.api.nvim_create_autocmd("ColorScheme", { callback = paint })
 
     local ns = vim.api.nvim_create_namespace("gs_custom")
+
+    -- When hunks are toggled off (<leader>hh) we hide the line backgrounds and
+    -- inline word-diff but keep gitsigns' numhl (colored line numbers) as a
+    -- minimal "changed line" marker. mark_hunks honors this flag.
+    local hunks_visible = true
 
     -- When a review base is set but the file doesn't exist in that ref (added
     -- in the current branch), gitsigns has nothing to diff against and emits
@@ -129,12 +137,18 @@ return {
           pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, 0, {
             end_row = row + 1,
             end_col = 0,
-            hl_group = "GitSignsAddLn",
+            hl_group = hunks_visible and "GitSignsAddLn" or nil,
             number_hl_group = "GitSignsAddNr",
-            hl_eol = true,
+            hl_eol = hunks_visible or nil,
             priority = 1,
           })
         end
+        return
+      end
+
+      -- Hunks toggled off: namespace is cleared above, colored line numbers
+      -- come from gitsigns' numhl, so there's nothing else to paint.
+      if not hunks_visible then
         return
       end
 
@@ -238,15 +252,49 @@ return {
       return string.format(" +%d ~%d -%d ↑%d ↓%d ", add, change, delete, above, below)
     end
 
+    -- Statusline counts (gitsigns_hunks_status) read gs.get_hunks directly and
+    -- stay live regardless of visibility. The toggle only affects the in-buffer
+    -- line backgrounds + word-diff; colored line numbers (numhl) are left on.
+    local function repaint_all()
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_loaded(buf) then
+          mark_hunks(buf)
+        end
+      end
+    end
+
+    function _G.gitsigns_toggle_hunks()
+      hunks_visible = not hunks_visible
+      local gs = require("gitsigns")
+      -- Flipping word_diff invalidates gitsigns' hunk cache and recomputes it
+      -- asynchronously (debounced), and it does NOT fire GitSignsUpdate. So the
+      -- immediate repaint below sees zero hunks when showing — it only handles
+      -- hiding (clear) and new-vs-base. Poll until the cache comes back, then
+      -- repaint so the line backgrounds actually reappear.
+      gs.toggle_word_diff(hunks_visible)
+      repaint_all()
+      if hunks_visible then
+        local tries = 0
+        local function settle()
+          tries = tries + 1
+          local buf = vim.api.nvim_get_current_buf()
+          local h = gs.get_hunks(buf)
+          if h and #h > 0 then
+            repaint_all()
+          elseif tries < 40 then
+            vim.defer_fn(settle, 25)
+          end
+        end
+        vim.defer_fn(settle, 25)
+      end
+      vim.notify("Git hunks " .. (hunks_visible and "shown" or "hidden"))
+    end
+
     vim.api.nvim_create_autocmd("User", {
       pattern = "GitSignsUpdate",
       callback = function()
         vim.cmd("redrawstatus")
-        for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-          if vim.api.nvim_buf_is_loaded(buf) then
-            mark_hunks(buf)
-          end
-        end
+        repaint_all()
       end,
     })
   end,

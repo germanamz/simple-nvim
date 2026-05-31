@@ -33,6 +33,39 @@ local function build_modified()
   return table.concat(out, "\n") .. "\n"
 end
 
+local function custom_marks(bufnr)
+  local ns = vim.api.nvim_create_namespace("gs_custom")
+  return #vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})
+end
+
+local function open_modified_repo()
+  local repo = git_fixture.repo({
+    commits = { { files = { ["a.lua"] = build_original() }, message = "init" } },
+    modified = { ["a.lua"] = build_modified() },
+  })
+  local canonical = vim.uv.fs_realpath(repo) or repo
+  vim.fn.chdir(canonical)
+  vim.cmd("edit " .. canonical .. "/a.lua")
+  return vim.api.nvim_get_current_buf()
+end
+
+-- Drive the global hunks_visible state to "shown" for a buffer that has hunks,
+-- regardless of where a previous test left it. Forcing a GitSignsUpdate makes
+-- the custom painter run synchronously, so the extmark count reflects the real
+-- toggle state before we decide whether to flip it.
+local function ensure_shown(bufnr)
+  wait.wait_for(function()
+    return (require("gitsigns").get_hunks(bufnr) or {})[1] ~= nil
+  end, 5000, "gitsigns produced no hunks")
+  vim.api.nvim_exec_autocmds("User", { pattern = "GitSignsUpdate", modeline = false })
+  if custom_marks(bufnr) == 0 then
+    _G.gitsigns_toggle_hunks()
+  end
+  wait.wait_for(function()
+    return custom_marks(bufnr) > 0
+  end, 3000, "hunk highlights were not shown")
+end
+
 describe("e2e: gitsigns", function()
   local root, prev_cwd
 
@@ -43,6 +76,10 @@ describe("e2e: gitsigns", function()
   end)
 
   after_each(function()
+    -- Toggling word_diff leaves gitsigns recomputing hunks/blame asynchronously
+    -- (current_line_blame has delay=0). Drain that against still-valid buffers
+    -- before wiping them, so stray debounced callbacks don't fire on a dead id.
+    vim.wait(100)
     vim.cmd("silent! %bwipeout!")
     pcall(vim.fn.chdir, prev_cwd)
     nvim_env.teardown(root)
@@ -154,5 +191,67 @@ describe("e2e: gitsigns", function()
     assert.is_true(#hunks >= 1, "expected ≥1 hunk vs HEAD~1, got " .. #hunks)
 
     require("config.review_base").clear(canonical)
+  end)
+
+  it("hides hunk highlights and restores them on toggle", function()
+    local bufnr = open_modified_repo()
+    ensure_shown(bufnr)
+
+    -- toggle OFF clears the custom line-background extmarks immediately
+    _G.gitsigns_toggle_hunks()
+    wait.wait_for(function()
+      return custom_marks(bufnr) == 0
+    end, 2000, "hunk highlights not cleared on toggle off")
+    assert.are.equal(0, custom_marks(bufnr))
+
+    -- toggle ON: backgrounds reappear once gitsigns' hunk cache recovers.
+    -- Regression: toggle_word_diff invalidates that cache and does NOT fire
+    -- GitSignsUpdate, so a naive synchronous repaint leaves this at 0 forever.
+    _G.gitsigns_toggle_hunks()
+    wait.wait_for(function()
+      return custom_marks(bufnr) > 0
+    end, 3000, "hunk highlights did not reappear on toggle on")
+    assert.is_true(custom_marks(bufnr) > 0)
+  end)
+
+  it("keeps statusline hunk counts while highlights are hidden", function()
+    local bufnr = open_modified_repo()
+    ensure_shown(bufnr)
+
+    _G.gitsigns_toggle_hunks() -- hide
+    wait.wait_for(function()
+      return custom_marks(bufnr) == 0
+    end, 2000, "hunk highlights not cleared on toggle off")
+
+    -- counts come straight from gs.get_hunks, independent of the visibility
+    -- toggle, so they stay reported even with the backgrounds hidden.
+    wait.wait_for(function()
+      return _G.gitsigns_hunks_status():find("%+%d") ~= nil
+    end, 3000, "hunk counts vanished while highlights were hidden")
+    assert.are.equal(0, custom_marks(bufnr))
+    assert.is_not_nil(_G.gitsigns_hunks_status():find("%+%d"))
+  end)
+
+  it("registers <leader>hh to toggle hunk highlights", function()
+    local bufnr = open_modified_repo()
+    -- on_attach installs the buffer-local map once gitsigns attaches
+    wait.wait_for(function()
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "n")) do
+        if m.lhs == " hh" then
+          return true
+        end
+      end
+      return false
+    end, 5000, "<leader>hh never registered")
+
+    local found
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "n")) do
+      if m.lhs == " hh" then
+        found = m
+        break
+      end
+    end
+    assert.is_not_nil(found, "<leader>hh not registered")
+    assert.is_not_nil(found.desc and found.desc:lower():find("toggle hunk"))
   end)
 end)
