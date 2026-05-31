@@ -18,6 +18,9 @@ return {
     -- Expand the tree to highlight whatever buffer is focused.
     update_focused_file = { enable = true },
     view = { width = 35 },
+    -- Treat the tree as an on-demand picker: close it once a file is opened so
+    -- it's only visible when you're actively browsing, not all the time.
+    actions = { open_file = { quit_on_open = true } },
     filters = {
       dotfiles = false, -- show dotfiles (toggle with H)
       git_ignored = true, -- hide gitignored, e.g. node_modules (toggle with I)
@@ -41,5 +44,16 @@ return {
         vim.api.nvim_set_option_value("winbar", "%#Comment#  g? — all mappings%*", { win = win })
       end
     end)
+    -- Close the tree the moment any Telescope picker opens. Combined with
+    -- quit_on_open (files opened from the tree), these are the only two events
+    -- that dismiss the tree — it otherwise stays put until toggled.
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "TelescopeFindPre",
+      callback = function()
+        if api.tree.is_visible() then
+          api.tree.close()
+        end
+      end,
+    })
   end,
 }
