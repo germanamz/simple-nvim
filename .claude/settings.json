@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:github.com)",
+      "Bash(NVIM_BOOTSTRAP=0 nvim --headless +qa)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(make test-smoke *)",
+      "Bash(make test-unit *)",
+      "Bash(make test-e2e *)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true
+  }
+}
