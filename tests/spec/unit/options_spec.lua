@@ -90,6 +90,47 @@ describe("config.options", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
+  it("binds <leader>bd to delete the current buffer", function()
+    vim.g.mapleader = " "
+    require("config.options")
+
+    local found
+    for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
+      if m.lhs == " bd" then
+        found = m
+        break
+      end
+    end
+    assert.is_not_nil(found)
+    assert.is_not_nil(found.desc and found.desc:lower():find("delete buffer"))
+  end)
+
+  it("<leader>bd deletes the current buffer but keeps its window open", function()
+    vim.g.mapleader = " "
+    require("config.options")
+
+    -- Two distinct listed buffers shown in one window, `second` on top so the
+    -- previous (`first`) is the window's alternate. nvim_create_buf is used
+    -- rather than :enew, which would reuse the same empty unnamed buffer.
+    local first = vim.api.nvim_create_buf(true, false)
+    local second = vim.api.nvim_create_buf(true, false)
+    local win = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(win, first)
+    vim.api.nvim_win_set_buf(win, second)
+
+    vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(" bd", true, false, true), "mx", false)
+
+    -- Window survives and falls back to the previous buffer; the one we left is
+    -- unloaded and unlisted (:bdelete unloads rather than wipes the buffer).
+    assert.is_true(vim.api.nvim_win_is_valid(win))
+    assert.are.equal(first, vim.api.nvim_win_get_buf(win))
+    assert.is_false(vim.api.nvim_buf_is_loaded(second))
+    assert.are.equal(0, vim.fn.buflisted(second))
+    assert.is_true(vim.api.nvim_buf_is_loaded(first))
+
+    pcall(vim.api.nvim_buf_delete, first, { force = true })
+  end)
+
   it("binds <leader>w to rewrap on markdown buffers", function()
     vim.g.mapleader = " "
     require("config.options")

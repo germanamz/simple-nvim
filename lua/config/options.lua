@@ -64,6 +64,11 @@ opt.termguicolors = true
 opt.mouse = "a"
 opt.clipboard = "unnamedplus"
 
+-- Delete the current buffer without closing its window: switch to the previous
+-- buffer first, then wipe the one we left, so the window stays on the prior
+-- file instead of collapsing (which would quit nvim if it's the last window).
+vim.keymap.set("n", "<leader>bd", "<cmd>bp | bd #<cr>", { desc = "Delete buffer" })
+
 -- OSC52 clipboard provider for containers/SSH (host uses pbcopy/xclip natively)
 local in_container = vim.env.REMOTE_CONTAINERS == "true"
   or vim.env.CODESPACES == "true"
