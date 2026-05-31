@@ -76,10 +76,19 @@ describe("e2e: gitsigns", function()
   end)
 
   after_each(function()
-    -- Toggling word_diff leaves gitsigns recomputing hunks/blame asynchronously
-    -- (current_line_blame has delay=0). Drain that against still-valid buffers
-    -- before wiping them, so stray debounced callbacks don't fire on a dead id.
-    vim.wait(100)
+    -- gitsigns' current-line blame (delay=0) computes asynchronously via a git
+    -- subprocess; an in-flight run_blame coroutine that resumes after the buffer
+    -- is wiped throws "Invalid buffer id". gitsigns writes
+    -- b:gitsigns_blame_line_dict when that computation lands, so we await that
+    -- signal (not a fixed sleep) before wiping — it returns the instant blame
+    -- settles, with the timeout only as a safety ceiling.
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_is_loaded(buf) and vim.b[buf].gitsigns_status ~= nil then
+        vim.wait(5000, function()
+          return vim.b[buf].gitsigns_blame_line_dict ~= nil
+        end, 10)
+      end
+    end
     vim.cmd("silent! %bwipeout!")
     pcall(vim.fn.chdir, prev_cwd)
     nvim_env.teardown(root)
