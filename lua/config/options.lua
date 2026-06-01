@@ -69,6 +69,12 @@ opt.clipboard = "unnamedplus"
 -- file instead of collapsing (which would quit nvim if it's the last window).
 vim.keymap.set("n", "<leader>bd", "<cmd>bp | bd #<cr>", { desc = "Delete buffer" })
 
+-- Quit all windows, discarding unsaved changes
+vim.keymap.set("n", "<leader>qa", "<cmd>qa!<cr>", { desc = "Quit all (force)" })
+
+-- Save all buffers and quit
+vim.keymap.set("n", "<leader>qw", "<cmd>wqa<cr>", { desc = "Save all and quit" })
+
 -- OSC52 clipboard provider for containers/SSH (host uses pbcopy/xclip natively)
 local in_container = vim.env.REMOTE_CONTAINERS == "true"
   or vim.env.CODESPACES == "true"
