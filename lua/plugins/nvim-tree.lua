@@ -1,5 +1,7 @@
--- File-tree explorer with reveal-to-current-file. netrw is left intact
--- (see init.lua <leader>E) — nvim-tree neither disables nor hijacks it.
+-- File-tree explorer with reveal-to-current-file. Launching nvim on a
+-- directory (`nvim .`) opens nvim-tree instead of netrw; netrw is still
+-- reachable on demand via init.lua's <leader>E (:Explore), which hijack_netrw
+-- leaves untouched.
 return {
   "nvim-tree/nvim-tree.lua",
   dependencies = { "nvim-tree/nvim-web-devicons" },
@@ -11,10 +13,20 @@ return {
       desc = "File tree (reveal current file)",
     },
   },
+  -- Stay lazy for `nvim file.txt`, but when nvim is launched on a directory
+  -- force the plugin to load during startup. setup() must run before the
+  -- directory buffer is read so manage_netrw can strip netrw's FileExplorer
+  -- autocmds and the hijack BufEnter handler is in place to win the race.
+  init = function()
+    if vim.fn.argc() >= 1 and vim.fn.isdirectory(vim.fn.argv(0)) == 1 then
+      require("lazy").load({ plugins = { "nvim-tree.lua" } })
+    end
+  end,
   opts = {
-    -- Leave netrw alone; nvim-tree is opt-in via <leader>e.
+    -- Take over directory buffers (so `nvim .` shows the tree) while leaving
+    -- netrw's :Explore command alone for the <leader>E fallback.
     disable_netrw = false,
-    hijack_netrw = false,
+    hijack_netrw = true,
     -- Expand the tree to highlight whatever buffer is focused.
     update_focused_file = { enable = true },
     view = { width = 35 },
