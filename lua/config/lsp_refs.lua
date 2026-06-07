@@ -29,6 +29,37 @@ local function cursor_rc()
   return pos[1] - 1, pos[2]
 end
 
+-- Keep only reference locations in `buf_uri`, deduped by start position.
+-- Returns the in-buffer ranges and their count.
+local function dedup_refs(result, buf_uri)
+  local seen, ranges, count = {}, {}, 0
+  for _, loc in ipairs(result) do
+    if loc.uri == buf_uri then
+      local s = loc.range.start
+      local key = s.line .. ":" .. s.character
+      if not seen[key] then
+        seen[key] = true
+        count = count + 1
+        ranges[#ranges + 1] = loc.range
+      end
+    end
+  end
+  return ranges, count
+end
+M._dedup_refs = dedup_refs
+
+-- Highlight each reference range with an extmark in our namespace.
+local function paint_refs(bufnr, ranges)
+  for _, r in ipairs(ranges) do
+    pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, r.start.line, r.start.character, {
+      end_row = r["end"].line,
+      end_col = r["end"].character,
+      hl_group = "LspReferenceText",
+      priority = 120,
+    })
+  end
+end
+
 local function request(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -71,31 +102,11 @@ local function request(bufnr)
         return
       end
 
-      local seen = {}
-      local ranges = {}
-      local count = 0
-      for _, loc in ipairs(result) do
-        if loc.uri == buf_uri then
-          local s = loc.range.start
-          local key = s.line .. ":" .. s.character
-          if not seen[key] then
-            seen[key] = true
-            count = count + 1
-            ranges[#ranges + 1] = loc.range
-          end
-        end
-      end
+      local ranges, count = dedup_refs(result, buf_uri)
 
       clear_marks(bufnr)
       if count >= 2 then
-        for _, r in ipairs(ranges) do
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, r.start.line, r.start.character, {
-            end_row = r["end"].line,
-            end_col = r["end"].character,
-            hl_group = "LspReferenceText",
-            priority = 120,
-          })
-        end
+        paint_refs(bufnr, ranges)
       end
 
       state[bufnr] = { row = row, col = col, count = count }

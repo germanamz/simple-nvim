@@ -109,6 +109,33 @@ describe("config.lsp_refs", function()
     end)
   end)
 
+  describe("_dedup_refs", function()
+    it("dedupes by start position and excludes other buffers", function()
+      local ranges, count = M._dedup_refs({
+        {
+          uri = "file:///a",
+          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
+        },
+        {
+          uri = "file:///a",
+          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
+        },
+        {
+          uri = "file:///a",
+          range = { start = { line = 2, character = 3 }, ["end"] = { line = 2, character = 4 } },
+        },
+        {
+          uri = "file:///other",
+          range = { start = { line = 5, character = 0 }, ["end"] = { line = 5, character = 1 } },
+        },
+      }, "file:///a")
+      assert.are.equal(2, count)
+      assert.are.equal(2, #ranges)
+      assert.are.equal(0, ranges[1].start.line)
+      assert.are.equal(2, ranges[2].start.line)
+    end)
+  end)
+
   describe("reference request callback", function()
     local function install_lsp_stubs(buf)
       local fake_client = {
