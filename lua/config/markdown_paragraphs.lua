@@ -171,6 +171,54 @@ local function copy_path(path)
   return out
 end
 
+-- Update the running heading `path` and `counters` for an ATX heading at level
+-- `hl` (H2 -> depth 1, H3 -> depth 2, ...). Truncates deeper levels, fills any
+-- skipped intermediate levels with 0, and bumps the sibling counter under the
+-- current parent. Mutates path and counters in place.
+local function advance_heading(path, counters, hl)
+  local depth = hl - 1
+  for j = #path, depth, -1 do
+    path[j] = nil
+  end
+  for j = #path + 1, depth - 1 do
+    path[j] = 0
+  end
+  counters[depth] = counters[depth] or {}
+  local parent_key = path_key(path, depth - 1)
+  counters[depth][parent_key] = (counters[depth][parent_key] or 0) + 1
+  path[depth] = counters[depth][parent_key]
+end
+M._advance_heading = advance_heading
+
+-- Build the padded statuscolumn marker for each numbered line. Headings render
+-- as "§<path>", blocks as "§<path>¶<n>" (or just "¶<n>" before any heading).
+-- Returns the per-line markers table and the blank pad for non-numbered lines,
+-- both right-padded to a common width.
+local function render_markers(blocks, headings)
+  local raw = {}
+  local max_w = 5
+  for lnum, h in pairs(headings) do
+    local s = "§" .. format_path(h.path)
+    raw[lnum] = s
+    max_w = math.max(max_w, vim.api.nvim_strwidth(s))
+  end
+  for lnum, blk in pairs(blocks) do
+    local p = format_path(blk.path)
+    local s = p == "" and ("¶" .. blk.paragraph) or ("§" .. p .. "¶" .. blk.paragraph)
+    raw[lnum] = s
+    max_w = math.max(max_w, vim.api.nvim_strwidth(s))
+  end
+
+  local total = max_w + 1
+  local markers = {}
+  for lnum, s in pairs(raw) do
+    local pad = string.rep(" ", total - vim.api.nvim_strwidth(s))
+    markers[lnum] = "%#Comment#" .. s .. pad .. "%*"
+  end
+  return markers, string.rep(" ", total)
+end
+M._render_markers = render_markers
+
 local function compute(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
     return
@@ -229,18 +277,7 @@ local function compute(bufnr)
         in_block = false
         prev_was_text = false
       elseif hl then
-        local depth = hl - 1
-        for j = #path, depth, -1 do
-          path[j] = nil
-        end
-        for j = #path + 1, depth - 1 do
-          path[j] = 0
-        end
-        counters[depth] = counters[depth] or {}
-        local parent_key = path_key(path, depth - 1)
-        local prev_count = counters[depth][parent_key] or 0
-        counters[depth][parent_key] = prev_count + 1
-        path[depth] = counters[depth][parent_key]
+        advance_heading(path, counters, hl)
         paragraph = 0
         headings[i] = { path = copy_path(path) }
         in_block = false
@@ -288,43 +325,12 @@ local function compute(bufnr)
     end
   end
 
-  local raw = {}
-  local max_w = 5
-  for lnum, h in pairs(headings) do
-    local s = "§" .. format_path(h.path)
-    raw[lnum] = s
-    local w = vim.api.nvim_strwidth(s)
-    if w > max_w then
-      max_w = w
-    end
-  end
-  for lnum, b in pairs(blocks) do
-    local p = format_path(b.path)
-    local s
-    if p == "" then
-      s = "¶" .. b.paragraph
-    else
-      s = "§" .. p .. "¶" .. b.paragraph
-    end
-    raw[lnum] = s
-    local w = vim.api.nvim_strwidth(s)
-    if w > max_w then
-      max_w = w
-    end
-  end
-
-  local total = max_w + 1
-  local markers = {}
-  for lnum, s in pairs(raw) do
-    local pad = string.rep(" ", total - vim.api.nvim_strwidth(s))
-    markers[lnum] = "%#Comment#" .. s .. pad .. "%*"
-  end
-
+  local markers, empty = render_markers(blocks, headings)
   cache[bufnr] = {
     blocks = blocks,
     headings = headings,
     markers = markers,
-    empty = string.rep(" ", total),
+    empty = empty,
   }
 end
 

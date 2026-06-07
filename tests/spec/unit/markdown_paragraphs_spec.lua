@@ -547,4 +547,48 @@ describe("config.markdown_paragraphs", function()
     })
     assert.are.same({ [6] = b({}, 1), [8] = b({}, 2) }, data.blocks)
   end)
+
+  describe("_advance_heading", function()
+    it("numbers sequential H2 siblings", function()
+      local path, counters = {}, {}
+      mp._advance_heading(path, counters, 2)
+      assert.are.same({ 1 }, path)
+      mp._advance_heading(path, counters, 2)
+      assert.are.same({ 2 }, path)
+    end)
+
+    it("nests H3 under the current H2 and resets deeper levels on the next H2", function()
+      local path, counters = {}, {}
+      mp._advance_heading(path, counters, 2)
+      mp._advance_heading(path, counters, 3)
+      assert.are.same({ 1, 1 }, path)
+      mp._advance_heading(path, counters, 3)
+      assert.are.same({ 1, 2 }, path)
+      mp._advance_heading(path, counters, 2)
+      assert.are.same({ 2 }, path)
+    end)
+
+    it("fills skipped intermediate levels with zero", function()
+      local path, counters = {}, {}
+      mp._advance_heading(path, counters, 4)
+      assert.are.same({ 0, 0, 1 }, path)
+    end)
+  end)
+
+  describe("_render_markers", function()
+    it("pads markers to a common width and returns the blank pad", function()
+      local markers, empty = mp._render_markers(
+        { [2] = { path = { 1 }, paragraph = 3 } },
+        { [1] = { path = { 1 } } }
+      )
+      assert.are.equal("%#Comment#§1    %*", markers[1])
+      assert.are.equal("%#Comment#§1¶3  %*", markers[2])
+      assert.are.equal("      ", empty)
+    end)
+
+    it("renders a pre-heading block as just ¶n", function()
+      local markers = mp._render_markers({ [1] = { path = {}, paragraph = 1 } }, {})
+      assert.are.equal("%#Comment#¶1    %*", markers[1])
+    end)
+  end)
 end)
