@@ -34,6 +34,7 @@ local M = {}
 
 local review_base = require("config.review_base")
 local git = require("util.git")
+local git_status_codes = require("config.git_status_codes")
 
 -- ===================== helpers =====================
 
@@ -43,56 +44,6 @@ local function parse_status_path(raw)
     raw = raw:sub(arrow + 4)
   end
   return (raw:gsub('^"(.*)"$', "%1"))
-end
-
-local function hl_for_letter(c)
-  if c == "A" then
-    return "SmartFilesAdded"
-  elseif c == "R" or c == "C" then
-    return "SmartFilesRenamed"
-  elseif c == "D" then
-    return "SmartFilesDeleted"
-  elseif c == "M" or c == "T" then
-    return "SmartFilesModified"
-  elseif c == "?" then
-    return "SmartFilesUntracked"
-  end
-end
-
--- format_prefix: turn an XY porcelain code (or 'b<letter>' for base-only)
--- into a 2-char text prefix plus a list of {range, hl} tuples.
-local function format_prefix(code)
-  if not code or code == "" then
-    return "  ", {}
-  end
-  if code == "??" then
-    return "?*", { { { 0, 2 }, "SmartFilesUntracked" } }
-  end
-  if code:sub(1, 1) == "b" then
-    local letter = code:sub(2, 2)
-    local lhl = hl_for_letter(letter)
-    local hls = { { { 0, 1 }, "SmartFilesBase" } }
-    if lhl then
-      table.insert(hls, { { 1, 2 }, lhl })
-    end
-    return "b" .. letter, hls
-  end
-  local x = code:sub(1, 1)
-  local y = code:sub(2, 2)
-  local dominant = (x ~= " " and x ~= "?") and x or y
-  if dominant == "" or dominant == " " then
-    return "  ", {}
-  end
-  local marker = (y ~= " " and y ~= "?") and "*" or " "
-  local dhl = hl_for_letter(dominant)
-  local hls = {}
-  if dhl then
-    table.insert(hls, { { 0, 1 }, dhl })
-  end
-  if marker == "*" then
-    table.insert(hls, { { 1, 2 }, "SmartFilesUnstaged" })
-  end
-  return dominant .. marker, hls
 end
 
 local function relpath(abs, base)
@@ -110,7 +61,7 @@ end
 -- ===================== git status / counts =====================
 
 M._parse_status_path = parse_status_path
-M._format_prefix = format_prefix
+M._format_prefix = git_status_codes.code_to_display
 
 function M._git_changes(root, base)
   local codes = {}
@@ -139,17 +90,9 @@ function M._git_changes(root, base)
         local path = parse_status_path(line:sub(4))
         codes[path] = x .. y
 
-        local dominant = (x ~= " " and x ~= "?") and x or y
-        if dominant == "?" then
-          counts.untracked = counts.untracked + 1
-        elseif dominant == "A" then
-          counts.added = counts.added + 1
-        elseif dominant == "R" or dominant == "C" then
-          counts.renamed = counts.renamed + 1
-        elseif dominant == "D" then
-          counts.deleted = counts.deleted + 1
-        elseif dominant == "M" or dominant == "T" then
-          counts.modified = counts.modified + 1
+        local cat = git_status_codes.category(git_status_codes.dominant_letter(x, y))
+        if cat then
+          counts[cat] = counts[cat] + 1
         end
 
         if x ~= " " and x ~= "?" then
@@ -180,14 +123,9 @@ function M._git_changes(root, base)
           end
           if path and path ~= "" then
             counts.committed = counts.committed + 1
-            if status_char == "A" then
-              counts.base.added = counts.base.added + 1
-            elseif status_char == "M" or status_char == "T" then
-              counts.base.modified = counts.base.modified + 1
-            elseif status_char == "D" then
-              counts.base.deleted = counts.base.deleted + 1
-            elseif status_char == "R" or status_char == "C" then
-              counts.base.renamed = counts.base.renamed + 1
+            local cat = git_status_codes.category(status_char)
+            if cat and counts.base[cat] ~= nil then
+              counts.base[cat] = counts.base[cat] + 1
             end
             if not codes[path] then
               codes[path] = "b" .. status_char
@@ -569,7 +507,7 @@ function M.setup()
         path = path:gsub("^%./", "")
       end
       local code = codes[path]
-      local prefix_text, prefix_hls = format_prefix(code)
+      local prefix_text, prefix_hls = git_status_codes.code_to_display(code)
       local pad = prefix_text .. " "
       local plen = #pad
       local base_display = e.display
