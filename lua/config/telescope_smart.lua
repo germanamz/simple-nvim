@@ -33,22 +33,9 @@
 local M = {}
 
 local review_base = require("config.review_base")
+local git = require("util.git")
 
 -- ===================== helpers =====================
-
-local function git_root_at(cwd)
-  local out = vim.fn.systemlist({
-    "git",
-    "-C",
-    cwd or vim.fn.getcwd(),
-    "rev-parse",
-    "--show-toplevel",
-  })
-  if vim.v.shell_error ~= 0 then
-    return nil
-  end
-  return out[1]
-end
 
 local function parse_status_path(raw)
   local arrow = raw:find(" %-> ")
@@ -256,7 +243,7 @@ local function refresh_codes(cwd, force)
   if not force and cache.cwd == cwd and (now - cache.time) < 500 then
     return cache.codes, cache.counts, cache.base, cache.root
   end
-  local root = git_root_at(cwd)
+  local root = git.root(cwd)
   if not root then
     cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = cwd, time = now }
     return cache.codes, cache.counts, cache.base, cache.root

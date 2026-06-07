@@ -5,13 +5,7 @@
 -- every redraw.
 local M = {}
 
-local function git_branch(root)
-  local out = vim.fn.systemlist({ "git", "-C", root, "branch", "--show-current" })
-  if vim.v.shell_error ~= 0 or not out[1] or out[1] == "" then
-    return nil
-  end
-  return out[1]
-end
+local git = require("util.git")
 
 local function refresh(buf)
   if not vim.api.nvim_buf_is_valid(buf) then
@@ -30,7 +24,7 @@ local function refresh(buf)
   end
   local root = start and start ~= "" and review_base.git_root(start) or nil
   vim.b[buf].nvim_review_base = (root and review_base.get(root)) or ""
-  vim.b[buf].nvim_git_branch = (root and git_branch(root)) or ""
+  vim.b[buf].nvim_git_branch = (root and git.branch(root)) or ""
 end
 
 function _G.git_branch_status()

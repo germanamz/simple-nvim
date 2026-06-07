@@ -5,6 +5,8 @@
 -- read state via `M.get(root)` or listen to the autocmd.
 local M = {}
 
+local git = require("util.git")
+
 local STATE_PATH = vim.fn.stdpath("data") .. "/nvim-review-base.json"
 
 local function read_state()
@@ -43,26 +45,11 @@ local function fire(root, ref)
 end
 
 function M.git_root(start_path)
-  local args = { "git" }
-  if start_path and start_path ~= "" then
-    table.insert(args, "-C")
-    table.insert(args, start_path)
-  end
-  table.insert(args, "rev-parse")
-  table.insert(args, "--show-toplevel")
-  local out = vim.fn.systemlist(args)
-  if vim.v.shell_error ~= 0 or not out[1] or out[1] == "" then
-    return nil
-  end
-  return out[1]
+  return git.root(start_path)
 end
 
 function M.resolve(root, ref)
-  if not root or not ref or ref == "" then
-    return false
-  end
-  vim.fn.system({ "git", "-C", root, "rev-parse", "--verify", "--quiet", ref })
-  return vim.v.shell_error == 0
+  return git.resolve(root, ref)
 end
 
 function M.get(root)
