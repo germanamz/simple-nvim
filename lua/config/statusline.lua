@@ -6,25 +6,27 @@
 local M = {}
 
 local git = require("util.git")
+local path = require("util.path")
 
 local function refresh(buf)
   if not vim.api.nvim_buf_is_valid(buf) then
     return
   end
   local review_base = require("config.review_base")
-  local fname = vim.api.nvim_buf_get_name(buf)
-  local start
-  if fname ~= "" and vim.fn.isdirectory(fname) == 1 then
-    start = fname
-  elseif fname ~= "" then
-    start = vim.fn.fnamemodify(fname, ":p:h")
-  end
-  if not start or start == "" or vim.fn.isdirectory(start) == 0 then
-    start = vim.fn.getcwd()
-  end
-  local root = start and start ~= "" and review_base.git_root(start) or nil
+  local root = review_base.git_root(path.buf_start_dir(buf))
   vim.b[buf].nvim_review_base = (root and review_base.get(root)) or ""
   vim.b[buf].nvim_git_branch = (root and git.branch(root)) or ""
+end
+
+-- Refresh every loaded buffer's cached branch/base and repaint the statusline.
+-- Used by the initial VimEnter pass and on review-base changes.
+local function refresh_all_buffers()
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) then
+      refresh(buf)
+    end
+  end
+  vim.cmd("redrawstatus!")
 end
 
 function _G.git_branch_status()
@@ -100,27 +102,13 @@ function M.setup()
   -- after startup completes so the initial buffer has branch/base populated.
   vim.api.nvim_create_autocmd("VimEnter", {
     group = group,
-    callback = function()
-      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(buf) then
-          refresh(buf)
-        end
-      end
-      vim.cmd("redrawstatus!")
-    end,
+    callback = refresh_all_buffers,
   })
 
   vim.api.nvim_create_autocmd("User", {
     group = group,
     pattern = "ReviewBaseChanged",
-    callback = function()
-      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(buf) then
-          refresh(buf)
-        end
-      end
-      vim.cmd("redrawstatus!")
-    end,
+    callback = refresh_all_buffers,
   })
   refresh(vim.api.nvim_get_current_buf())
 

@@ -3,11 +3,10 @@ return {
   event = { "BufReadPre", "BufNewFile" },
   opts = function()
     local review_base = require("config.review_base")
+    local path = require("util.path")
 
     local function apply_base(bufnr)
-      local fname = vim.api.nvim_buf_get_name(bufnr)
-      local start = (fname ~= "" and vim.fn.fnamemodify(fname, ":h")) or vim.fn.getcwd()
-      local root = review_base.git_root(start)
+      local root = review_base.git_root(path.buf_start_dir(bufnr))
       local ref = root and review_base.get(root) or nil
       require("gitsigns").change_base(ref, true)
     end
