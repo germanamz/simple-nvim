@@ -63,6 +63,69 @@ end
 M._parse_status_path = parse_status_path
 M._format_prefix = git_status_codes.code_to_display
 
+-- Parse `git status --porcelain` into per-path XY codes and worktree counts.
+local function parse_worktree_status(root, codes, counts)
+  -- --untracked-files=all lists each untracked file individually; without it
+  -- git collapses a fully-untracked directory to a single "dir/" entry, which
+  -- would show (and try to open) the directory instead of the new file.
+  local lines, ok = git.run({ "status", "--porcelain", "--untracked-files=all" }, { cwd = root })
+  if not ok then
+    return
+  end
+  for _, line in ipairs(lines) do
+    if #line >= 4 then
+      local x = line:sub(1, 1)
+      local y = line:sub(2, 2)
+      codes[parse_status_path(line:sub(4))] = x .. y
+
+      local cat = git_status_codes.category(git_status_codes.dominant_letter(x, y))
+      if cat then
+        counts[cat] = counts[cat] + 1
+      end
+      if x ~= " " and x ~= "?" then
+        counts.staged = counts.staged + 1
+      end
+      if y ~= " " and y ~= "?" then
+        counts.unstaged = counts.unstaged + 1
+      end
+      if x == "?" and y == "?" then
+        counts.unstaged = counts.unstaged + 1
+      end
+    end
+  end
+end
+
+-- Parse `git diff --name-status base..HEAD` into base-only 'b<letter>' codes
+-- (only for paths not already changed in the worktree) and base counts.
+local function parse_committed_history(root, base, codes, counts)
+  local lines, ok = git.run({ "diff", "--name-status", base .. "..HEAD" }, { cwd = root })
+  if not ok then
+    return
+  end
+  for _, line in ipairs(lines) do
+    if line ~= "" then
+      local status_char = line:sub(1, 1)
+      local rest = line:sub(2):match("^%s*(.*)$") or ""
+      local path
+      if status_char == "R" or status_char == "C" then
+        path = rest:match("\t[^\t]+\t(.+)$") or rest:match("%s+%S+%s+(.+)$")
+      else
+        path = rest:match("^(.+)$")
+      end
+      if path and path ~= "" then
+        counts.committed = counts.committed + 1
+        local cat = git_status_codes.category(status_char)
+        if cat and counts.base[cat] ~= nil then
+          counts.base[cat] = counts.base[cat] + 1
+        end
+        if not codes[path] then
+          codes[path] = "b" .. status_char
+        end
+      end
+    end
+  end
+end
+
 function M._git_changes(root, base)
   local codes = {}
   local counts = {
@@ -77,63 +140,9 @@ function M._git_changes(root, base)
     base = { added = 0, modified = 0, deleted = 0, renamed = 0 },
   }
 
-  -- --untracked-files=all lists each untracked file individually; without it
-  -- git collapses a fully-untracked directory to a single "dir/" entry, which
-  -- would show (and try to open) the directory instead of the new file.
-  local status =
-    vim.fn.systemlist({ "git", "-C", root, "status", "--porcelain", "--untracked-files=all" })
-  if vim.v.shell_error == 0 then
-    for _, line in ipairs(status) do
-      if #line >= 4 then
-        local x = line:sub(1, 1)
-        local y = line:sub(2, 2)
-        local path = parse_status_path(line:sub(4))
-        codes[path] = x .. y
-
-        local cat = git_status_codes.category(git_status_codes.dominant_letter(x, y))
-        if cat then
-          counts[cat] = counts[cat] + 1
-        end
-
-        if x ~= " " and x ~= "?" then
-          counts.staged = counts.staged + 1
-        end
-        if y ~= " " and y ~= "?" then
-          counts.unstaged = counts.unstaged + 1
-        end
-        if x == "?" and y == "?" then
-          counts.unstaged = counts.unstaged + 1
-        end
-      end
-    end
-  end
-
+  parse_worktree_status(root, codes, counts)
   if base and review_base.resolve(root, base) then
-    local cm = vim.fn.systemlist({ "git", "-C", root, "diff", "--name-status", base .. "..HEAD" })
-    if vim.v.shell_error == 0 then
-      for _, line in ipairs(cm) do
-        if line ~= "" then
-          local status_char = line:sub(1, 1)
-          local rest = line:sub(2):match("^%s*(.*)$") or ""
-          local path
-          if status_char == "R" or status_char == "C" then
-            path = rest:match("\t[^\t]+\t(.+)$") or rest:match("%s+%S+%s+(.+)$")
-          else
-            path = rest:match("^(.+)$")
-          end
-          if path and path ~= "" then
-            counts.committed = counts.committed + 1
-            local cat = git_status_codes.category(status_char)
-            if cat and counts.base[cat] ~= nil then
-              counts.base[cat] = counts.base[cat] + 1
-            end
-            if not codes[path] then
-              codes[path] = "b" .. status_char
-            end
-          end
-        end
-      end
-    end
+    parse_committed_history(root, base, codes, counts)
   end
 
   return codes, counts
@@ -286,42 +295,39 @@ local function fit_line(text, ranges, width)
   return text, ranges
 end
 
-local function open_legend(prompt_bufnr, counts, base)
-  close_legend()
-  set_legend_highlights()
-  if not counts then
-    return
-  end
-
-  local ok, action_state = pcall(require, "telescope.actions.state")
-  if not ok then
-    return
-  end
-  local picker = action_state.get_current_picker(prompt_bufnr)
-  local results_win = picker and picker.results_win
-  if not results_win or not vim.api.nvim_win_is_valid(results_win) then
-    return
-  end
-
+-- Pure: turn the counts table into the two legend rows (worktree + base),
+-- dropping zero-count entries and appending a "vs <base>" trailer when a base
+-- is set and has any nonzero category. Exposed for unit testing.
+local function build_legend_segments(counts, base)
   local function b_icon(letter, type_hl)
     return {
       icon = "b" .. letter,
       icon_hls = { { 0, 1, "SmartFilesBase" }, { 1, 2, type_hl } },
     }
   end
+  local function nonzero(segs)
+    local out = {}
+    for _, s in ipairs(segs) do
+      if (s.count or 0) > 0 then
+        table.insert(out, s)
+      end
+    end
+    return out
+  end
 
-  local worktree_segments = {
+  local worktree = nonzero({
     { icon = "A", icon_hl = "SmartFilesAdded", count = counts.added, label = "added" },
     { icon = "M", icon_hl = "SmartFilesModified", count = counts.modified, label = "modified" },
     { icon = "D", icon_hl = "SmartFilesDeleted", count = counts.deleted, label = "deleted" },
     { icon = "R", icon_hl = "SmartFilesRenamed", count = counts.renamed, label = "renamed" },
     { icon = "?*", icon_hl = "SmartFilesUntracked", count = counts.untracked, label = "untracked" },
     { icon = "*", icon_hl = "SmartFilesUnstaged", count = counts.unstaged, label = "unstaged" },
-  }
-  local base_segments = {}
+  })
+
+  local base_list = {}
   if base then
     local b = counts.base or {}
-    base_segments = {
+    base_list = nonzero({
       vim.tbl_extend("force", b_icon("A", "SmartFilesAdded"), { count = b.added, label = "added" }),
       vim.tbl_extend(
         "force",
@@ -338,45 +344,52 @@ local function open_legend(prompt_bufnr, counts, base)
         b_icon("R", "SmartFilesRenamed"),
         { count = b.renamed, label = "renamed" }
       ),
-    }
-  end
-
-  local function nonzero(segs)
-    local out = {}
-    for _, s in ipairs(segs) do
-      if (s.count or 0) > 0 then
-        table.insert(out, s)
-      end
+    })
+    if #base_list > 0 then
+      table.insert(base_list, { label = "vs " .. base })
     end
-    return out
-  end
-  local worktree = nonzero(worktree_segments)
-  local base_list = nonzero(base_segments)
-  if base and #base_list > 0 then
-    table.insert(base_list, { label = "vs " .. base })
-  end
-  if #worktree == 0 and #base_list == 0 then
-    return
   end
 
+  return { worktree = worktree, base_list = base_list }
+end
+M._build_legend_segments = build_legend_segments
+
+-- Resolve the telescope results window for a prompt buffer, or nil if telescope
+-- isn't loaded / the window is gone.
+local function picker_results_win(prompt_bufnr)
+  local ok, action_state = pcall(require, "telescope.actions.state")
+  if not ok then
+    return nil
+  end
+  local picker = action_state.get_current_picker(prompt_bufnr)
+  local results_win = picker and picker.results_win
+  if not results_win or not vim.api.nvim_win_is_valid(results_win) then
+    return nil
+  end
+  return results_win
+end
+
+-- Render the segment rows into padded statuscolumn lines + their highlights.
+local function render_legend_lines(groups, width)
+  local lines, ranges_by_line = {}, {}
+  for _, segs in ipairs({ groups.worktree, groups.base_list }) do
+    if #segs > 0 then
+      local text, ranges = render_segments(segs, "   ")
+      text, ranges = fit_line(text, ranges, width)
+      table.insert(lines, text)
+      table.insert(ranges_by_line, ranges)
+    end
+  end
+  return lines, ranges_by_line
+end
+
+-- Create the floating legend buffer + window anchored to the bottom of the
+-- telescope results window. No-op if the legend would be taller than results.
+local function create_legend_window(results_win, lines, ranges_by_line)
   local pos = vim.api.nvim_win_get_position(results_win)
   local width = vim.api.nvim_win_get_width(results_win)
   local height = vim.api.nvim_win_get_height(results_win)
-
-  local lines, ranges_by_line = {}, {}
-  local function push(segs)
-    if #segs == 0 then
-      return
-    end
-    local text, ranges = render_segments(segs, "   ")
-    text, ranges = fit_line(text, ranges, width)
-    table.insert(lines, text)
-    table.insert(ranges_by_line, ranges)
-  end
-  push(worktree)
-  push(base_list)
-
-  if #lines == 0 or #lines > height then
+  if #lines > height then
     return
   end
 
@@ -400,6 +413,30 @@ local function open_legend(prompt_bufnr, counts, base)
     noautocmd = true,
     zindex = 250,
   })
+end
+
+local function open_legend(prompt_bufnr, counts, base)
+  close_legend()
+  set_legend_highlights()
+  if not counts then
+    return
+  end
+  local results_win = picker_results_win(prompt_bufnr)
+  if not results_win then
+    return
+  end
+
+  local groups = build_legend_segments(counts, base)
+  if #groups.worktree == 0 and #groups.base_list == 0 then
+    return
+  end
+
+  local width = vim.api.nvim_win_get_width(results_win)
+  local lines, ranges_by_line = render_legend_lines(groups, width)
+  if #lines == 0 then
+    return
+  end
+  create_legend_window(results_win, lines, ranges_by_line)
 end
 
 -- ===================== picker core =====================

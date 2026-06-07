@@ -271,4 +271,51 @@ describe("config.telescope_smart", function()
       assert.are.same({ "find-ok" }, out)
     end)
   end)
+
+  describe("_build_legend_segments", function()
+    local counts = {
+      added = 2,
+      modified = 1,
+      deleted = 0,
+      renamed = 0,
+      untracked = 3,
+      staged = 5,
+      unstaged = 4,
+      committed = 0,
+      base = { added = 1, modified = 0, deleted = 0, renamed = 0 },
+    }
+
+    it("keeps only nonzero worktree segments in order", function()
+      local groups = M._build_legend_segments(counts, nil)
+      assert.are.equal(4, #groups.worktree)
+      assert.are.equal("A", groups.worktree[1].icon)
+      assert.are.equal(2, groups.worktree[1].count)
+      assert.are.equal("M", groups.worktree[2].icon)
+      assert.are.equal("?*", groups.worktree[3].icon)
+      assert.are.equal(3, groups.worktree[3].count)
+      assert.are.equal("*", groups.worktree[4].icon)
+      assert.are.equal(4, groups.worktree[4].count)
+    end)
+
+    it("omits the base list entirely when no base is set", function()
+      local groups = M._build_legend_segments(counts, nil)
+      assert.are.equal(0, #groups.base_list)
+    end)
+
+    it("builds base segments with a 'vs <base>' trailer when base is set", function()
+      local groups = M._build_legend_segments(counts, "main")
+      assert.are.equal(2, #groups.base_list)
+      assert.are.equal("bA", groups.base_list[1].icon)
+      assert.are.equal(1, groups.base_list[1].count)
+      assert.are.equal("vs main", groups.base_list[2].label)
+    end)
+
+    it("emits no base trailer when every base count is zero", function()
+      local zero = vim.tbl_deep_extend("force", counts, {
+        base = { added = 0, modified = 0, deleted = 0, renamed = 0 },
+      })
+      local groups = M._build_legend_segments(zero, "main")
+      assert.are.equal(0, #groups.base_list)
+    end)
+  end)
 end)
