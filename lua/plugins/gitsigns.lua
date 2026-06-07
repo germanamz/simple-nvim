@@ -47,14 +47,17 @@ return {
         map("n", "<leader>hd", gs.diffthis, "Diff against index")
         map("n", "<leader>ht", gs.toggle_deleted, "Toggle deleted lines inline")
         map("n", "<leader>hi", gs.preview_hunk_inline, "Inline preview hunk")
-        map("n", "<leader>hh", function()
-          _G.gitsigns_toggle_hunks()
-        end, "Toggle hunk highlights")
+        -- <leader>hh (toggle hunk highlights) is intentionally NOT mapped here.
+        -- gitsigns never attaches to untracked / new-vs-base files, so on_attach
+        -- doesn't run for them — yet those buffers still get the custom add
+        -- painting and need to toggle it. The toggle is global state anyway, so
+        -- the keymap is registered globally in config() instead.
       end,
     }
   end,
   config = function(_, opts)
     local review_base = require("config.review_base")
+    local git = require("util.git")
     review_base.bootstrap()
 
     require("gitsigns").setup(opts)
@@ -114,8 +117,8 @@ return {
       if relpath == "" then
         return false
       end
-      vim.fn.system({ "git", "-C", root, "cat-file", "-e", ref .. ":" .. relpath })
-      return vim.v.shell_error ~= 0
+      -- new vs base == the file does not exist in that ref (nothing to diff).
+      return not git.file_in_ref(root, ref, relpath)
     end
 
     local function mark_hunks(bufnr)
@@ -289,6 +292,13 @@ return {
       end
       vim.notify("Git hunks " .. (hunks_visible and "shown" or "hidden"))
     end
+
+    -- Global (not buffer-local): the toggle drives shared state and repaints
+    -- every buffer, and it must work in buffers gitsigns never attaches to
+    -- (untracked / new-vs-base files), where on_attach never runs.
+    vim.keymap.set("n", "<leader>hh", function()
+      _G.gitsigns_toggle_hunks()
+    end, { desc = "Toggle hunk highlights" })
 
     vim.api.nvim_create_autocmd("User", {
       pattern = "GitSignsUpdate",

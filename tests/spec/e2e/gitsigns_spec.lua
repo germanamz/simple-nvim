@@ -38,6 +38,22 @@ local function custom_marks(bufnr)
   return #vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, {})
 end
 
+-- Count only the extmarks that actually paint a line background. For a file
+-- that's new vs the review base the painter always lays down an extmark per
+-- line (to keep the colored line number), and toggles just the hl_group/hl_eol
+-- — so #extmarks stays constant. The visible-background count is what flips.
+local function visible_bg_marks(bufnr)
+  local ns = vim.api.nvim_create_namespace("gs_custom")
+  local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, 0, -1, { details = true })
+  local n = 0
+  for _, m in ipairs(marks) do
+    if m[4] and m[4].hl_group then
+      n = n + 1
+    end
+  end
+  return n
+end
+
 local function open_modified_repo()
   local repo = git_fixture.repo({
     commits = { { files = { ["a.lua"] = build_original() }, message = "init" } },
@@ -47,6 +63,43 @@ local function open_modified_repo()
   vim.fn.chdir(canonical)
   vim.cmd("edit " .. canonical .. "/a.lua")
   return vim.api.nvim_get_current_buf()
+end
+
+-- Open a brand-new file (untracked, absent from the review base). gitsigns does
+-- not attach to untracked files, so the buffer only ever gets the custom
+-- new-vs-base painting — never gitsigns' own attach/on_attach path.
+local function open_new_vs_base_file()
+  local repo = git_fixture.repo({
+    commits = { { files = { ["a.lua"] = "-- a\n" }, message = "init" } },
+  })
+  local canonical = vim.uv.fs_realpath(repo) or repo
+  vim.fn.chdir(canonical)
+  require("config.review_base").set(canonical, "HEAD")
+
+  local f = assert(io.open(canonical .. "/new.lua", "w"))
+  f:write("-- new 1\n-- new 2\n-- new 3\n")
+  f:close()
+
+  vim.cmd("edit " .. canonical .. "/new.lua")
+  local bufnr = vim.api.nvim_get_current_buf()
+
+  -- drive the custom painter and make sure highlights start in the shown state
+  -- regardless of where a previous test left the global toggle.
+  local function paint()
+    vim.api.nvim_exec_autocmds("User", { pattern = "GitSignsUpdate", modeline = false })
+  end
+  paint()
+  wait.wait_for(function()
+    return vim.b[bufnr].gs_new_vs_base == true
+  end, 5000, "new file never flagged new-vs-base")
+  if visible_bg_marks(bufnr) == 0 then
+    _G.gitsigns_toggle_hunks()
+    paint()
+  end
+  wait.wait_for(function()
+    return visible_bg_marks(bufnr) > 0
+  end, 3000, "new-file add highlights never shown")
+  return bufnr, canonical
 end
 
 -- Drive the global hunks_visible state to "shown" for a buffer that has hunks,
@@ -242,25 +295,41 @@ describe("e2e: gitsigns", function()
   end)
 
   it("registers <leader>hh to toggle hunk highlights", function()
-    local bufnr = open_modified_repo()
-    -- on_attach installs the buffer-local map once gitsigns attaches
+    open_modified_repo()
+    -- <leader>hh is a global map (set in config), not buffer-local: it must work
+    -- even in buffers gitsigns never attaches to, where on_attach never runs.
+    local found
     wait.wait_for(function()
-      for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "n")) do
+      for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
         if m.lhs == " hh" then
+          found = m
           return true
         end
       end
       return false
     end, 5000, "<leader>hh never registered")
 
-    local found
-    for _, m in ipairs(vim.api.nvim_buf_get_keymap(bufnr, "n")) do
-      if m.lhs == " hh" then
-        found = m
-        break
-      end
-    end
     assert.is_not_nil(found, "<leader>hh not registered")
     assert.is_not_nil(found.desc and found.desc:lower():find("toggle hunk"))
+  end)
+
+  it("toggles hunk highlights via <leader>hh on a new (unattached) file", function()
+    local bufnr = open_new_vs_base_file()
+
+    -- gitsigns never attaches to an untracked file, so the toggle keymap must
+    -- exist independently of on_attach for the press to do anything.
+    press(" hh") -- hide
+    wait.wait_for(function()
+      return visible_bg_marks(bufnr) == 0
+    end, 2000, "<leader>hh did not hide add highlights on new file")
+    assert.are.equal(0, visible_bg_marks(bufnr))
+
+    press(" hh") -- show
+    wait.wait_for(function()
+      return visible_bg_marks(bufnr) > 0
+    end, 3000, "<leader>hh did not restore add highlights on new file")
+    assert.is_true(visible_bg_marks(bufnr) > 0)
+
+    require("config.review_base").clear(vim.fn.getcwd())
   end)
 end)
