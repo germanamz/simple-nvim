@@ -183,6 +183,29 @@ suite green → review.
 - The `_G.*` globals (`gitsigns_toggle_hunks`, `lsp_refs_status`, etc.) stay global
   — they are the statusline/keymap contract; renaming is out of scope.
 
+## Execution log (2026-06-07)
+
+All 8 phases shipped on branch `refactor/config-quality`, each TDD (red→green),
+suite green at every step. Final: **unit 119 → 191 (+72 tests), smoke 41, e2e 20,
+lint clean.** New modules: `util/git`, `util/inline_diff`, `util/overlay`,
+`util/path`, `config/git_status_codes`, `config/markdown_rewrap`.
+
+**Deviations from plan (evidence-driven, verified against source):**
+- **`util/extmark` dropped (P3).** Its justification was "gitsigns gains a `pcall`
+  guard," but gitsigns already `pcall`-wraps every `set_extmark`. The adversarial
+  critique's premise was false, so extraction would be pure indirection.
+- **`build_server_config`/H8 dropped (P7).** The `lsp.lua` mason-lspconfig loop is
+  already a clean 7-line capability merge — not a real hotspot.
+- **Naming "sweep" folded into each phase** rather than a separate pass: every
+  extracted function/local was named deliberately at extraction time; a blanket
+  rename of working code would be churn without payoff.
+
+**Behavior-improving unifications (flagged, not silent):**
+- `util/git.root` guards the empty-string toplevel that telescope's old
+  `git_root_at` returned unguarded.
+- `gitsigns.apply_base` now uses `util/path.buf_start_dir`, gaining the
+  dir-buffer / `isdirectory` guards statusline already had.
+
 ## Risks
 
 - **Async-dependent gitsigns tests** (toggle cache-settle, word-diff) are timing
