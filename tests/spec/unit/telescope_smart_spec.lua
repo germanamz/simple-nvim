@@ -92,6 +92,46 @@ describe("config.telescope_smart", function()
       assert.are.equal(2, counts.base.added)
     end)
 
+    it("lists individual untracked files inside a brand-new directory", function()
+      local repo = git_fixture.repo({
+        commits = { { files = { ["a.lua"] = "x" } } },
+        untracked = { ["newdir/newfile.lua"] = "..." },
+      })
+      local codes, counts = M._git_changes(repo, "main")
+      -- git collapses fully-untracked dirs to "newdir/" by default; we want the
+      -- actual file so the picker can list and open it, not the directory.
+      assert.are.equal("??", codes["newdir/newfile.lua"])
+      assert.is_nil(codes["newdir/"])
+      assert.are.equal(1, counts.untracked)
+    end)
+
+    it("recurses into deeply nested untracked directories", function()
+      local repo = git_fixture.repo({
+        commits = { { files = { ["a.lua"] = "x" } } },
+        untracked = { ["deep/nested/dir/file.lua"] = "..." },
+      })
+      local codes, counts = M._git_changes(repo, "main")
+      assert.are.equal("??", codes["deep/nested/dir/file.lua"])
+      assert.is_nil(codes["deep/"])
+      assert.is_nil(codes["deep/nested/"])
+      assert.are.equal(1, counts.untracked)
+    end)
+
+    it("still excludes gitignored files inside an untracked directory", function()
+      local repo = git_fixture.repo({
+        commits = { { files = { [".gitignore"] = "*.log\n" } } },
+        untracked = {
+          ["newdir/keep.lua"] = "...",
+          ["newdir/skip.log"] = "...",
+        },
+      })
+      local codes, counts = M._git_changes(repo, "main")
+      assert.are.equal("??", codes["newdir/keep.lua"])
+      assert.is_nil(codes["newdir/skip.log"])
+      assert.is_nil(codes["newdir/"])
+      assert.are.equal(1, counts.untracked)
+    end)
+
     it("does not consult the base when it does not resolve", function()
       local repo = git_fixture.repo({
         commits = { { files = { ["a.lua"] = "x" } } },

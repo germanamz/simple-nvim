@@ -139,7 +139,11 @@ function M._git_changes(root, base)
     base = { added = 0, modified = 0, deleted = 0, renamed = 0 },
   }
 
-  local status = vim.fn.systemlist({ "git", "-C", root, "status", "--porcelain" })
+  -- --untracked-files=all lists each untracked file individually; without it
+  -- git collapses a fully-untracked directory to a single "dir/" entry, which
+  -- would show (and try to open) the directory instead of the new file.
+  local status =
+    vim.fn.systemlist({ "git", "-C", root, "status", "--porcelain", "--untracked-files=all" })
   if vim.v.shell_error == 0 then
     for _, line in ipairs(status) do
       if #line >= 4 then
