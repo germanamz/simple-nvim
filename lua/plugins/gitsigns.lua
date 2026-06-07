@@ -58,6 +58,7 @@ return {
   config = function(_, opts)
     local review_base = require("config.review_base")
     local git = require("util.git")
+    local inline_diff = require("util.inline_diff")
     review_base.bootstrap()
 
     require("gitsigns").setup(opts)
@@ -121,40 +122,54 @@ return {
       return not git.file_in_ref(root, ref, relpath)
     end
 
-    local function mark_hunks(bufnr)
-      if not vim.api.nvim_buf_is_valid(bufnr) then
-        return
+    -- Paint every line of a new-vs-base file with the "add" highlight: gitsigns
+    -- has nothing to diff against so emits no hunks. Honors the visibility
+    -- toggle for the line background but always keeps the colored line numbers.
+    local function paint_new_vs_base(bufnr, line_count)
+      for row = 0, line_count - 1 do
+        pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, 0, {
+          end_row = row + 1,
+          end_col = 0,
+          hl_group = hunks_visible and "GitSignsAddLn" or nil,
+          number_hl_group = "GitSignsAddNr",
+          hl_eol = hunks_visible or nil,
+          priority = 1,
+        })
       end
-      vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
-      local ok, gs = pcall(require, "gitsigns")
-      if not ok then
-        return
-      end
-      local hunks = gs.get_hunks(bufnr) or {}
-      local line_count = vim.api.nvim_buf_line_count(bufnr)
+    end
 
-      local new_vs_base = #hunks == 0 and file_new_vs_base(bufnr)
-      vim.b[bufnr].gs_new_vs_base = new_vs_base
-      if new_vs_base then
-        for row = 0, line_count - 1 do
-          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, 0, {
-            end_row = row + 1,
-            end_col = 0,
-            hl_group = hunks_visible and "GitSignsAddLn" or nil,
-            number_hl_group = "GitSignsAddNr",
-            hl_eol = hunks_visible or nil,
-            priority = 1,
+    -- Inline word-diff for a change hunk: highlight the differing middle span in
+    -- each new line and mark the deletion point carried over from the old line.
+    local function paint_word_diff(bufnr, h)
+      local removed = (h.removed and h.removed.lines) or {}
+      local added = (h.added and h.added.lines) or {}
+      for i = 1, math.min(#removed, #added) do
+        local new = added[i]
+        local span = inline_diff.middle_span(removed[i], new)
+        local row = h.added.start + i - 2
+        if span.new_mid > 0 then
+          pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, span.prefix, {
+            end_col = span.prefix + span.new_mid,
+            hl_group = "GitSignsAddLnInline",
+            priority = 200,
           })
         end
-        return
+        if span.old_mid > 0 and #new > 0 then
+          local col = math.max(0, span.prefix - 1)
+          if col < #new then
+            pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, col, {
+              end_col = col + 1,
+              hl_group = "GitSignsDelPrev",
+              priority = 5000,
+            })
+          end
+        end
       end
+    end
 
-      -- Hunks toggled off: namespace is cleared above, colored line numbers
-      -- come from gitsigns' numhl, so there's nothing else to paint.
-      if not hunks_visible then
-        return
-      end
-
+    -- Paint line backgrounds for add/change/delete hunks, with inline word-diff
+    -- on changed lines.
+    local function paint_hunks(bufnr, hunks, line_count)
       local function line_bg(row, hl)
         if row < 0 or row >= line_count then
           return
@@ -179,47 +194,40 @@ return {
           for i = 0, (h.added.count or 0) - 1 do
             line_bg(start + i, "GitSignsChangeLn")
           end
-
-          local removed = (h.removed and h.removed.lines) or {}
-          local added = (h.added and h.added.lines) or {}
-          local n = math.min(#removed, #added)
-          for i = 1, n do
-            local old, new = removed[i], added[i]
-            local olen, nlen = #old, #new
-            local p = 0
-            while p < olen and p < nlen and old:byte(p + 1) == new:byte(p + 1) do
-              p = p + 1
-            end
-            local s = 0
-            while s < olen - p and s < nlen - p and old:byte(olen - s) == new:byte(nlen - s) do
-              s = s + 1
-            end
-            local old_mid = olen - p - s
-            local new_mid = nlen - p - s
-            local row = h.added.start + i - 2
-            if new_mid > 0 then
-              pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, p, {
-                end_col = p + new_mid,
-                hl_group = "GitSignsAddLnInline",
-                priority = 200,
-              })
-            end
-            if old_mid > 0 and nlen > 0 then
-              local col = math.max(0, p - 1)
-              if col < nlen then
-                pcall(vim.api.nvim_buf_set_extmark, bufnr, ns, row, col, {
-                  end_col = col + 1,
-                  hl_group = "GitSignsDelPrev",
-                  priority = 5000,
-                })
-              end
-            end
-          end
+          paint_word_diff(bufnr, h)
         elseif h.type == "delete" then
           local row = math.max(0, (h.added.start or 1) - 1)
           line_bg(row, "GitSignsDeleteLn")
         end
       end
+    end
+
+    local function mark_hunks(bufnr)
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        return
+      end
+      vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+      local ok, gs = pcall(require, "gitsigns")
+      if not ok then
+        return
+      end
+      local hunks = gs.get_hunks(bufnr) or {}
+      local line_count = vim.api.nvim_buf_line_count(bufnr)
+
+      local new_vs_base = #hunks == 0 and file_new_vs_base(bufnr)
+      vim.b[bufnr].gs_new_vs_base = new_vs_base
+      if new_vs_base then
+        paint_new_vs_base(bufnr, line_count)
+        return
+      end
+
+      -- Hunks toggled off: namespace is cleared above, colored line numbers
+      -- come from gitsigns' numhl, so there's nothing else to paint.
+      if not hunks_visible then
+        return
+      end
+
+      paint_hunks(bufnr, hunks, line_count)
     end
 
     function _G.gitsigns_hunks_status()
