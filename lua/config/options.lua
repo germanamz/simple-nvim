@@ -32,6 +32,10 @@ opt.smartcase = true
 opt.hlsearch = true
 opt.incsearch = true
 
+-- Toggle search-match highlighting (flips 'hlsearch'). Unlike :nohlsearch,
+-- which only clears until the next search, this stays off until toggled back.
+vim.keymap.set("n", "<leader>uh", "<cmd>set hlsearch!<cr>", { desc = "Toggle search highlight" })
+
 -- netrw: tree-style listing with banner. g:netrw_treedepthstring doesn't always
 -- take effect (newer netrw caches it), so we also hide the bar character by
 -- setting its highlight foreground to the Normal background. Re-applied on

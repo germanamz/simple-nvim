@@ -131,6 +131,35 @@ describe("config.options", function()
     pcall(vim.api.nvim_buf_delete, first, { force = true })
   end)
 
+  it("binds <leader>uh to toggle search highlight", function()
+    vim.g.mapleader = " "
+    require("config.options")
+
+    local found
+    for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
+      if m.lhs == " uh" then
+        found = m
+        break
+      end
+    end
+    assert.is_not_nil(found)
+    assert.is_not_nil(found.desc and found.desc:lower():find("toggle search highlight"))
+  end)
+
+  it("<leader>uh flips the hlsearch option", function()
+    vim.g.mapleader = " "
+    require("config.options")
+
+    local keys = vim.api.nvim_replace_termcodes(" uh", true, false, true)
+
+    vim.opt.hlsearch = true
+    vim.api.nvim_feedkeys(keys, "mx", false)
+    assert.is_false(vim.opt.hlsearch:get())
+
+    vim.api.nvim_feedkeys(keys, "mx", false)
+    assert.is_true(vim.opt.hlsearch:get())
+  end)
+
   it("binds <leader>w to rewrap on markdown buffers", function()
     vim.g.mapleader = " "
     require("config.options")

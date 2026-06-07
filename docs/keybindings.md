@@ -281,6 +281,7 @@ uppercase = case-sensitive. `incsearch` + `hlsearch` are on.
 | `*` / `#`        | search word under cursor forward / backward  |
 | `g*` / `g#`      | …without word boundaries                     |
 | `:noh`           | clear current highlight                      |
+| `<Space>uh`      | toggle search highlight (flips `hlsearch`)   |
 | `<Space>fs`      | Telescope grep-string of word under cursor   |
 | `<Space>fg`      | Telescope live grep across project           |
 | `<Space>f/`      | Fuzzy find within current buffer             |
