@@ -6,6 +6,7 @@
 local M = {}
 
 local git = require("util.git")
+local Overlay = require("util.overlay")
 
 local STATE_PATH = vim.fn.stdpath("data") .. "/nvim-review-base.json"
 
@@ -95,30 +96,23 @@ end
 
 local CLEAR_SENTINEL = "__CLEAR__"
 
-local legend_win, legend_buf
+local legend = Overlay.new()
 
 local function close_legend()
-  if legend_win and vim.api.nvim_win_is_valid(legend_win) then
-    vim.api.nvim_win_close(legend_win, true)
-  end
-  if legend_buf and vim.api.nvim_buf_is_valid(legend_buf) then
-    vim.api.nvim_buf_delete(legend_buf, { force = true })
-  end
-  legend_win, legend_buf = nil, nil
+  legend:close()
 end
 
 local function open_legend()
-  close_legend()
   vim.api.nvim_set_hl(0, "ReviewBaseActive", { fg = "#5aa0d4", bold = true, default = true })
   vim.api.nvim_set_hl(0, "ReviewBaseLegend", { fg = "#888888", default = true })
   local text = " ● active base "
-  legend_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(legend_buf, 0, -1, false, { text })
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text })
   local ns = vim.api.nvim_create_namespace("review_base_legend")
-  vim.api.nvim_buf_add_highlight(legend_buf, ns, "ReviewBaseActive", 0, 1, 4)
-  vim.api.nvim_buf_add_highlight(legend_buf, ns, "ReviewBaseLegend", 0, 4, #text)
+  vim.api.nvim_buf_add_highlight(buf, ns, "ReviewBaseActive", 0, 1, 4)
+  vim.api.nvim_buf_add_highlight(buf, ns, "ReviewBaseLegend", 0, 4, #text)
   local width = vim.api.nvim_strwidth(text)
-  legend_win = vim.api.nvim_open_win(legend_buf, false, {
+  legend:mount(buf, {
     relative = "editor",
     row = vim.o.lines - 4,
     col = math.floor((vim.o.columns - width - 2) / 2),
@@ -163,6 +157,58 @@ local function list_branches(root)
   return entries
 end
 
+-- Build a telescope entry for a review-base candidate: the clear sentinel, the
+-- active base (● + highlight), or a plain branch.
+local function build_branch_entry(val, active)
+  local display, hl_ranges
+  if val == CLEAR_SENTINEL then
+    display = "[ clear base ]"
+  elseif val == active then
+    display = "● " .. val
+    hl_ranges = { { { 0, 3 }, "ReviewBaseActive" } }
+  else
+    display = "  " .. val
+  end
+  return {
+    value = val,
+    ordinal = val == CLEAR_SENTINEL and "clear base" or val,
+    display = hl_ranges and function()
+      return display, hl_ranges
+    end or display,
+  }
+end
+
+-- Apply a chosen review-base value: clear, set a valid ref, or reject an
+-- invalid one. Notifies and calls on_done with the resulting ref (or nil for a
+-- clear / invalid / empty selection). Separated from the picker so the decision
+-- logic is testable without telescope.
+local function apply_selection(root, value, on_done)
+  local function done(ref)
+    if on_done then
+      on_done(ref)
+    end
+  end
+  if not value then
+    return done(nil)
+  end
+  if value == CLEAR_SENTINEL then
+    M.clear(root)
+    vim.notify("Review base cleared")
+    return done(nil)
+  end
+  if not M.resolve(root, value) then
+    vim.notify("Ref does not exist: " .. value, vim.log.levels.ERROR)
+    return done(nil)
+  end
+  M.set(root, value)
+  vim.notify("Review base set to " .. value)
+  return done(value)
+end
+
+M._CLEAR_SENTINEL = CLEAR_SENTINEL
+M._build_branch_entry = build_branch_entry
+M._apply_selection = apply_selection
+
 function M.pick(root, on_done)
   if not root then
     vim.notify("Not a git repo", vim.log.levels.WARN)
@@ -191,22 +237,7 @@ function M.pick(root, on_done)
       finder = finders.new_table({
         results = results,
         entry_maker = function(val)
-          local display, hl_ranges
-          if val == CLEAR_SENTINEL then
-            display = "[ clear base ]"
-          elseif val == active then
-            display = "● " .. val
-            hl_ranges = { { { 0, 3 }, "ReviewBaseActive" } }
-          else
-            display = "  " .. val
-          end
-          return {
-            value = val,
-            ordinal = val == CLEAR_SENTINEL and "clear base" or val,
-            display = hl_ranges and function()
-              return display, hl_ranges
-            end or display,
-          }
+          return build_branch_entry(val, active)
         end,
       }),
       sorter = conf.generic_sorter({}),
@@ -232,32 +263,7 @@ function M.pick(root, on_done)
         actions.select_default:replace(function()
           local selection = action_state.get_selected_entry()
           actions.close(prompt_bufnr)
-          if not selection then
-            if on_done then
-              on_done(nil)
-            end
-            return
-          end
-          if selection.value == CLEAR_SENTINEL then
-            M.clear(root)
-            vim.notify("Review base cleared")
-            if on_done then
-              on_done(nil)
-            end
-            return
-          end
-          if not M.resolve(root, selection.value) then
-            vim.notify("Ref does not exist: " .. selection.value, vim.log.levels.ERROR)
-            if on_done then
-              on_done(nil)
-            end
-            return
-          end
-          M.set(root, selection.value)
-          vim.notify("Review base set to " .. selection.value)
-          if on_done then
-            on_done(selection.value)
-          end
+          apply_selection(root, selection and selection.value or nil, on_done)
         end)
         vim.api.nvim_create_autocmd({ "BufWipeout", "BufLeave" }, {
           buffer = prompt_bufnr,

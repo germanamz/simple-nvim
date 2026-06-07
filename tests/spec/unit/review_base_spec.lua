@@ -180,6 +180,50 @@ describe("config.review_base", function()
     end)
   end)
 
+  describe("apply_selection", function()
+    local repo
+    before_each(function()
+      repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+    end)
+
+    it("clears the base on the clear sentinel and reports nil", function()
+      M.set(repo, "main")
+      local got = "unset"
+      M._apply_selection(repo, M._CLEAR_SENTINEL, function(ref)
+        got = ref
+      end)
+      assert.is_nil(M.get(repo))
+      assert.is_nil(got)
+    end)
+
+    it("sets a valid branch and reports it", function()
+      vim.fn.system({ "git", "-C", repo, "branch", "feature", "HEAD" })
+      local got = "unset"
+      M._apply_selection(repo, "feature", function(ref)
+        got = ref
+      end)
+      assert.are.equal("feature", M.get(repo))
+      assert.are.equal("feature", got)
+    end)
+
+    it("rejects an invalid ref without setting, reporting nil", function()
+      local got = "unset"
+      M._apply_selection(repo, "no-such-ref", function(ref)
+        got = ref
+      end)
+      assert.is_nil(M.get(repo))
+      assert.is_nil(got)
+    end)
+
+    it("reports nil when there is no selection", function()
+      local got = "unset"
+      M._apply_selection(repo, nil, function(ref)
+        got = ref
+      end)
+      assert.is_nil(got)
+    end)
+  end)
+
   describe("atomic write", function()
     it("leaves the state file uncorrupted when os.rename errors", function()
       local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })

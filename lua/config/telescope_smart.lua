@@ -35,6 +35,7 @@ local M = {}
 local review_base = require("config.review_base")
 local git = require("util.git")
 local git_status_codes = require("config.git_status_codes")
+local Overlay = require("util.overlay")
 
 -- ===================== helpers =====================
 
@@ -224,16 +225,10 @@ local function set_legend_highlights()
   vim.api.nvim_set_hl(0, "SmartFilesLegendCount", { fg = "#cccccc", bold = true, default = true })
 end
 
-local legend_win, legend_buf
+local legend = Overlay.new()
 
 local function close_legend()
-  if legend_win and vim.api.nvim_win_is_valid(legend_win) then
-    vim.api.nvim_win_close(legend_win, true)
-  end
-  if legend_buf and vim.api.nvim_buf_is_valid(legend_buf) then
-    vim.api.nvim_buf_delete(legend_buf, { force = true })
-  end
-  legend_win, legend_buf = nil, nil
+  legend:close()
 end
 
 local function append_segment(text, ranges, seg, separator)
@@ -393,16 +388,16 @@ local function create_legend_window(results_win, lines, ranges_by_line)
     return
   end
 
-  legend_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(legend_buf, 0, -1, false, lines)
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   local ns = vim.api.nvim_create_namespace("smart_files_legend")
   for lnum, ranges in ipairs(ranges_by_line) do
     for _, r in ipairs(ranges) do
-      vim.api.nvim_buf_add_highlight(legend_buf, ns, r[1], lnum - 1, r[2], r[3])
+      vim.api.nvim_buf_add_highlight(buf, ns, r[1], lnum - 1, r[2], r[3])
     end
   end
 
-  legend_win = vim.api.nvim_open_win(legend_buf, false, {
+  legend:mount(buf, {
     relative = "editor",
     row = pos[1] + height - #lines,
     col = pos[2],
