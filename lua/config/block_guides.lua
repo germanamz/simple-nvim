@@ -6,6 +6,8 @@
 -- docs/superpowers/specs/2026-06-08-block-scope-guides-design.md.
 local M = {}
 
+local cache = {} -- [buf] = { tick = <changedtick>, blocks = {...} }
+
 -- Display width of a line's leading whitespace, honoring tab stops.
 function M._indent_width(line, tabstop)
   tabstop = tabstop or 8
@@ -72,6 +74,45 @@ function M.guides_at(blocks, chain, row, row_indent)
     return a.col < b.col
   end)
   return out
+end
+
+-- All foldable blocks in `buf` as { s, e, col }, via the language's folds query.
+-- col is the display width of the block header's leading indentation.
+function M.collect_foldable_blocks(buf)
+  local blocks = {}
+  local ok, parser = pcall(vim.treesitter.get_parser, buf)
+  if not ok or not parser then
+    return blocks
+  end
+  local query = vim.treesitter.query.get(parser:lang(), "folds")
+  if not query then
+    return blocks
+  end
+  local tabstop = vim.bo[buf].tabstop
+  for _, tree in ipairs(parser:parse()) do
+    for id, node in query:iter_captures(tree:root(), buf, 0, -1) do
+      if query.captures[id] == "fold" then
+        local s, _, e = node:range()
+        if e > s then
+          local header = vim.api.nvim_buf_get_lines(buf, s, s + 1, false)[1] or ""
+          blocks[#blocks + 1] = { s = s, e = e, col = M._indent_width(header, tabstop) }
+        end
+      end
+    end
+  end
+  return blocks
+end
+
+-- collect_foldable_blocks cached per buffer changedtick.
+function M.blocks_for(buf)
+  local tick = vim.api.nvim_buf_get_changedtick(buf)
+  local c = cache[buf]
+  if c and c.tick == tick then
+    return c.blocks
+  end
+  local blocks = M.collect_foldable_blocks(buf)
+  cache[buf] = { tick = tick, blocks = blocks }
+  return blocks
 end
 
 return M
