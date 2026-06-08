@@ -100,14 +100,25 @@ outermost) is the chain. Each chain node yields a `{start_row, end_row,
 indent_col}` triple, where `indent_col` is the column of the block body's
 indentation (where its guide line is drawn).
 
-**Foldability test.** Resolve via the language's `folds.scm` query
-(`vim.treesitter.query.get(lang, "folds")`), matching nodes captured as `@fold`.
-A node is foldable iff it (or its fold-defining child) is captured. Computed once
-per `(buf, changedtick)` and cached: a set/interval structure of foldable ranges
-the cursor walk and the dim-guide pass both consult. Fallback when a language has
-no `folds.scm`: treat multi-line `block`/`*_statement`/`*_declaration`-shaped
-nodes as foldable (a small named-type heuristic) so the feature degrades rather
-than disappears.
+**Foldability test.** Collected by mirroring Neovim's own treesitter foldexpr
+(`runtime/lua/vim/treesitter/_fold.lua`): `parser:parse(true)` then
+`parser:for_each_tree`, and for each tree resolve **that tree's own language**
+`folds` query (`vim.treesitter.query.get(ltree:lang(), "folds")`), iterating with
+`iter_matches` and capturing `@fold`. This matters in three ways the naive
+top-level-only approach gets wrong:
+
+- **Injected languages** (JS/CSS in HTML, SQL-in-Lua, etc.) are folded by their
+  own language's query, so embedded code gets guides too.
+- **Quantified `+` fold groups** (a run of imports captured as one `@fold`)
+  collapse into a single block — `iter_matches` groups the nodes; the span runs
+  from the first node to the last.
+- **Range directives + the `end_col == 0` correction** (`vim.treesitter.get_range`
+  with the match metadata) keep extents identical to what `foldexpr()` folds.
+
+Computed once per `(buf, changedtick)` and cached. No fallback for languages
+without a `folds.scm`: every parser this config installs ships one, so the
+heuristic-node fallback considered earlier is dropped as YAGNI — a folds-less
+language simply shows no guides.
 
 **Sibling exclusion** is automatic: only nodes on the cursor's root path are in
 the chain, so a sibling block (not an ancestor) never enters it.
@@ -167,6 +178,20 @@ ranges.
 - **Insert mode** — chain updates on `CursorMovedI` too, debounced.
 - **Disabled / non-eligible buffer** — `on_win` returns `false` to skip
   `on_line` entirely; zero per-line cost.
+
+## Known limitations (accepted)
+
+- **Dedented structural lines** — a block whose guide sits at the header indent
+  (`else` / `elseif` / `case` / `except:` at the same column as the keyword)
+  shows a one-line gap in that block's *own* bar there. Drawing the bar on those
+  lines would overlay (and visually corrupt) the keyword glyph, since the guide
+  column is occupied by code rather than whitespace, so the gap is the safe
+  behavior. Parent bars (at shallower columns) still run continuously through
+  such lines.
+- **Horizontal scroll** — `virt_text_win_col` pins bars to absolute window
+  columns and does not track `leftcol`. This is moot here: code buffers use
+  `wrap = true` (the only `nowrap` filetype is markdown, which is excluded), so
+  there is no horizontal scrolling to desync against.
 
 ## Testing
 

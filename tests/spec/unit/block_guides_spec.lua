@@ -109,4 +109,33 @@ describe("config.block_guides", function()
       }, guides)
     end)
   end)
+
+  describe("_chain_signature", function()
+    local blocks = {
+      { s = 0, e = 6, col = 0 },
+      { s = 1, e = 2, col = 2 },
+      { s = 3, e = 5, col = 2 },
+    }
+
+    it("is empty when there is no active block", function()
+      assert.are.equal("", bg._chain_signature(blocks, bg.chain_at(blocks, 10)))
+      assert.are.equal("", bg._chain_signature(blocks, nil))
+    end)
+
+    it("is stable for cursor rows that share the same chain", function()
+      -- rows 3, 4, 5 are all inside the same {function, if} chain
+      local a = bg._chain_signature(blocks, bg.chain_at(blocks, 3))
+      local b = bg._chain_signature(blocks, bg.chain_at(blocks, 4))
+      local c = bg._chain_signature(blocks, bg.chain_at(blocks, 5))
+      assert.are.equal(a, b)
+      assert.are.equal(b, c)
+      assert.is_true(#a > 0)
+    end)
+
+    it("differs when the cursor crosses into a different chain", function()
+      local inner = bg._chain_signature(blocks, bg.chain_at(blocks, 4)) -- {fn, if#3}
+      local sibling = bg._chain_signature(blocks, bg.chain_at(blocks, 1)) -- {fn, if#2}
+      assert.are_not.equal(inner, sibling)
+    end)
+  end)
 end)

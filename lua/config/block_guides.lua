@@ -83,30 +83,65 @@ function M.guides_at(blocks, chain, row, row_indent)
   return out
 end
 
--- All foldable blocks in `buf` as { s, e, col }, via the language's folds query.
--- col is the display width of the block header's leading indentation.
+-- Stable string identity of the cursor's chain (the set of chain blocks, by
+-- extent+col). The cursor-move handler uses this to skip a repaint when moving
+-- between rows inside the same block leaves the chain unchanged. The active
+-- block is the innermost of the set, so the set alone determines the rendering.
+function M._chain_signature(blocks, chain)
+  if not chain or not chain.active then
+    return ""
+  end
+  local parts = {}
+  for i in pairs(chain.set) do
+    local b = blocks[i]
+    parts[#parts + 1] = b.s .. ":" .. b.e .. ":" .. b.col
+  end
+  table.sort(parts)
+  return table.concat(parts, ",")
+end
+
+-- All foldable blocks in `buf` as { s, e, col }, mirroring core's treesitter
+-- foldexpr (runtime/lua/vim/treesitter/_fold.lua): every parsed tree — including
+-- injected languages (JS in HTML, etc.) — is matched with its OWN language's
+-- folds query via iter_matches, so quantified `+` fold groups (e.g. a run of
+-- imports) collapse into one block and embedded code is included. The
+-- `end_col == 0` correction and per-capture metadata keep ranges identical to
+-- what `vim.treesitter.foldexpr()` folds. col is the display width of the block
+-- header's leading indentation.
 function M.collect_foldable_blocks(buf)
   local blocks = {}
   local ok, parser = pcall(vim.treesitter.get_parser, buf)
   if not ok or not parser then
     return blocks
   end
-  local query = vim.treesitter.query.get(parser:lang(), "folds")
-  if not query then
-    return blocks
-  end
   local tabstop = vim.bo[buf].tabstop
-  for _, tree in ipairs(parser:parse()) do
-    for id, node in query:iter_captures(tree:root(), buf, 0, -1) do
-      if query.captures[id] == "fold" then
-        local s, _, e = node:range()
-        if e > s then
-          local header = vim.api.nvim_buf_get_lines(buf, s, s + 1, false)[1] or ""
-          blocks[#blocks + 1] = { s = s, e = e, col = M._indent_width(header, tabstop) }
+  parser:parse(true)
+  parser:for_each_tree(function(tree, ltree)
+    local query = vim.treesitter.query.get(ltree:lang(), "folds")
+    if not query then
+      return
+    end
+    for _, match, metadata in query:iter_matches(tree:root(), buf, 0, -1) do
+      for id, nodes in pairs(match) do
+        if query.captures[id] == "fold" then
+          local range = vim.treesitter.get_range(nodes[1], buf, metadata[id])
+          local s, e, e_col = range[1], range[4], range[5]
+          if #nodes > 1 then
+            -- a quantified `+` group: span from the first node to the last
+            local last = vim.treesitter.get_range(nodes[#nodes], buf, metadata[id])
+            e, e_col = last[4], last[5]
+          end
+          if e_col == 0 then
+            e = e - 1
+          end
+          if e > s then
+            local header = vim.api.nvim_buf_get_lines(buf, s, s + 1, false)[1] or ""
+            blocks[#blocks + 1] = { s = s, e = e, col = M._indent_width(header, tabstop) }
+          end
         end
       end
     end
-  end
+  end)
   return blocks
 end
 
@@ -199,23 +234,50 @@ function M.setup()
     end,
   })
 
-  -- Repaint the moved window on cursor move so the chain recolors across the
-  -- whole viewport (a partial redraw would leave stale ephemeral guides).
-  -- Coalesced to once per event-loop tick.
-  local redraw_scheduled = false
+  -- Repaint the moved window only when the cursor's chain actually changes
+  -- (crossing a foldable-block boundary) so the guides recolor across the whole
+  -- viewport. Moving within the same block, or moving in an ineligible buffer,
+  -- forces no redraw. The repaint is coalesced to once per event-loop tick.
+  local last_sig = {} -- [win] = last rendered chain signature
+  local redraw_pending = {} -- [win] = true while a repaint is queued
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
     callback = function()
-      if not enabled or redraw_scheduled then
+      if not enabled then
         return
       end
-      redraw_scheduled = true
       local win = vim.api.nvim_get_current_win()
+      local buf = vim.api.nvim_win_get_buf(win)
+      if not eligible(buf) then
+        return
+      end
+      local blocks = M.blocks_for(buf)
+      local row = vim.api.nvim_win_get_cursor(win)[1] - 1
+      local sig = M._chain_signature(blocks, M.chain_at(blocks, row))
+      if sig == last_sig[win] then
+        return
+      end
+      last_sig[win] = sig
+      if redraw_pending[win] then
+        return
+      end
+      redraw_pending[win] = true
       vim.schedule(function()
-        redraw_scheduled = false
+        redraw_pending[win] = nil
         if vim.api.nvim_win_is_valid(win) then
           pcall(vim.api.nvim__redraw, { win = win, valid = false })
         end
       end)
+    end,
+  })
+
+  -- Forget per-window chain state when a window closes.
+  vim.api.nvim_create_autocmd("WinClosed", {
+    callback = function(args)
+      local win = tonumber(args.match)
+      if win then
+        last_sig[win] = nil
+        redraw_pending[win] = nil
+      end
     end,
   })
 
