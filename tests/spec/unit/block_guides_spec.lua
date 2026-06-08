@@ -23,4 +23,43 @@ describe("config.block_guides", function()
       assert.are.equal(2, bg._indent_width("  x  y", 2))
     end)
   end)
+
+  describe("chain_at", function()
+    -- function (rows 0..6) containing a sibling if (1..2) and the cursor's
+    -- if (3..5); cursor on row 4.
+    local blocks = {
+      { s = 0, e = 6, col = 0 }, -- 1: function
+      { s = 1, e = 2, col = 2 }, -- 2: sibling if
+      { s = 3, e = 5, col = 2 }, -- 3: cursor's if
+    }
+
+    it("returns the innermost containing block as active", function()
+      local chain = bg.chain_at(blocks, 4)
+      assert.are.equal(3, chain.active)
+    end)
+
+    it("includes the parent in the chain set", function()
+      local chain = bg.chain_at(blocks, 4)
+      assert.is_true(chain.set[1]) -- function (parent)
+      assert.is_true(chain.set[3]) -- the if (innermost)
+    end)
+
+    it("excludes sibling blocks the cursor is not inside", function()
+      local chain = bg.chain_at(blocks, 4)
+      assert.is_nil(chain.set[2]) -- sibling if
+    end)
+
+    it("has no active block when the cursor is outside every block", function()
+      local chain = bg.chain_at(blocks, 10)
+      assert.is_nil(chain.active)
+    end)
+
+    it("picks the deeper block on an extent tie via larger col", function()
+      local tied = {
+        { s = 0, e = 2, col = 0 },
+        { s = 0, e = 2, col = 2 },
+      }
+      assert.are.equal(2, bg.chain_at(tied, 1).active)
+    end)
+  end)
 end)

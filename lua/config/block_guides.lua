@@ -23,4 +23,30 @@ function M._indent_width(line, tabstop)
   return w
 end
 
+-- blocks: array of { s, e, col } (0-indexed rows; col = display column).
+-- Returns { active = <index|nil>, set = { [index] = true } } for the blocks
+-- whose extent contains cursor_row; active = innermost (smallest extent, then
+-- deeper col on a tie).
+function M.chain_at(blocks, cursor_row)
+  local containing = {}
+  for i, b in ipairs(blocks) do
+    if cursor_row >= b.s and cursor_row <= b.e then
+      containing[#containing + 1] = i
+    end
+  end
+  table.sort(containing, function(ia, ib)
+    local a, b = blocks[ia], blocks[ib]
+    local da, db = a.e - a.s, b.e - b.s
+    if da ~= db then
+      return da < db
+    end
+    return a.col > b.col
+  end)
+  local set = {}
+  for _, i in ipairs(containing) do
+    set[i] = true
+  end
+  return { active = containing[1], set = set }
+end
+
 return M
