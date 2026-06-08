@@ -8,6 +8,13 @@ local M = {}
 
 local cache = {} -- [buf] = { tick = <changedtick>, blocks = {...} }
 
+local ns = vim.api.nvim_create_namespace("block_guides")
+local GUIDE_CHAR = "│"
+local HL = { active = "BlockGuideActive", chain = "BlockGuideChain", dim = "BlockGuide" }
+local EXCLUDED_FT = { [""] = true, markdown = true, mdx = true, help = true, text = true }
+local enabled = true
+local draw = { active = false, blocks = nil, chain = nil } -- set per redraw in on_win
+
 -- Display width of a line's leading whitespace, honoring tab stops.
 function M._indent_width(line, tabstop)
   tabstop = tabstop or 8
@@ -121,6 +128,98 @@ function M.guides_for_row(blocks, chain, buf, row)
   local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
   local indent = line:match("^%s*$") and math.huge or M._indent_width(line, vim.bo[buf].tabstop)
   return M.guides_at(blocks, chain, row, indent)
+end
+
+function M.is_enabled()
+  return enabled
+end
+
+local function eligible(buf)
+  if not enabled then
+    return false
+  end
+  if EXCLUDED_FT[vim.bo[buf].filetype] then
+    return false
+  end
+  return vim.treesitter.highlighter.active[buf] ~= nil
+end
+
+local function ensure_highlights()
+  vim.api.nvim_set_hl(0, "BlockGuide", { link = "Whitespace", default = true })
+  vim.api.nvim_set_hl(0, "BlockGuideChain", { link = "Comment", default = true })
+  vim.api.nvim_set_hl(0, "BlockGuideActive", { link = "Function", default = true })
+end
+
+-- Decoration provider: on_win runs once per window per redraw (compute the
+-- chain from that window's cursor); on_line paints ephemeral overlay guides.
+local function on_win(_, win, buf)
+  draw.active = false
+  if not eligible(buf) then
+    return false
+  end
+  local blocks = M.blocks_for(buf)
+  if #blocks == 0 then
+    return false
+  end
+  draw.active = true
+  draw.blocks = blocks
+  draw.chain = M.chain_at(blocks, vim.api.nvim_win_get_cursor(win)[1] - 1)
+  return true
+end
+
+local function on_line(_, _win, buf, row)
+  if not draw.active then
+    return
+  end
+  for _, g in ipairs(M.guides_for_row(draw.blocks, draw.chain, buf, row)) do
+    vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
+      ephemeral = true,
+      virt_text = { { GUIDE_CHAR, HL[g.tier] } },
+      virt_text_win_col = g.col,
+      hl_mode = "combine",
+    })
+  end
+end
+
+function M.toggle()
+  enabled = not enabled
+  pcall(vim.api.nvim__redraw, { valid = false, flush = true })
+  vim.notify("Block guides " .. (enabled and "on" or "off"))
+end
+
+function M.setup()
+  ensure_highlights()
+  vim.api.nvim_create_autocmd("ColorScheme", { callback = ensure_highlights })
+  vim.api.nvim_set_decoration_provider(ns, { on_win = on_win, on_line = on_line })
+
+  -- Drop the per-buffer cache when a buffer is wiped.
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+    callback = function(args)
+      cache[args.buf] = nil
+    end,
+  })
+
+  -- Repaint the moved window on cursor move so the chain recolors across the
+  -- whole viewport (a partial redraw would leave stale ephemeral guides).
+  -- Coalesced to once per event-loop tick.
+  local redraw_scheduled = false
+  vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+    callback = function()
+      if not enabled or redraw_scheduled then
+        return
+      end
+      redraw_scheduled = true
+      local win = vim.api.nvim_get_current_win()
+      vim.schedule(function()
+        redraw_scheduled = false
+        if vim.api.nvim_win_is_valid(win) then
+          pcall(vim.api.nvim__redraw, { win = win, valid = false })
+        end
+      end)
+    end,
+  })
+
+  vim.keymap.set("n", "<leader>ub", M.toggle, { desc = "Toggle block guides" })
 end
 
 return M

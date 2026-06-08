@@ -83,4 +83,37 @@ describe("e2e: block_guides", function()
     local guides = bg.guides_for_row(blocks, chain, buf, 4) -- the blank row
     assert.is_true(#guides >= 1, "expected guides to draw through the blank line")
   end)
+
+  it("defines the three guide highlight groups", function()
+    open_sample()
+    for _, name in ipairs({ "BlockGuide", "BlockGuideChain", "BlockGuideActive" }) do
+      local hl = vim.api.nvim_get_hl(0, { name = name })
+      assert.is_true(next(hl) ~= nil, name .. " highlight group is not defined")
+    end
+  end)
+
+  it("renders without error and toggles on and off", function()
+    open_sample()
+    assert.is_true(bg.is_enabled())
+    vim.cmd("redraw")
+
+    bg.toggle()
+    assert.is_false(bg.is_enabled())
+    vim.cmd("redraw")
+
+    bg.toggle()
+    assert.is_true(bg.is_enabled())
+  end)
+
+  it("registers the <leader>ub toggle keymap", function()
+    open_sample()
+    local found = false
+    for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
+      if m.lhs == " ub" then
+        found = true
+        break
+      end
+    end
+    assert.is_true(found, "<leader>ub keymap not registered")
+  end)
 end)
