@@ -49,4 +49,29 @@ function M.chain_at(blocks, cursor_row)
   return { active = containing[1], set = set }
 end
 
+-- For screen `row` with leading-indent display width `row_indent` (pass
+-- math.huge for blank lines so all covering guides draw), return the guides to
+-- paint: array of { col, tier } sorted by col. tier is "active" for the
+-- cursor's innermost block, "chain" for a parent in the chain, else "dim".
+function M.guides_at(blocks, chain, row, row_indent)
+  local out = {}
+  for i, b in ipairs(blocks) do
+    if row >= b.s and row <= b.e and row_indent > b.col then
+      local tier = "dim"
+      if chain then
+        if chain.active == i then
+          tier = "active"
+        elseif chain.set[i] then
+          tier = "chain"
+        end
+      end
+      out[#out + 1] = { col = b.col, tier = tier }
+    end
+  end
+  table.sort(out, function(a, b)
+    return a.col < b.col
+  end)
+  return out
+end
+
 return M

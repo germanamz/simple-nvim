@@ -62,4 +62,51 @@ describe("config.block_guides", function()
       assert.are.equal(2, bg.chain_at(tied, 1).active)
     end)
   end)
+
+  describe("guides_at", function()
+    local blocks = {
+      { s = 0, e = 6, col = 0 }, -- function
+      { s = 1, e = 2, col = 2 }, -- sibling if
+      { s = 3, e = 5, col = 2 }, -- cursor's if
+    }
+    local chain = bg.chain_at(blocks, 4) -- active=3, set={1,3}
+
+    it("classifies the innermost block as active and the parent as chain", function()
+      -- row 4, indented past col 2 (e.g. body at col 4)
+      local guides = bg.guides_at(blocks, chain, 4, 4)
+      assert.are.same({
+        { col = 0, tier = "chain" }, -- function
+        { col = 2, tier = "active" }, -- cursor's if
+      }, guides)
+    end)
+
+    it("marks a sibling block's guide as dim", function()
+      -- row 2 is inside the sibling if (block 2) and the function (block 1)
+      local guides = bg.guides_at(blocks, chain, 2, 4)
+      assert.are.same({
+        { col = 0, tier = "chain" }, -- function (in chain)
+        { col = 2, tier = "dim" }, -- sibling if (not in chain)
+      }, guides)
+    end)
+
+    it("omits a guide when the line's indent does not reach past its col", function()
+      -- row 4, indent only 2 → the col-2 guide is gated out (cell has code),
+      -- but the col-0 function guide still draws.
+      local guides = bg.guides_at(blocks, chain, 4, 2)
+      assert.are.same({ { col = 0, tier = "chain" } }, guides)
+    end)
+
+    it("draws every covering guide on a blank line (math.huge indent)", function()
+      local guides = bg.guides_at(blocks, chain, 4, math.huge)
+      assert.are.equal(2, #guides)
+    end)
+
+    it("returns dim guides when there is no chain", function()
+      local guides = bg.guides_at(blocks, nil, 4, 4)
+      assert.are.same({
+        { col = 0, tier = "dim" },
+        { col = 2, tier = "dim" },
+      }, guides)
+    end)
+  end)
 end)
