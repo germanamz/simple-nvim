@@ -115,4 +115,12 @@ function M.blocks_for(buf)
   return blocks
 end
 
+-- Guides to paint on `row`, reading the line for its indent. Blank/whitespace-
+-- only lines use math.huge so every covering guide draws through the gap.
+function M.guides_for_row(blocks, chain, buf, row)
+  local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
+  local indent = line:match("^%s*$") and math.huge or M._indent_width(line, vim.bo[buf].tabstop)
+  return M.guides_at(blocks, chain, row, indent)
+end
+
 return M

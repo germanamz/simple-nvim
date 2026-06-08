@@ -59,4 +59,28 @@ describe("e2e: block_guides", function()
     assert.is_not_nil(by_start[2], "expected a foldable block starting at row 2 (if)")
     assert.are.equal(2, by_start[2].col)
   end)
+
+  it("renders active + chain guides for the cursor's row", function()
+    local buf = open_sample()
+    local blocks = bg.blocks_for(buf)
+    local chain = bg.chain_at(blocks, 3) -- cursor on row 3 (inside the if)
+
+    -- Row 3 body is indented 4; both the function (col 0) and if (col 2) cover
+    -- it. The if is innermost → active; the function is a parent → chain.
+    local guides = bg.guides_for_row(blocks, chain, buf, 3)
+    assert.are.same({
+      { col = 0, tier = "chain" },
+      { col = 2, tier = "active" },
+    }, guides)
+  end)
+
+  it("draws guides through a blank line inside a block", function()
+    local buf = open_sample()
+    -- Append a blank line inside the if body, then a closing line.
+    vim.api.nvim_buf_set_lines(buf, 4, 4, false, { "" }) -- new blank row 4
+    local blocks = bg.blocks_for(buf)
+    local chain = bg.chain_at(blocks, 3)
+    local guides = bg.guides_for_row(blocks, chain, buf, 4) -- the blank row
+    assert.is_true(#guides >= 1, "expected guides to draw through the blank line")
+  end)
 end)
