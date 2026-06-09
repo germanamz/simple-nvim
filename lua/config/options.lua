@@ -116,19 +116,17 @@ vim.api.nvim_create_autocmd({ "OptionSet" }, {
   end,
 })
 
--- Writing-friendly markdown: paragraph numbering in gutter, thin ruler line at
--- column 80, hard-wrap before the word that would push past textwidth. The
--- <leader>w rewrap logic lives in config.markdown_rewrap.
+-- Writing-friendly markdown: paragraph numbering in the gutter and a thin ruler
+-- at column 80 as a reading guide. Prose is soft-wrapped (visual only) instead
+-- of hard-wrapped on disk, so line length is left to the file itself (or a
+-- project's .editorconfig / prettier). 't' is cleared because the bundled
+-- markdown ftplugin sets it; otherwise an editorconfig 'max_line_length' would
+-- set 'textwidth' and resume auto-hard-wrapping prose as you type.
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "markdown", "mdx" },
   callback = function(args)
-    vim.opt_local.textwidth = 80
-    vim.opt_local.formatoptions:append("t") -- auto-wrap text using textwidth
-    vim.opt_local.wrap = false -- prose is hard-wrapped; long table rows scroll horizontally instead of soft-wrapping ugly
-    vim.keymap.set("n", "<leader>w", require("config.markdown_rewrap").rewrap, {
-      buffer = args.buf,
-      desc = "Rewrap from cursor to end of file",
-    })
+    vim.opt_local.wrap = true -- soft-wrap long lines for readability
+    vim.opt_local.formatoptions:remove("t") -- never auto-hard-wrap prose
     require("config.markdown_paragraphs").attach(args.buf)
   end,
 })
