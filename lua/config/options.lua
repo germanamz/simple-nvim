@@ -100,32 +100,15 @@ opt.splitright = true
 opt.scrolloff = 8
 opt.sidescrolloff = 8
 opt.laststatus = 3
-opt.wrap = true
-opt.linebreak = true -- wrap at word boundaries, not mid-word
-opt.breakindent = true -- wrapped lines keep indent
-opt.showbreak = "↪ "
-
--- Force wrap inside diff mode (vim disables it by default)
-vim.api.nvim_create_autocmd({ "OptionSet" }, {
-  pattern = "diff",
-  callback = function()
-    if vim.v.option_new == "1" then
-      vim.opt_local.wrap = true
-      vim.opt_local.linebreak = true
-    end
-  end,
-})
+opt.wrap = false -- no soft-wrap; long lines (incl. wide tables) scroll horizontally
 
 -- Writing-friendly markdown: paragraph numbering in the gutter and a thin ruler
--- at column 80 as a reading guide. Prose is soft-wrapped (visual only) instead
--- of hard-wrapped on disk, so line length is left to the file itself (or a
--- project's .editorconfig / prettier). 't' is cleared because the bundled
--- markdown ftplugin sets it; otherwise an editorconfig 'max_line_length' would
--- set 'textwidth' and resume auto-hard-wrapping prose as you type.
+-- at column 80 as a reading guide. 't' is cleared because the bundled markdown
+-- ftplugin sets it; otherwise an editorconfig 'max_line_length' would set
+-- 'textwidth' and start auto-hard-wrapping prose as you type.
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "markdown", "mdx" },
   callback = function(args)
-    vim.opt_local.wrap = true -- soft-wrap long lines for readability
     vim.opt_local.formatoptions:remove("t") -- never auto-hard-wrap prose
     require("config.markdown_paragraphs").attach(args.buf)
   end,
