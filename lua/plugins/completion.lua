@@ -22,6 +22,10 @@ return {
     sources = { default = { "lsp", "path", "buffer" } },
     completion = {
       documentation = { auto_show = true, auto_show_delay_ms = 200 },
+      -- Don't append "()" when accepting a function/method from the menu.
+      -- Closing pairs are instead added only when typed explicitly, via
+      -- mini.pairs (see lua/plugins/mini-pairs.lua).
+      accept = { auto_brackets = { enabled = false } },
     },
     signature = { enabled = true },
   },
