@@ -49,11 +49,11 @@ describe("smoke: boot", function()
   describe("globally-registered keymaps", function()
     local expected_descriptions = {
       "Find files",
-      "Live grep",
+      "Live grep (project root)",
       "Buffers",
       "Help tags",
       "Recent files (cwd)",
-      "Grep word under cursor",
+      "Grep word under cursor (project root)",
       "Diagnostics",
       "Keymaps",
       "Commands",

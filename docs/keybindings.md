@@ -43,7 +43,7 @@ Leader = `<Space>` · Local leader = `\`
 | ----------------- | ----------------------------------------------------- |
 | `<Space><Space>`  | Files picker (changed-first ordering)                 |
 | `<Space>ff`       | Find files                                            |
-| `<Space>fg`       | Live grep                                             |
+| `<Space>fg`       | Live grep (from project/git root)                     |
 | `<Space>fb`       | Buffer list                                           |
 | `<Space>f/`       | Fuzzy find inside current buffer                      |
 | `<Space>?`        | Telescope keymaps (searchable list of *everything*)   |
@@ -444,8 +444,8 @@ All under `<Space>f` (group: "find").
 | `<Space><Space>` | Smart files picker — changed-first ordering   |
 | `<Space>ff`    | Find files (respects `.gitignore`)              |
 | `<Space>fi`    | Find files *including* gitignored / hidden      |
-| `<Space>fg`    | Live grep                                       |
-| `<Space>fs`    | Grep word under cursor                          |
+| `<Space>fg`    | Live grep (from project/git root)               |
+| `<Space>fs`    | Grep word under cursor (from project/git root)  |
 | `<Space>fb`    | Buffers                                         |
 | `<Space>fr`    | Recent files (`oldfiles`)                       |
 | `<Space>fh`    | Help tags                                       |

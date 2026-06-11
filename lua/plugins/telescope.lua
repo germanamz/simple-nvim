@@ -1,3 +1,10 @@
+-- Grep pickers search from the repo toplevel (cwd when outside a repo) so
+-- results always cover the whole project, even if the cwd has drifted from
+-- where nvim was launched.
+local function grep_root()
+  return require("util.git").root() or vim.fn.getcwd()
+end
+
 return {
   {
     "nvim-telescope/telescope.nvim",
@@ -20,11 +27,23 @@ return {
         "<cmd>Telescope find_files no_ignore=true hidden=true<cr>",
         desc = "Find files (incl. gitignored)",
       },
-      { "<leader>fg", "<cmd>Telescope live_grep<cr>", desc = "Live grep" },
+      {
+        "<leader>fg",
+        function()
+          require("telescope.builtin").live_grep({ cwd = grep_root() })
+        end,
+        desc = "Live grep (project root)",
+      },
       { "<leader>fb", "<cmd>Telescope buffers<cr>", desc = "Buffers" },
       { "<leader>fh", "<cmd>Telescope help_tags<cr>", desc = "Help tags" },
       { "<leader>fr", "<cmd>Telescope oldfiles cwd_only=true<cr>", desc = "Recent files (cwd)" },
-      { "<leader>fs", "<cmd>Telescope grep_string<cr>", desc = "Grep word under cursor" },
+      {
+        "<leader>fs",
+        function()
+          require("telescope.builtin").grep_string({ cwd = grep_root() })
+        end,
+        desc = "Grep word under cursor (project root)",
+      },
       { "<leader>fd", "<cmd>Telescope diagnostics<cr>", desc = "Diagnostics" },
       { "<leader>?", "<cmd>Telescope keymaps<cr>", desc = "Keymaps" },
       { "<leader>fc", "<cmd>Telescope commands<cr>", desc = "Commands" },
