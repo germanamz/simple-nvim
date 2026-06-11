@@ -21,7 +21,9 @@ return {
       current_line_blame_opts = {
         virt_text = true,
         virt_text_pos = "eol",
-        delay = 0,
+        -- Nonzero so blame virtual text isn't recomputed on every cursor
+        -- movement while scrolling through a buffer.
+        delay = 250,
         ignore_whitespace = false,
       },
       on_attach = function(bufnr)
@@ -61,14 +63,6 @@ return {
     review_base.bootstrap()
 
     require("gitsigns").setup(opts)
-
-    vim.api.nvim_create_autocmd("User", {
-      pattern = "ReviewBaseChanged",
-      callback = function(args)
-        local ref = args.data and args.data.ref or nil
-        require("gitsigns").change_base(ref, true)
-      end,
-    })
 
     local function paint()
       vim.api.nvim_set_hl(0, "GitSignsAddNr", { fg = "#ffffff", bg = "#4ea862" })
@@ -307,11 +301,44 @@ return {
       _G.gitsigns_toggle_hunks()
     end, { desc = "Toggle hunk highlights" })
 
+    -- Repaint only the buffer whose hunks changed (the event carries it in
+    -- data.buffer); repainting every loaded buffer on each update made every
+    -- edit O(open buffers). The full repaint stays on the <leader>hh toggle
+    -- and ReviewBaseChanged paths, where shared state really changes.
     vim.api.nvim_create_autocmd("User", {
       pattern = "GitSignsUpdate",
-      callback = function()
+      callback = function(args)
         vim.cmd("redrawstatus")
+        local buf = args.data and args.data.buffer
+        if buf then
+          mark_hunks(buf)
+        else
+          repaint_all()
+        end
+      end,
+    })
+
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "ReviewBaseChanged",
+      callback = function(args)
+        local ref = args.data and args.data.ref or nil
+        require("gitsigns").change_base(ref, true)
+        -- Attached buffers repaint via their own GitSignsUpdate once hunks
+        -- recompute against the new base; unattached (new-vs-base) buffers
+        -- get no such event, so repaint everything here.
         repaint_all()
+      end,
+    })
+
+    -- gitsigns never attaches to files absent from the base/index (untracked
+    -- or new-vs-base), so they get no GitSignsUpdate either. They previously
+    -- relied on other buffers' updates triggering a global repaint; paint
+    -- them explicitly when their file is read instead.
+    vim.api.nvim_create_autocmd("BufReadPost", {
+      callback = function(args)
+        vim.defer_fn(function()
+          mark_hunks(args.buf)
+        end, 200)
       end,
     })
   end,
