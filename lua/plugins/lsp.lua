@@ -121,7 +121,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
 return {
   {
     "mason-org/mason.nvim",
-    lazy = false,
+    cmd = "Mason",
     build = ":MasonUpdate",
     config = function()
       require("mason").setup()
@@ -132,11 +132,14 @@ return {
     -- that vim.lsp.config merges with our per-server overrides. Without it,
     -- `vim.lsp.config("gopls", {...})` errors out because `cmd` is nil.
     "neovim/nvim-lspconfig",
-    lazy = false,
+    lazy = true,
   },
   {
+    -- The whole LSP stack is deferred to the first real file: FileType (which
+    -- triggers vim.lsp.enable's attach) fires after BufReadPre for the same
+    -- buffer, so capabilities are still registered before any server attaches.
     "mason-org/mason-lspconfig.nvim",
-    lazy = false,
+    event = { "BufReadPre", "BufNewFile" },
     dependencies = { "mason-org/mason.nvim", "neovim/nvim-lspconfig", "saghen/blink.cmp" },
     config = function()
       -- Tool installs are owned by mason-tool-installer (reads
@@ -168,7 +171,7 @@ return {
   },
   {
     "WhoIsSethDaniel/mason-tool-installer.nvim",
-    lazy = false,
+    event = { "BufReadPre", "BufNewFile" },
     dependencies = { "mason-org/mason.nvim" },
     config = function()
       local lockfile = vim.fn.stdpath("config") .. "/mason-tool-versions.lock"
@@ -184,7 +187,18 @@ return {
         ensure_installed = ensure_installed,
         auto_update = false,
         run_on_start = true,
+        -- Skip tool-version verification when it already ran in the last day,
+        -- instead of respawning checks on every launch.
+        debounce_hours = 24,
       })
+
+      -- The plugin triggers run_on_start from a VimEnter autocmd. Loading on
+      -- BufReadPre usually happens before VimEnter (file on the command line),
+      -- but when the first file is opened later — after VimEnter — that
+      -- autocmd can never fire, so kick the (debounced) check explicitly.
+      if vim.v.vim_did_enter == 1 then
+        require("mason-tool-installer").check_install(false)
+      end
     end,
   },
 }

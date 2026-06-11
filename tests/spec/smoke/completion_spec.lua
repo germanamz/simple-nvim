@@ -11,13 +11,19 @@ describe("smoke: completion (blink.cmp)", function()
     nvim_env.teardown(root)
   end)
 
-  it("blink.cmp is loaded with no errors", function()
+  -- The LSP stack (and blink with it, as a dependency of mason-lspconfig) is
+  -- deferred to BufReadPre/BufNewFile; a bare headless boot must not load it.
+  -- Loading mason-lspconfig stands in for opening the first real file.
+  local function load_lsp_stack()
+    require("lazy").load({ plugins = { "mason-lspconfig.nvim" } })
+  end
+
+  it("blink.cmp is deferred at startup and loads with the LSP stack", function()
     local plugins = require("lazy.core.config").plugins
     local blink = plugins["blink.cmp"]
     assert.is_not_nil(blink, "blink.cmp spec not registered")
-    -- Loaded eagerly because it is a dependency of mason-lspconfig (lazy=false);
-    -- capabilities must be known before servers attach on FileType.
-    assert.is_not_nil(blink._.loaded, "blink.cmp not loaded at startup")
+    load_lsp_stack()
+    assert.is_not_nil(blink._.loaded, "blink.cmp not loaded with the LSP stack")
     assert.is_false(require("lazy.core.plugin").has_errors(blink), "blink.cmp reported load errors")
   end)
 
@@ -25,6 +31,7 @@ describe("smoke: completion (blink.cmp)", function()
     local cfg
 
     before_each(function()
+      load_lsp_stack()
       cfg = require("blink.cmp.config")
     end)
 
@@ -47,6 +54,8 @@ describe("smoke: completion (blink.cmp)", function()
   end)
 
   describe("LSP capabilities", function()
+    before_each(load_lsp_stack)
+
     -- blink advertises snippetSupport=true (Neovim's default is false), so it
     -- doubles as proof that blink's capabilities were merged into each server.
     local function snippet_support(server)

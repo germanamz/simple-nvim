@@ -4,12 +4,14 @@
 --   • No snippets source (and no friendly-snippets dep): only lsp, path and
 --     buffer feed the menu.
 --   • blink's completion capabilities are advertised to the LSP servers from
---     lua/plugins/lsp.lua, where blink is listed as a dependency so it loads
---     before the servers are enabled (capabilities are resolved at attach time,
---     which can happen on FileType before InsertEnter — hence not lazy here).
+--     lua/plugins/lsp.lua, where blink is listed as a dependency of
+--     mason-lspconfig so it loads before the servers are enabled (capabilities
+--     are resolved at attach time, which can happen on FileType before
+--     InsertEnter — hence dependency-loaded, not event-gated on InsertEnter).
 return {
   "saghen/blink.cmp",
   version = "1.*",
+  lazy = true,
   opts = {
     -- "enter" preset: Enter accepts, C-space opens the menu, C-n/C-p (and the
     -- arrow keys) move the selection, C-e hides. Tab is added on top so it also

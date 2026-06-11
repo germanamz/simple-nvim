@@ -22,10 +22,16 @@ describe("smoke: lsp file operations", function()
   end)
 
   describe("LSP capabilities", function()
+    -- The LSP stack is deferred to BufReadPre/BufNewFile; loading
+    -- mason-lspconfig stands in for opening the first real file.
+    before_each(function()
+      require("lazy").load({ plugins = { "mason-lspconfig.nvim" } })
+    end)
+
     -- willRename is what makes ts_ls react to an nvim-tree rename (rewrite
     -- imports, drop the stale path) instead of leaving the project in the
-    -- "Already included file name ... only in casing" state. Advertised at
-    -- startup from a static table, so it doesn't require nvim-tree to load.
+    -- "Already included file name ... only in casing" state. Advertised from a
+    -- static table when the stack loads, so it doesn't require nvim-tree.
     local function will_rename(server)
       local c = vim.lsp.config[server]
       return c
