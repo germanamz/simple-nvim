@@ -16,10 +16,9 @@ local servers = {
       Lua = {
         runtime = { version = "LuaJIT" },
         diagnostics = { globals = { "vim" } },
-        workspace = {
-          library = vim.api.nvim_get_runtime_file("", true),
-          checkThirdParty = false,
-        },
+        -- No static workspace.library: lazydev (lua/plugins/lazydev.lua)
+        -- injects runtime + plugin definitions on demand per require().
+        workspace = { checkThirdParty = false },
         telemetry = { enable = false },
       },
     },
