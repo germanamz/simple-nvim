@@ -38,6 +38,80 @@ end, { desc = "Open keybindings cheatsheet" })
 -- hidden); `:b#` or <C-^> jumps back to the previous buffer.
 vim.keymap.set("n", "<leader>E", "<cmd>Explore<cr>", { desc = "Open file tree (netrw)" })
 
+-- Resolve the commit a plugin clone is sitting on, via plain file reads (no
+-- process spawns): detached HEAD holds the sha directly; a `ref:` HEAD is
+-- resolved through the loose ref file, falling back to packed-refs.
+local function installed_commit(dir)
+  local function read(p)
+    local f = io.open(p, "r")
+    if not f then
+      return nil
+    end
+    local s = f:read("*a")
+    f:close()
+    return s
+  end
+  local head = read(dir .. "/.git/HEAD")
+  if not head then
+    return nil
+  end
+  head = vim.trim(head)
+  local ref = head:match("^ref:%s*(.+)$")
+  if not ref then
+    return head
+  end
+  local loose = read(dir .. "/.git/" .. ref)
+  if loose then
+    return vim.trim(loose)
+  end
+  for line in (read(dir .. "/.git/packed-refs") or ""):gmatch("[^\n]+") do
+    local sha, name = line:match("^(%x+) (.+)$")
+    if name == ref then
+      return sha
+    end
+  end
+  return nil
+end
+
+-- Fresh installs restore to the lockfile below, but an existing machine that
+-- pulls lockfile updates never re-applied them: plugins silently drift from
+-- their pins (or never install at all). Compare installed commits against
+-- lazy-lock.json after startup and warn so drift is never silent.
+local function warn_on_lock_drift()
+  local raw = (function()
+    local f = io.open(vim.fn.stdpath("config") .. "/lazy-lock.json", "r")
+    if not f then
+      return nil
+    end
+    local s = f:read("*a")
+    f:close()
+    return s
+  end)()
+  if not raw then
+    return
+  end
+  local ok, lock = pcall(vim.json.decode, raw)
+  if not ok or type(lock) ~= "table" then
+    return
+  end
+  local drifted = {}
+  for name, pin in pairs(lock) do
+    local dir = vim.fn.stdpath("data") .. "/lazy/" .. name
+    if installed_commit(dir) ~= pin.commit then
+      drifted[#drifted + 1] = name
+    end
+  end
+  if #drifted > 0 then
+    table.sort(drifted)
+    vim.notify(
+      "Plugins out of sync with lazy-lock.json: "
+        .. table.concat(drifted, ", ")
+        .. " — run :Lazy restore",
+      vim.log.levels.WARN
+    )
+  end
+end
+
 if vim.env.NVIM_BOOTSTRAP ~= "0" then
   require("lazy").setup("plugins")
 
@@ -46,4 +120,6 @@ if vim.env.NVIM_BOOTSTRAP ~= "0" then
   if fresh_install then
     require("lazy").restore({ wait = true })
   end
+
+  vim.defer_fn(warn_on_lock_drift, 1000)
 end
