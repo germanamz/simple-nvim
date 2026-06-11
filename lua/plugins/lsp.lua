@@ -174,7 +174,17 @@ return {
     dependencies = { "mason-org/mason.nvim" },
     config = function()
       local lockfile = vim.fn.stdpath("config") .. "/mason-tool-versions.lock"
-      local raw = assert(io.open(lockfile, "r"), "missing " .. lockfile):read("*a")
+      local lf = io.open(lockfile, "r")
+      if not lf then
+        -- Warn instead of erroring: now that this runs lazily (first file
+        -- read), an error here would also poison unrelated autocmd chains —
+        -- and the test harness runs against an isolated config dir where the
+        -- lockfile legitimately doesn't exist.
+        vim.notify("missing " .. lockfile .. "; skipping tool install checks", vim.log.levels.WARN)
+        return
+      end
+      local raw = lf:read("*a")
+      lf:close()
       local versions = vim.json.decode(raw)
 
       local ensure_installed = {}

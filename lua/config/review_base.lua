@@ -8,10 +8,17 @@ local M = {}
 local git = require("util.git")
 local Overlay = require("util.overlay")
 
-local STATE_PATH = vim.fn.stdpath("data") .. "/nvim-review-base.json"
+-- Resolved per call, not at require time: stdpath("data") follows
+-- $XDG_DATA_HOME at call time, and the test harness swaps that per test for
+-- isolation. Baking the path at first require made state reads/writes land in
+-- whichever (possibly since-deleted) environment happened to load this module
+-- first.
+local function state_path()
+  return vim.fn.stdpath("data") .. "/nvim-review-base.json"
+end
 
 local function read_state()
-  local f = io.open(STATE_PATH, "r")
+  local f = io.open(state_path(), "r")
   if not f then
     return {}
   end
@@ -28,14 +35,14 @@ local function read_state()
 end
 
 local function write_state(state)
-  local tmp = STATE_PATH .. ".tmp"
+  local tmp = state_path() .. ".tmp"
   local f = io.open(tmp, "w")
   if not f then
     return
   end
   f:write(vim.json.encode(state))
   f:close()
-  os.rename(tmp, STATE_PATH)
+  os.rename(tmp, state_path())
 end
 
 local function fire(root, ref)
