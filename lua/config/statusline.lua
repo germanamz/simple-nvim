@@ -2,20 +2,43 @@
 -- file-oriented events (e.g. netrw, which doesn't fire BufReadPre/BufNewFile
 -- and therefore wouldn't lazy-load gitsigns or any statusline setup gated on
 -- it). Branch and review base are cached per-buffer to avoid running git on
--- every redraw.
+-- every redraw, and refreshed asynchronously so BufEnter never blocks on a
+-- process spawn.
 local M = {}
 
-local git = require("util.git")
 local path = require("util.path")
 
+-- Resolve repo toplevel and branch in one git spawn, off the main thread.
+-- `--show-toplevel` prints even when `--abbrev-ref HEAD` fails (e.g. a repo
+-- with no commits yet), so the toplevel is parsed regardless of exit code and
+-- the branch only on success. Detached HEAD prints "HEAD" → treated as none.
 local function refresh(buf)
   if not vim.api.nvim_buf_is_valid(buf) then
     return
   end
-  local review_base = require("config.review_base")
-  local root = review_base.git_root(path.buf_start_dir(buf))
-  vim.b[buf].nvim_review_base = (root and review_base.get(root)) or ""
-  vim.b[buf].nvim_git_branch = (root and git.branch(root)) or ""
+  local cmd =
+    { "git", "-C", path.buf_start_dir(buf), "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD" }
+  local spawned = pcall(vim.system, cmd, { text = true }, function(out)
+    local lines = vim.split(out.stdout or "", "\n", { trimempty = true })
+    local root = lines[1]
+    local branch = (out.code == 0 and lines[2]) or ""
+    if branch == "HEAD" then
+      branch = ""
+    end
+    vim.schedule(function()
+      if not vim.api.nvim_buf_is_valid(buf) then
+        return
+      end
+      local review_base = require("config.review_base")
+      vim.b[buf].nvim_review_base = (root and review_base.get(root)) or ""
+      vim.b[buf].nvim_git_branch = (root and branch) or ""
+      vim.cmd("redrawstatus!")
+    end)
+  end)
+  if not spawned then
+    vim.b[buf].nvim_review_base = ""
+    vim.b[buf].nvim_git_branch = ""
+  end
 end
 
 -- Refresh every loaded buffer's cached branch/base and repaint the statusline.
