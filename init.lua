@@ -23,6 +23,12 @@ vim.opt.rtp:prepend(lazypath)
 vim.g.mapleader = " "
 vim.g.maplocalleader = "\\"
 
+-- Skip python3 provider detection: the bundled python ftplugin's has('python3')
+-- check otherwise probes every interpreter on PATH (pyenv shims, ~0.7-1.4s),
+-- stalling the first Python buffer. Nothing here uses :python3/pynvim —
+-- completion is blink.cmp + pyright, formatting is conform.
+vim.g.loaded_python3_provider = 0
+
 vim.filetype.add({ extension = { mdx = "mdx" } })
 
 require("config.options")
