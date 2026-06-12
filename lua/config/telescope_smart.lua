@@ -36,6 +36,7 @@ local review_base = require("config.review_base")
 local git = require("util.git")
 local git_status_codes = require("config.git_status_codes")
 local Overlay = require("util.overlay")
+local path_util = require("util.path")
 
 -- ===================== helpers =====================
 
@@ -45,18 +46,6 @@ local function parse_status_path(raw)
     raw = raw:sub(arrow + 4)
   end
   return (raw:gsub('^"(.*)"$', "%1"))
-end
-
-local function relpath(abs, base)
-  abs = vim.fn.fnamemodify(abs, ":p")
-  base = vim.fn.fnamemodify(base, ":p")
-  if base:sub(-1) ~= "/" then
-    base = base .. "/"
-  end
-  if abs:sub(1, #base) == base then
-    return abs:sub(#base + 1)
-  end
-  return abs
 end
 
 -- ===================== git status / counts =====================
@@ -201,7 +190,7 @@ local function refresh_codes(cwd, force)
   local codes = {}
   for p, c in pairs(raw_codes) do
     local abs = root .. "/" .. p
-    codes[relpath(abs, cwd)] = c
+    codes[path_util.relative(abs, cwd)] = c
   end
   cache = { codes = codes, counts = counts, base = base, root = root, cwd = cwd, time = now }
   return codes, counts, base, root
@@ -214,13 +203,7 @@ end
 -- ===================== highlights & legend =====================
 
 local function set_legend_highlights()
-  vim.api.nvim_set_hl(0, "SmartFilesAdded", { fg = "#6cc070", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesUntracked", { fg = "#c08850", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesModified", { fg = "#5a8ed4", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesDeleted", { fg = "#9a9a9a", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesRenamed", { fg = "#4cb0a0", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesBase", { fg = "#d896ff", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesUnstaged", { fg = "#888888", default = true })
+  git_status_codes.define_highlights()
   vim.api.nvim_set_hl(0, "SmartFilesLegend", { fg = "#888888", default = true })
   vim.api.nvim_set_hl(0, "SmartFilesLegendCount", { fg = "#cccccc", bold = true, default = true })
 end

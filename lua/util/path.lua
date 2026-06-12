@@ -19,4 +19,19 @@ function M.buf_start_dir(buf)
   return start
 end
 
+-- Path of `abs` relative to directory `base`, or the absolute path unchanged
+-- when it does not live under `base`. Both arguments are normalized first, so
+-- either may be relative or carry a trailing slash.
+function M.relative(abs, base)
+  abs = vim.fn.fnamemodify(abs, ":p")
+  base = vim.fn.fnamemodify(base, ":p")
+  if base:sub(-1) ~= "/" then
+    base = base .. "/"
+  end
+  if abs:sub(1, #base) == base then
+    return abs:sub(#base + 1)
+  end
+  return abs
+end
+
 return M

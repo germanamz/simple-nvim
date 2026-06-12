@@ -30,3 +30,21 @@ describe("util.path.buf_start_dir", function()
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 end)
+
+describe("util.path.relative", function()
+  it("strips the base directory prefix", function()
+    assert.are.equal("a/b.lua", path.relative("/repo/a/b.lua", "/repo"))
+  end)
+
+  it("tolerates a trailing slash on the base", function()
+    assert.are.equal("a/b.lua", path.relative("/repo/a/b.lua", "/repo/"))
+  end)
+
+  it("returns the absolute path unchanged when outside the base", function()
+    assert.are.equal("/elsewhere/c.lua", path.relative("/elsewhere/c.lua", "/repo"))
+  end)
+
+  it("does not treat a sibling with a shared prefix as inside the base", function()
+    assert.are.equal("/repo-other/c.lua", path.relative("/repo-other/c.lua", "/repo"))
+  end)
+end)

@@ -13,12 +13,19 @@ local config_dir = vim.fn.fnamemodify(debug.getinfo(1, "S").source:sub(2), ":h:h
 vim.opt.runtimepath:prepend(config_dir)
 package.path = config_dir .. "/tests/?.lua;" .. config_dir .. "/tests/?/init.lua;" .. package.path
 
+-- lazy.setup resets the runtimepath to the standard paths plus plugins. In a
+-- real boot the repo *is* stdpath("config") and survives the reset; under the
+-- harness's redirected XDG dirs it does not, so repo modules first required
+-- mid-setup or later (plugin config functions, statusline's deferred
+-- requires) would fail. package.path is immune to the reset, so route module
+-- resolution through it as well.
+package.path = config_dir .. "/lua/?.lua;" .. config_dir .. "/lua/?/init.lua;" .. package.path
+
 dofile(config_dir .. "/init.lua")
 
 require("lazy").setup("plugins", {
   install = { missing = false },
   change_detection = { enabled = false },
 })
-
 vim.opt.rtp:prepend(vim.fn.stdpath("data") .. "/lazy/plenary.nvim")
 vim.cmd("runtime plugin/plenary.vim")

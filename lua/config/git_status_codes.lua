@@ -5,6 +5,19 @@
 -- format_prefix and _git_changes) and the grammar is unit-testable on its own.
 local M = {}
 
+-- Define the shared label highlight groups (`default = true`, so a colorscheme
+-- can override). Lives here rather than telescope_smart so non-telescope
+-- consumers (nvim-tree) can define them without loading the picker module.
+function M.define_highlights()
+  vim.api.nvim_set_hl(0, "SmartFilesAdded", { fg = "#6cc070", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesUntracked", { fg = "#c08850", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesModified", { fg = "#5a8ed4", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesDeleted", { fg = "#9a9a9a", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesRenamed", { fg = "#4cb0a0", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesBase", { fg = "#d896ff", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesUnstaged", { fg = "#888888", default = true })
+end
+
 -- XY porcelain precedence: the staged letter X dominates unless it is empty or
 -- untracked, in which case the worktree letter Y wins.
 function M.dominant_letter(x, y)
@@ -77,6 +90,20 @@ function M.code_to_display(code)
     table.insert(hls, { { 1, 2 }, "SmartFilesUnstaged" })
   end
   return dominant .. marker, hls
+end
+
+-- Single-highlight variant of code_to_display for renderers that can only
+-- color a label with one group per string (nvim-tree decorator icons): the
+-- trimmed label plus the group of its leading character — the dominant letter
+-- for worktree codes, SmartFilesBase for base-only codes. Returns nil for a
+-- clean/empty code.
+function M.code_to_icon(code)
+  local text, hls = M.code_to_display(code)
+  text = text:gsub("%s+$", "")
+  if text == "" then
+    return nil
+  end
+  return text, hls[1] and hls[1][2] or nil
 end
 
 return M

@@ -39,6 +39,22 @@ return {
     },
   },
   config = function(_, opts)
+    -- Swap the builtin Git decorator for the smart-picker-aligned one (same
+    -- porcelain labels, same review base — see config.nvim_tree_git). Built
+    -- here, not in `opts`, because the decorator class extends nvim-tree.api
+    -- and so can only be created once the plugin is loaded.
+    opts.renderer = {
+      decorators = {
+        "Open",
+        "Hidden",
+        "Modified",
+        "Bookmark",
+        "Diagnostics",
+        "Copied",
+        require("config.nvim_tree_git").decorator(),
+        "Cut",
+      },
+    }
     require("nvim-tree").setup(opts)
     -- Subscribe to nvim-tree's rename/move/delete events and forward them to
     -- the LSP (workspace/willRenameFiles). Deferred to here — not the plugin's
@@ -56,6 +72,19 @@ return {
         vim.api.nvim_set_option_value("winbar", "%#Comment#  g? — all mappings%*", { win = win })
       end
     end)
+    -- Re-render the tree when the review base or HEAD changes (external
+    -- checkout) so labels appear or vanish immediately. Force-refresh the
+    -- codes cache first — its 500ms TTL could otherwise serve codes computed
+    -- against the old base or branch.
+    vim.api.nvim_create_autocmd("User", {
+      pattern = { "ReviewBaseChanged", "HeadChanged" },
+      callback = function()
+        if api.tree.is_visible() then
+          require("config.telescope_smart")._refresh(vim.fn.getcwd(), true)
+          api.tree.reload()
+        end
+      end,
+    })
     -- Close the tree the moment any Telescope picker opens. Combined with
     -- quit_on_open (files opened from the tree), these are the only two events
     -- that dismiss the tree — it otherwise stays put until toggled.
