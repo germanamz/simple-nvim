@@ -53,9 +53,13 @@ local function refresh_all_buffers()
 end
 
 function _G.git_branch_status()
-  local head = vim.b.nvim_git_branch
+  -- Prefer gitsigns' head: its .git watcher keeps it live across external
+  -- checkouts (and GitSignsUpdate already redraws the statusline), while
+  -- nvim_git_branch is only re-resolved on BufEnter/write/focus. The cached
+  -- value still covers buffers gitsigns never attaches to (netrw, untracked).
+  local head = vim.b.gitsigns_head
   if not head or head == "" then
-    head = vim.b.gitsigns_head
+    head = vim.b.nvim_git_branch
   end
   local base = vim.b.nvim_review_base
   local has_head = head and head ~= ""
@@ -87,7 +91,10 @@ end
 
 function M.setup()
   local group = vim.api.nvim_create_augroup("nvim_statusline", { clear = true })
-  vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "DirChanged" }, {
+  -- FocusGained catches branch switches made from another terminal; it needs
+  -- the terminal (and tmux's focus-events option) to forward focus, so it's a
+  -- best-effort complement to the gitsigns_head preference above.
+  vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "DirChanged", "FocusGained" }, {
     group = group,
     callback = function(args)
       refresh(args.buf)

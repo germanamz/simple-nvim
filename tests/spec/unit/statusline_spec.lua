@@ -40,18 +40,36 @@ describe("config.statusline", function()
       assert.are.equal(" ↗ origin/main ", _G.git_branch_status())
     end)
 
-    it("falls back to gitsigns_head when nvim_git_branch is empty", function()
+    it("uses gitsigns_head when set", function()
       vim.b.nvim_git_branch = ""
       vim.b.nvim_review_base = ""
       vim.b.gitsigns_head = "main"
       assert.are.equal(" main ", _G.git_branch_status())
     end)
 
-    it("prefers nvim_git_branch over gitsigns_head", function()
+    it("falls back to nvim_git_branch when gitsigns_head is empty", function()
       vim.b.nvim_git_branch = "feature"
-      vim.b.gitsigns_head = "main"
+      vim.b.gitsigns_head = ""
       vim.b.nvim_review_base = ""
       assert.are.equal(" feature ", _G.git_branch_status())
+    end)
+
+    it("prefers gitsigns_head over nvim_git_branch when both are set", function()
+      vim.b.nvim_git_branch = "stale-branch"
+      vim.b.gitsigns_head = "main"
+      vim.b.nvim_review_base = ""
+      assert.are.equal(" main ", _G.git_branch_status())
+    end)
+  end)
+
+  describe("setup", function()
+    it("refreshes the branch cache on FocusGained", function()
+      require("config.statusline").setup()
+      local autocmds = vim.api.nvim_get_autocmds({
+        group = "nvim_statusline",
+        event = "FocusGained",
+      })
+      assert.is_true(#autocmds > 0)
     end)
   end)
 
