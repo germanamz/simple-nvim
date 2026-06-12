@@ -112,6 +112,21 @@ describe("util.git", function()
     end)
   end)
 
+  describe("git_dir", function()
+    it("returns the absolute git directory for a repo", function()
+      local repo = new_repo()
+      local dir = git.git_dir(repo)
+      assert.are.equal(vim.fn.resolve(repo .. "/.git"), vim.fn.resolve(dir))
+    end)
+
+    it("returns nil for a non-git directory", function()
+      local dir = vim.fn.tempname() .. "-not-a-repo"
+      vim.fn.mkdir(dir, "p")
+      assert.is_nil(git.git_dir(dir))
+      vim.fn.delete(dir, "rf")
+    end)
+  end)
+
   describe("resolve", function()
     local repo
     before_each(function()

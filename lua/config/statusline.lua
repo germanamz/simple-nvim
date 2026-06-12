@@ -32,6 +32,12 @@ local function refresh(buf)
       local review_base = require("config.review_base")
       vim.b[buf].nvim_review_base = (root and review_base.get(root)) or ""
       vim.b[buf].nvim_git_branch = (root and branch) or ""
+      -- Lazily start the repo's HEAD watcher; its HeadChanged broadcast drives
+      -- refresh_all_buffers, so external checkouts repaint without waiting for
+      -- a buffer event.
+      if root then
+        require("config.git_head").watch(root)
+      end
       vim.cmd("redrawstatus!")
     end)
   end)
@@ -53,13 +59,12 @@ local function refresh_all_buffers()
 end
 
 function _G.git_branch_status()
-  -- Prefer gitsigns' head: its .git watcher keeps it live across external
-  -- checkouts (and GitSignsUpdate already redraws the statusline), while
-  -- nvim_git_branch is only re-resolved on BufEnter/write/focus. The cached
-  -- value still covers buffers gitsigns never attaches to (netrw, untracked).
-  local head = vim.b.gitsigns_head
+  -- nvim_git_branch is kept live by config.git_head's watcher (HeadChanged →
+  -- refresh) and exists for every buffer, attached or not; gitsigns_head is
+  -- the fallback for roots where that watcher could not start.
+  local head = vim.b.nvim_git_branch
   if not head or head == "" then
-    head = vim.b.nvim_git_branch
+    head = vim.b.gitsigns_head
   end
   local base = vim.b.nvim_review_base
   local has_head = head and head ~= ""
@@ -91,9 +96,10 @@ end
 
 function M.setup()
   local group = vim.api.nvim_create_augroup("nvim_statusline", { clear = true })
-  -- FocusGained catches branch switches made from another terminal; it needs
-  -- the terminal (and tmux's focus-events option) to forward focus, so it's a
-  -- best-effort complement to the gitsigns_head preference above.
+  -- FocusGained catches what the HEAD watcher can't: a review base changed by
+  -- another nvim instance (the JSON store is shared), or a root whose watcher
+  -- failed to start. Best-effort — it needs the terminal (and tmux's
+  -- focus-events option) to forward focus.
   vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "DirChanged", "FocusGained" }, {
     group = group,
     callback = function(args)
@@ -137,7 +143,7 @@ function M.setup()
 
   vim.api.nvim_create_autocmd("User", {
     group = group,
-    pattern = "ReviewBaseChanged",
+    pattern = { "ReviewBaseChanged", "HeadChanged" },
     callback = refresh_all_buffers,
   })
   refresh(vim.api.nvim_get_current_buf())

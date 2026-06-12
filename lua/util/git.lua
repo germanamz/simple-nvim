@@ -41,6 +41,13 @@ function M.branch(root)
   return M.first_line({ "branch", "--show-current" }, { cwd = root })
 end
 
+-- Absolute path of the git directory for `root`, or nil outside a repo.
+-- Worktrees and submodules resolve to their own gitdir — the one whose HEAD
+-- file moves on checkout — not the shared parent .git.
+function M.git_dir(root)
+  return M.first_line({ "rev-parse", "--absolute-git-dir" }, { cwd = root })
+end
+
 -- True when `ref` resolves to an object in `root`.
 function M.resolve(root, ref)
   if not root or not ref or ref == "" then
