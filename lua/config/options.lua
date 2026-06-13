@@ -68,10 +68,36 @@ opt.termguicolors = true
 opt.mouse = "a"
 opt.clipboard = "unnamedplus"
 
--- Delete the current buffer without closing its window: switch to the previous
--- buffer first, then wipe the one we left, so the window stays on the prior
--- file instead of collapsing (which would quit nvim if it's the last window).
-vim.keymap.set("n", "<leader>bd", "<cmd>bp | bd #<cr>", { desc = "Delete buffer" })
+-- Delete the current buffer without closing its window. When other buffers
+-- remain, switch to the previous one first so the window stays on a real file
+-- instead of collapsing (which would quit nvim if it's the last window). When
+-- this is the *last* listed buffer, fall back to the nvim-tree explorer — the
+-- same default view `nvim .` opens — instead of leaving a stuck empty buffer.
+vim.keymap.set("n", "<leader>bd", function()
+  local cur = vim.api.nvim_get_current_buf()
+  local listed = vim.tbl_filter(function(b)
+    return vim.bo[b].buflisted
+  end, vim.api.nvim_list_bufs())
+
+  if #listed > 1 then
+    vim.cmd("bprevious")
+    vim.cmd("bdelete " .. cur)
+    return
+  end
+
+  -- Last listed buffer: delete it first so unsaved-changes errors still abort
+  -- loudly (nvim leaves a throwaway empty [No Name] in the window), then open
+  -- nvim-tree and drop every other window so we land on just the tree.
+  vim.cmd("bdelete " .. cur)
+  require("lazy").load({ plugins = { "nvim-tree.lua" } })
+  require("nvim-tree.api").tree.open()
+  local tree_win = vim.api.nvim_get_current_win()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if win ~= tree_win then
+      pcall(vim.api.nvim_win_close, win, false)
+    end
+  end
+end, { desc = "Delete buffer" })
 
 -- Quit all windows, discarding unsaved changes
 vim.keymap.set("n", "<leader>qa", "<cmd>qa!<cr>", { desc = "Quit all (force)" })
