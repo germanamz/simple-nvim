@@ -128,10 +128,10 @@ opt.sidescrolloff = 8
 opt.laststatus = 3
 opt.wrap = false -- no soft-wrap; long lines (incl. wide tables) scroll horizontally
 
--- Writing-friendly markdown: paragraph numbering in the gutter and a thin ruler
--- at column 80 as a reading guide. 't' is cleared because the bundled markdown
--- ftplugin sets it; otherwise an editorconfig 'max_line_length' would set
--- 'textwidth' and start auto-hard-wrapping prose as you type.
+-- Writing-friendly markdown: paragraph numbering in the gutter. 't' is cleared
+-- because the bundled markdown ftplugin sets it; otherwise an editorconfig
+-- 'max_line_length' would set 'textwidth' and start auto-hard-wrapping prose as
+-- you type.
 vim.api.nvim_create_autocmd("FileType", {
   pattern = { "markdown", "mdx" },
   callback = function(args)

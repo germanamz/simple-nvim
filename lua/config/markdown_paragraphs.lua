@@ -17,8 +17,6 @@ local M = {}
 -- }
 local cache = {}
 
-local RULER_COL = 81
-
 local function blend(hex, target, ratio)
   local r = bit.band(bit.rshift(hex, 16), 0xff)
   local g = bit.band(bit.rshift(hex, 8), 0xff)
@@ -379,7 +377,6 @@ end
 
 function M.apply_window()
   vim.opt_local.statuscolumn = STATUSCOLUMN
-  vim.opt_local.colorcolumn = tostring(RULER_COL)
   vim.w.markdown_writing_active = true
 end
 
@@ -388,7 +385,6 @@ function M.detach_window()
     return
   end
   vim.opt_local.statuscolumn = ""
-  vim.opt_local.colorcolumn = ""
   vim.w.markdown_writing_active = nil
 end
 
