@@ -29,7 +29,11 @@ vim.g.maplocalleader = "\\"
 -- completion is blink.cmp + pyright, formatting is conform.
 vim.g.loaded_python3_provider = 0
 
-vim.filetype.add({ extension = { mdx = "mdx" } })
+-- `.tmpl` defaults to filetype `template` (no parser/LSP). Go projects use it
+-- for html/template, so treat it as gohtmltmpl: html treesitter + autotag (see
+-- lua/plugins/treesitter.lua, lua/plugins/nvim-ts-autotag.lua) without pulling
+-- in the html LSP/prettier, which would choke on `{{ ... }}` actions.
+vim.filetype.add({ extension = { mdx = "mdx", tmpl = "gohtmltmpl" } })
 
 require("config.options")
 require("config.lsp_refs").setup()

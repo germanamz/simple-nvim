@@ -57,6 +57,10 @@ return {
       vim.treesitter.language.register("markdown", "mdx")
       -- jsonc has no dedicated parser; the json parser handles it.
       vim.treesitter.language.register("json", "jsonc")
+      -- Go html templates (.tmpl, ft=gohtmltmpl from init.lua) reuse the html
+      -- parser so tags highlight and nvim-ts-autotag can walk the tree. Go
+      -- `{{ ... }}` actions fall through as plain text — fine for editing tags.
+      vim.treesitter.language.register("html", "gohtmltmpl")
 
       -- filetype → parser language mapping (only where they differ)
       local ft_to_lang = {
@@ -65,6 +69,7 @@ return {
         sh = "bash",
         mdx = "markdown",
         jsonc = "json",
+        gohtmltmpl = "html",
       }
 
       local ft_pattern = {
@@ -92,6 +97,7 @@ return {
         "yaml",
         "toml",
         "html",
+        "gohtmltmpl",
         "css",
       }
 
