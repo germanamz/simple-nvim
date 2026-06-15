@@ -564,6 +564,29 @@ auto-wrap fires while typing. `colorcolumn=81` shows the ruler.
 | `<Space>w`   | re-wrap from cursor → EOF using textwidth (gq + smart) |
 | `gq{motion}` | re-wrap one motion's worth                              |
 | `<Space>F`   | run conform's markdown formatter                        |
+| `<Space>mp`  | toggle live `glow` preview (read-only side pane)        |
+| `gd`         | follow wiki-link under cursor (else LSP definition)     |
+
+`<Space>mp` opens a read-only, **full-color** preview split on the right that
+renders the buffer through [`glow`](https://github.com/charmbracelet/glow) inside a
+terminal buffer. It reflows prose *and* keeps wide tables aligned (cells wider than
+the pane are truncated with `…`, not shattered) — so it sidesteps the wrap-vs-table
+problem that plain soft-wrap can't. Wiki-style links (`[[note]]`, `[[note|alias]]`)
+are rewritten to standard links so they render too (glow doesn't grok them natively).
+It renders the **live buffer** (written to a
+private temp file, so you never have to save your document) and refreshes on save,
+when you leave insert mode, and after normal-mode edits (debounced) — not on every
+keystroke, to limit the redraw flicker from re-running glow. Scroll approximately
+syncs to the source cursor (glow reflows, so the match is by % through the
+document, not line-for-line). Toggle again to close. Requires the `glow` binary
+(`brew install glow`); without it the keymap notifies once and does nothing.
+
+`gd` follows the wiki-link under the cursor, falling back to LSP go-to-definition
+when the cursor isn't on one. Wikilinks are project-scoped: `[[a/b/c]]` opens
+`<project root>/a/b/c.md`, where the root is found by walking up for a `.git` /
+`.marksman.toml` / `tusk.toml` / `.tusk` marker. `[[target|alias]]` and
+`[[target#heading]]` work too (alias/heading are ignored for resolution). `<C-^>`
+returns to the previous file.
 
 `<Space>w` is smarter than plain `gq`:
 
@@ -644,6 +667,9 @@ Other helpful Ex bits:
 - **TypeScript buffers (ts_ls):** custom "go to source definition" that
   follows imports through, falling back to standard `definition` if the
   command returns nothing.
+- **Markdown / MDX buffers:** follows the `[[wikilink]]` under the cursor
+  (project-root path), falling back to `vim.lsp.buf.definition` when the cursor
+  isn't on a wikilink.
 
 ### `<Esc>` in Telescope
 

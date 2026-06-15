@@ -51,10 +51,9 @@ return {
       )
       require("nvim-treesitter").install(parsers)
 
-      -- Global filetype → parser registration. Downstream plugins
-      -- (render-markdown, etc.) resolve parser via this registry, not via
-      -- our ad-hoc `ft_to_lang` table below. mdx has no dedicated parser,
-      -- so reuse markdown.
+      -- Global filetype → parser registration. Downstream consumers resolve
+      -- parser via this registry, not via our ad-hoc `ft_to_lang` table below.
+      -- mdx has no dedicated parser, so reuse markdown.
       vim.treesitter.language.register("markdown", "mdx")
       -- jsonc has no dedicated parser; the json parser handles it.
       vim.treesitter.language.register("json", "jsonc")

@@ -39,18 +39,20 @@ still happens in the raw, long-line source buffer as today. The existing
 | Topic            | Decision |
 | ---------------- | -------- |
 | Renderer         | `glow` (external binary; documented install + graceful fallback) |
-| Color handling   | `baleia.nvim` — translate glow's ANSI into real highlights in a normal scratch buffer |
-| Layout           | Vertical split on the **right**, read-only scratch buffer (`nofile`) |
+| Color handling   | Render glow inside a Neovim **terminal buffer** — nvim's terminal emulator carries glow's full color. **(Revised after verification: baleia was the original plan but glow emits no color when piped, and a captured pty hangs on glow's terminal-capability queries. Only a real terminal buffer yields color. No baleia dependency.)** |
+| Layout           | Vertical split on the **right**; read-only terminal buffer |
 | Trigger          | Manual toggle `<leader>mp`. No auto-open. |
-| Live update      | Debounced (~250 ms) refresh by piping the **live buffer** to glow over stdin — no save required |
-| Width            | glow width = preview pane width; recompute on resize |
+| Live update      | Refresh on save / leaving insert / debounced (~300 ms) normal-mode edits, rendering the live buffer via a private temp file (no save of your document required). **Not** every keystroke — each refresh re-runs glow in the terminal, so this limits redraw flicker. |
+| Width            | glow `-w` = preview pane width − ~6 (left margin); recompute on resize |
 | Scroll sync      | **Approximate** — sync preview to the same % through the doc as the source cursor (exact line-mapping is impossible because glow reflows) |
 
 ## Non-goals
 
 - No exact, line-mapped scroll sync (glow reflows; source line → rendered line has
   no stable mapping).
-- No replacement of `render-markdown.nvim`'s in-buffer decoration.
+- ~~No replacement of `render-markdown.nvim`'s in-buffer decoration.~~ **(Superseded:
+  render-markdown.nvim was later removed in favor of this preview — editing is now
+  raw markdown, reading happens in the preview pane.)**
 - No browser preview (rejected — window-switching cost).
 - No auto-install of glow (mason doesn't carry it; cross-platform scripted install
   is fragile). Install stays a documented manual step.
@@ -58,69 +60,70 @@ still happens in the raw, long-line source buffer as today. The existing
 
 ## Architecture
 
-Two new files, following the existing custom-module convention
-(`markdown_paragraphs.lua`, `block_guides.lua`):
+One new file (no plugin dependency, since baleia was dropped), following the
+existing custom-module convention (`markdown_paragraphs.lua`, `block_guides.lua`):
 
-### 1. `lua/plugins/markdown-preview.lua` — lazy.nvim spec
+### `lua/config/markdown_preview.lua` — the engine
 
-- Declares the only new plugin dependency: `m00qek/baleia.nvim`.
-- Lazy-loads on `ft = { "markdown", "mdx" }`.
-- `config` requires `config.markdown_preview` and calls its `setup()`.
+Wired from `init.lua` via `require("config.markdown_preview").setup()`, alongside
+`block_guides`/`statusline`/`lsp_refs` (config-only modules are loaded there, not
+through `lua/plugins/`).
 
-### 2. `lua/config/markdown_preview.lua` — the engine
-
-A module with a header comment (matching the style of the other `config/*` modules)
-explaining purpose and the glow/baleia/stdin pipeline.
-
-**State** (keyed by source buffer): source bufnr, preview bufnr, preview winid,
-debounce timer handle, current glow job handle, shared baleia instance.
+**State** (keyed by source buffer): source bufnr, preview winid, current preview
+(terminal) bufnr, debounce timer, current glow job, generation counter, augroup
+id, temp-file path.
 
 **Public functions**
 
-- `M.setup()` — create the singleton baleia instance; install a `FileType`
-  autocmd for `markdown`/`mdx` that sets the buffer-local `<leader>mp` →
-  `M.toggle` (desc `"Toggle markdown preview"`). This mirrors how
-  `options.lua` wires `markdown_paragraphs.attach` per buffer.
+- `M.setup()` — install a `FileType` autocmd for `markdown`/`mdx` that sets the
+  buffer-local `<leader>mp` → `M.toggle` (desc `"Toggle markdown preview"`), and
+  backfill any markdown buffers already open.
 - `M.toggle()` — preview open for this source → `close`; else `open`.
 - `M.open(src_buf)` — guard on `vim.fn.executable("glow")` (see Fallback); open a
-  right-hand `vsplit`; create the scratch preview buffer (`buftype=nofile`,
-  `bufhidden=wipe`, `swapfile=false`, `modifiable=false` to the user,
-  `number=false`, `signcolumn=no`, `statuscolumn=""`, `wrap=false` — glow already
-  wraps to width); wire per-source autocmds (below); return focus to the source;
-  trigger the first `refresh`.
-- `M.refresh(src_buf)` — read the source lines, compute width from the preview
-  window, run glow (see Pipeline), and on completion write the colorized output
-  into the preview buffer, then restore the previous preview scroll position.
-- `M.sync_scroll(src_buf)` — `pct = src_cursor_line / src_line_count`; place the
+  right-hand split (`nvim_open_win`, `enter=false`, so focus stays on the source)
+  with a placeholder scratch buffer; set window-local display options
+  (`number=false`, `signcolumn=no`, `statuscolumn=""`, `wrap=false`,
+  `winfixwidth`); allocate a temp file; wire per-source autocmds; first `refresh`.
+- `refresh(src_buf)` — write the live source lines to the temp file; create a
+  fresh terminal buffer; inside `nvim_win_call(preview_win, …)` set it current and
+  `termopen({"glow","-s",<style>,"-w",<width>, tmpfile})`; on exit, strip nvim's
+  trailing `[Process exited N]` line and `sync_scroll`; swap it into the preview
+  window and wipe the previous terminal buffer. A generation counter discards
+  stale renders.
+- `sync_scroll(src_buf)` — `pct = src_cursor_line / src_line_count`; place the
   preview view at the same fraction of the preview's line count.
-- `M.close(src_buf)` — stop the timer, kill any in-flight glow job, close the
-  window, wipe the buffer, clear autocmds and state.
+- `M.close(src_buf)` — delete the augroup (first, to avoid WinClosed re-entry),
+  stop the timer, `jobstop`, close the window, wipe the buffer, delete the temp
+  file, clear state.
 
 **Autocmds wired while a preview is open** (in a per-source augroup):
 
-- `TextChanged` / `TextChangedI` on the source → debounced `refresh`.
-- `CursorMoved` / `WinScrolled` on the source → `sync_scroll` (approximate).
-- `VimResized` / `WinResized` → recompute width + `refresh`.
-- `WinClosed` / `BufWipeout` (preview or source) → `close` / cleanup.
+- `BufWritePost` / `InsertLeave` / `TextChanged` on the source → debounced
+  `refresh`. (Deliberately **not** `TextChangedI` — avoids flicker while typing.)
+- `CursorMoved` on the source → `sync_scroll` (approximate).
+- `VimResized` / `WinResized` → debounced `refresh` (recomputes width).
+- `WinClosed` (preview) / `BufWipeout` / `BufDelete` (source) → `close` / cleanup.
 
 ### Render pipeline (the load-bearing detail)
 
 ```
-source buffer lines
-  → vim.system({ "glow", "-w", <panewidth>, "-" },
-               { stdin = <text>, env = { CLICOLOR_FORCE = "1", ... } }, on_exit)
-  → on_exit (vim.schedule): stdout = ANSI-styled lines
-  → set lines in preview buffer (temporarily modifiable)
-  → baleia: strip ANSI, apply highlights as extmarks
-  → modifiable = false; restore scroll
+live source buffer lines
+  → writefile(lines, tmpfile)                       (render the unsaved buffer)
+  → new scratch buffer, shown in the preview window
+  → nvim_win_call(preview_win): termopen(
+        { "glow", "-s", <dark|light>, "-w", <panewidth−6>, tmpfile })
+  → nvim's terminal emulator renders glow's full-color output into the buffer
+  → on_exit: strip trailing "[Process exited N]" line; approximate scroll sync
+  → wipe the previous terminal buffer
 ```
 
-- Piping the live buffer over **stdin** is what makes updates appear without
-  saving.
-- `CLICOLOR_FORCE=1` forces color even though stdout is not a TTY (glow/termenv
-  honor it). **This is unverified until glow is installed — first thing to confirm.**
+- The **terminal buffer** is what gives color: glow only colors a real TTY, and
+  nvim's terminal emulator is one. Rendering a temp file (not stdin) avoids the
+  pty stdin/EOF hassle while still rendering the **unsaved** buffer.
+- An explicit `-s dark`/`-s light` (not the default `auto`) is also needed; `auto`
+  renders monochrome off-TTY.
 - Debounce uses a libuv timer (`vim.uv.new_timer`): on change, `stop()` then
-  `start(250, 0, schedule_wrap(refresh))`.
+  `start(300, 0, schedule_wrap(refresh))`.
 
 ### Graceful fallback
 
@@ -140,25 +143,40 @@ live:
 2. The keymap `desc = "Toggle markdown preview"` (surfaces via `<Space>?` Telescope
    keymaps and which-key).
 3. `docs/keybindings.md` §18 "Markdown / MDX" — add a `<Space>mp` table row plus a
-   short paragraph: live, read-only glow preview; updates as you type; reflows prose
-   and wide tables to the pane; approximate %-based scroll sync; requires the `glow`
+   short paragraph: read-only full-color glow preview; refreshes on save / leaving
+   insert / edits; reflows prose and keeps wide tables aligned (wide cells
+   truncated, not shattered); approximate %-based scroll sync; requires the `glow`
    binary.
 4. `README.md` "What's included" — extend the **Markdown** bullet (line 92) to
-   mention the glow-backed live preview and its `glow` prerequisite.
+   mention the glow-backed preview and its `glow` prerequisite.
 
-## Risks & verification
+## Verification outcomes
 
-- **glow stdin + width + forced color** — the whole pipeline assumes
-  `glow -w N -` reads stdin and `CLICOLOR_FORCE=1` yields ANSI. Verify immediately
-  after `brew install glow`; if `-` is rejected, fall back to bare stdin (glow
-  auto-detects a pipe).
-- **glow wide-table behavior** — the entire premise is that glow renders
-  wider-than-pane tables more readably than nvim soft-wrap. Verify glow degrades
-  acceptably (reflow/scale) at realistic pane widths with a genuinely wide table.
-- **Refresh cost** — baleia + glow on every keystroke would be heavy; the 250 ms
-  debounce mitigates. Confirm responsiveness on a large document.
-- **Off-by-one width** — pane width vs glow's border math; tune `-w` if the output
-  is one column too wide and wraps.
+Verified against glow on this machine (`/opt/homebrew/bin/glow`) before/while
+implementing — several assumptions in the original plan were **falsified**:
+
+- **Color requires a TTY.** Piping glow (`vim.system`) yields bold/italic only —
+  no foreground color — regardless of `CLICOLOR_FORCE` / `FORCE_COLOR` /
+  `COLORTERM` / `-s dark`. A captured pty (`jobstart{pty=true}`) **hangs** on
+  glow's terminal-capability queries (OSC 10/11 + DSR), even when answered
+  manually. A Neovim **terminal buffer renders in full color in ~18 ms** because
+  nvim's emulator answers those queries. → drove the switch to the terminal buffer
+  and the removal of baleia.
+- **Wide-table behavior is acceptable.** At a narrow `-w`, glow keeps the table
+  aligned with box-drawing borders and truncates over-wide cells with `…` (it does
+  **not** shatter the table the way soft-wrap does). Confirmed in the e2e render.
+- **Width margin.** glow lays out to roughly `-w` + 6 columns (left margin), so the
+  engine targets `panewidth − 6` to avoid horizontal overflow.
+- **`[Process exited N]` line.** A finished terminal job appends this line; the
+  engine strips it in `on_exit`. Confirmed absent in the rendered buffer.
+- **Lifecycle + fallback.** Headless e2e confirms open creates the split, glow
+  renders, close removes the window and temp file, and the full real config loads
+  cleanly with the new `init.lua` wiring. When `glow` is absent the toggle notifies
+  once and no-ops.
+
+Remaining to confirm interactively (needs a real UI, not headless): the
+flicker/scroll feel during live editing at a normal pane width, and color contrast
+under the user's colorscheme.
 
 ## Testing
 

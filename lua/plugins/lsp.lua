@@ -92,10 +92,15 @@ vim.api.nvim_create_autocmd("LspAttach", {
       vim.keymap.set("n", lhs, rhs, { buffer = args.buf, silent = true, desc = desc })
     end
 
+    local ft = vim.bo[args.buf].filetype
     if client and client.name == "ts_ls" then
       map("gd", function()
         ts_goto_source_definition(client, args.buf)
       end, "Goto source definition (ts_ls)")
+    elseif ft == "markdown" or ft == "mdx" then
+      -- Smart gd: follow a wikilink if the cursor is on one, else LSP definition.
+      -- Re-asserted here so marksman's attach doesn't overwrite the FileType map.
+      map("gd", require("config.wikilinks").goto_definition, "Goto wikilink / definition")
     else
       map("gd", vim.lsp.buf.definition, "Goto definition")
     end
