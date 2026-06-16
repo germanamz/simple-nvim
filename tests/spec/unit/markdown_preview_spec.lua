@@ -1,11 +1,11 @@
 local mp = require("config.markdown_preview")
 
 local function t(line)
-  return mp._transform_wikilinks({ line })[1]
+  return mp._transform_links({ line })[1]
 end
 
 describe("config.markdown_preview", function()
-  describe("_transform_wikilinks", function()
+  describe("_transform_links (wikilinks)", function()
     -- Anchor destination so glow shows only the link text (no temp-path URL tail).
     it("converts a bare wikilink, keeping the target text", function()
       assert.are.equal("[My Note](#)", t("[[My Note]]"))
@@ -27,8 +27,8 @@ describe("config.markdown_preview", function()
       assert.are.equal("[a](#) and [b](#)", t("[[a]] and [[b]]"))
     end)
 
-    it("leaves text without wikilinks unchanged", function()
-      assert.are.equal("just [a](b) and text", t("just [a](b) and text"))
+    it("leaves plain text without links unchanged", function()
+      assert.are.equal("just some text", t("just some text"))
     end)
 
     it("does not rewrite wikilinks inside inline code", function()
@@ -40,8 +40,68 @@ describe("config.markdown_preview", function()
     end)
 
     it("does not rewrite wikilinks inside fenced code blocks", function()
-      local out = mp._transform_wikilinks({ "```", "[[raw]]", "```" })
+      local out = mp._transform_links({ "```", "[[raw]]", "```" })
       assert.are.same({ "```", "[[raw]]", "```" }, out)
+    end)
+  end)
+
+  -- glow appends a markdown link's destination as a visible URL tail, resolving a
+  -- relative path against the temp file's directory -- a noisy absolute temp path
+  -- for links to sibling docs. Local-file destinations are rewritten to a bare
+  -- anchor (`#`) so glow shows just the link text; real URLs and in-doc anchors
+  -- are kept, since those tails are meaningful.
+  describe("_transform_links (standard links)", function()
+    it("neutralizes a relative file-link destination", function()
+      assert.are.equal("[PRODUCT.md](#)", t("[PRODUCT.md](PRODUCT.md)"))
+    end)
+
+    it("neutralizes a relative subpath destination", function()
+      assert.are.equal("[cli docs](#)", t("[cli docs](docs/cli/)"))
+    end)
+
+    it("neutralizes a ./ or ../ relative destination", function()
+      assert.are.equal("[up](#)", t("[up](../sibling.md)"))
+    end)
+
+    it("neutralizes an absolute file-path destination", function()
+      assert.are.equal("[p](#)", t("[p](/var/folders/x/PRODUCT.md)"))
+    end)
+
+    it("keeps an http(s) URL destination", function()
+      assert.are.equal("[ex](https://example.com)", t("[ex](https://example.com)"))
+    end)
+
+    it("keeps a mailto: destination", function()
+      assert.are.equal("[me](mailto:a@b.com)", t("[me](mailto:a@b.com)"))
+    end)
+
+    it("keeps a pure in-doc fragment anchor", function()
+      assert.are.equal("[h](#heading)", t("[h](#heading)"))
+    end)
+
+    it("leaves images (![alt](src)) unchanged", function()
+      assert.are.equal("![alt](img.png)", t("![alt](img.png)"))
+    end)
+
+    it("neutralizes multiple file links on one line", function()
+      assert.are.equal("[a](#) and [b](#)", t("[a](a.md) and [b](b.md)"))
+    end)
+
+    it("preserves surrounding text around a file link", function()
+      assert.are.equal("see [a](#) here", t("see [a](b.md) here"))
+    end)
+
+    it("does not rewrite a file link inside an inline code span", function()
+      assert.are.equal("use `[a](b.md)` verbatim", t("use `[a](b.md)` verbatim"))
+    end)
+
+    it("does not rewrite a file link inside a fenced code block", function()
+      local out = mp._transform_links({ "```", "[a](b.md)", "```" })
+      assert.are.same({ "```", "[a](b.md)", "```" }, out)
+    end)
+
+    it("handles a wikilink and a file link on the same line", function()
+      assert.are.equal("[a](#) and [b](#)", t("[[a]] and [b](b.md)"))
     end)
   end)
 

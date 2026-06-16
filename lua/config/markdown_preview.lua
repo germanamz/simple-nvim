@@ -19,9 +19,11 @@
 -- stays in the raw source buffer; this side pane is the reading view (it replaces
 -- the former in-buffer render-markdown.nvim decoration).
 --
--- Wiki-style links (`[[target]]`, `[[target|alias]]`) aren't CommonMark, so glow
--- prints them literally; we rewrite them to anchor-destination markdown links so
--- glow shows just the link-styled text (no path tail). See transform_wikilinks.
+-- Links get a destination tail glow would resolve against the temp file's dir:
+-- wiki-style links (`[[target]]`) aren't CommonMark so glow prints them raw, and
+-- standard `[text](path.md)` links to sibling docs show a noisy absolute temp
+-- path. Both are rewritten to anchor-destination links so glow shows just the
+-- link-styled text (no path tail). External URLs are kept. See transform_links.
 --
 -- Trigger: buffer-local `<leader>mp` in markdown/mdx buffers (see setup()).
 -- `glow` is an external binary; if it is missing the toggle notifies once with
@@ -61,14 +63,32 @@ local function frontmatter_lines(lines)
 end
 M._frontmatter_lines = frontmatter_lines
 
--- glow (goldmark) doesn't understand wiki-style `[[target]]` / `[[target|alias]]`
--- links and prints them literally. Rewrite them to markdown links with a bare
--- anchor destination (`#`) so glow renders just the link-styled text. A real
--- (relative) destination would make glow append a URL tail expanded against the
--- temp file's directory -- a noisy absolute path, meaningless in a non-navigable
--- preview. `#` is a fragment, not a path, so glow leaves no tail. Inline code
--- spans are protected; fenced code blocks are skipped by the caller.
-local function convert_wikilinks(text)
+-- glow renders both wiki-style and standard links in ways that need rewriting
+-- before it sees them:
+--
+--   * Wiki-style `[[target]]` / `[[target|alias]]` links aren't CommonMark, so
+--     glow prints them literally.
+--   * For a standard `[text](dest)` link, glow appends `dest` as a visible URL
+--     tail -- and resolves a *relative* dest against the temp file's directory,
+--     so a link to a sibling doc shows a noisy absolute temp path (e.g.
+--     `/var/.../nvim.germanamz/PRODUCT.md`), meaningless in this non-navigable
+--     preview.
+--
+-- Rewrite both so glow shows just the link-styled text: wikilinks become
+-- `[text](#)`, and a local-file link's destination is replaced with the bare
+-- anchor `#` (a fragment, not a path, so glow leaves no tail). External links
+-- (`http(s):`, `mailto:`, ...) and pure in-doc `#fragment` anchors keep their
+-- destination -- those tails are real URLs worth showing, not temp-path noise.
+-- Inline code spans are protected; fenced code blocks are skipped by the caller.
+
+-- A link destination glow renders verbatim instead of expanding against the temp
+-- dir: one with an explicit URI scheme (`http://`, `mailto:`, ...) or a pure
+-- in-document `#fragment`. These keep their tail; everything else is a local path.
+local function is_external_dest(dest)
+  return dest:match("^%a[%w+.-]*:") ~= nil or dest:sub(1, 1) == "#"
+end
+
+local function convert_links(text)
   -- Protect inline code spans (`...`, ``...``) from rewriting.
   local spans = {}
   text = text:gsub("(`+)(.-)%1", function(ticks, body)
@@ -83,6 +103,15 @@ local function convert_wikilinks(text)
   text = text:gsub("%[%[([^%]|]+)%]%]", function(target)
     return "[" .. target .. "](#)"
   end)
+  -- [text](local/path) -> [text](#)  (drop the temp-path tail glow would append).
+  -- The leading `.?` captures the char before `[` so an image (`![alt](src)`) is
+  -- detected and skipped; external URLs and `#` anchors keep their destination.
+  text = text:gsub("(.?)(%[[^%]]*%])%(([^%)]*)%)", function(prefix, label, dest)
+    if prefix == "!" or is_external_dest(dest) then
+      return nil
+    end
+    return prefix .. label .. "(#)"
+  end)
   -- Restore protected code spans.
   text = text:gsub("\1(%d+)\2", function(i)
     return spans[tonumber(i)]
@@ -90,8 +119,8 @@ local function convert_wikilinks(text)
   return text
 end
 
--- Apply convert_wikilinks line by line, leaving fenced code blocks untouched.
-local function transform_wikilinks(lines)
+-- Apply convert_links line by line, leaving fenced code blocks untouched.
+local function transform_links(lines)
   local out, in_fence = {}, false
   for _, line in ipairs(lines) do
     if line:match("^%s*```") or line:match("^%s*~~~") then
@@ -100,12 +129,12 @@ local function transform_wikilinks(lines)
     elseif in_fence then
       out[#out + 1] = line
     else
-      out[#out + 1] = convert_wikilinks(line)
+      out[#out + 1] = convert_links(line)
     end
   end
   return out
 end
-M._transform_wikilinks = transform_wikilinks
+M._transform_links = transform_links
 
 notify_missing = function()
   if notified then
@@ -169,11 +198,11 @@ refresh = function(src)
   end
 
   -- Render the live (possibly unsaved) buffer via a private temp file, rewriting
-  -- wiki-style links to standard links so glow renders them. Record the
-  -- frontmatter length (glow strips it) for the scroll sync.
+  -- wiki-style and local-file links so glow renders them without a temp-path tail.
+  -- Record the frontmatter length (glow strips it) for the scroll sync.
   local raw = vim.api.nvim_buf_get_lines(src, 0, -1, false)
   state.fm_lines = frontmatter_lines(raw)
-  vim.fn.writefile(transform_wikilinks(raw), state.tmpfile)
+  vim.fn.writefile(transform_links(raw), state.tmpfile)
 
   -- glow lays out to roughly `-w` + a left margin (~6 cols); target the pane
   -- width minus that so the rendered frame doesn't overflow horizontally.
