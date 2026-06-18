@@ -17,43 +17,6 @@ local M = {}
 -- }
 local cache = {}
 
-local function blend(hex, target, ratio)
-  local r = bit.band(bit.rshift(hex, 16), 0xff)
-  local g = bit.band(bit.rshift(hex, 8), 0xff)
-  local b = bit.band(hex, 0xff)
-  local tr = bit.band(bit.rshift(target, 16), 0xff)
-  local tg = bit.band(bit.rshift(target, 8), 0xff)
-  local tb = bit.band(target, 0xff)
-  local nr = math.floor(r + (tr - r) * ratio)
-  local ng = math.floor(g + (tg - g) * ratio)
-  local nb = math.floor(b + (tb - b) * ratio)
-  return string.format("#%02x%02x%02x", nr, ng, nb)
-end
-
-local function apply_ruler_hl()
-  local cursorline = vim.api.nvim_get_hl(0, { name = "CursorLine", link = false })
-  local normal = vim.api.nvim_get_hl(0, { name = "Normal", link = false })
-  local base = cursorline.bg or normal.bg
-  local bg
-  if base then
-    local luminance = (
-      bit.band(bit.rshift(base, 16), 0xff) * 0.299
-      + bit.band(bit.rshift(base, 8), 0xff) * 0.587
-      + bit.band(base, 0xff) * 0.114
-    )
-    local ratio = luminance < 128 and 0.55 or 0.18
-    bg = blend(base, 0x000000, ratio)
-  else
-    bg = vim.o.background == "light" and "#c0c0c0" or "#0a0a0a"
-  end
-  vim.api.nvim_set_hl(0, "ColorColumn", { bg = bg, default = false })
-end
-apply_ruler_hl()
-vim.api.nvim_create_autocmd("ColorScheme", {
-  group = vim.api.nvim_create_augroup("markdown_paragraphs_hl", { clear = true }),
-  callback = apply_ruler_hl,
-})
-
 local function is_blank(line)
   return line:match("^%s*$") ~= nil
 end

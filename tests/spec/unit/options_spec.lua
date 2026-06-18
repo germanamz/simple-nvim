@@ -56,30 +56,15 @@ describe("config.options", function()
     end
   end)
 
-  it("forces wrap on when diff mode toggles on", function()
+  it("disables soft-wrap globally so long lines scroll horizontally", function()
     require("config.options")
+    assert.is_false(vim.opt.wrap:get())
+    -- the diff-mode wrap override was removed along with global soft-wrap
     local autocmds = vim.api.nvim_get_autocmds({ event = "OptionSet", pattern = "diff" })
-    assert.are.equal(1, #autocmds)
-    local callback = autocmds[1].callback
-    assert.is_function(callback)
-
-    vim.cmd("new")
-    local win = vim.api.nvim_get_current_win()
-    vim.opt_local.wrap = false
-
-    -- OptionSet is suppressed in headless plenary (fires only post-VimEnter),
-    -- so invoke the callback directly with v:option_new mocked.
-    local orig_v = vim.v
-    vim.v = setmetatable({ option_new = "1" }, { __index = orig_v })
-    local ok, err = pcall(callback, {})
-    vim.v = orig_v
-
-    assert.is_true(ok, tostring(err))
-    assert.is_true(vim.opt_local.wrap:get())
-    vim.api.nvim_win_close(win, true)
+    assert.are.equal(0, #autocmds)
   end)
 
-  it("soft-wraps markdown and disables auto hard-wrap", function()
+  it("disables auto hard-wrap in markdown without forcing soft-wrap", function()
     require("config.options")
     vim.cmd("new")
     local win = vim.api.nvim_get_current_win()
@@ -87,8 +72,8 @@ describe("config.options", function()
     vim.opt_local.wrap = false
     vim.bo[buf].filetype = "markdown"
 
-    -- soft-wrap visually instead of hard-wrapping the file on disk
-    assert.is_true(vim.opt_local.wrap:get())
+    -- soft-wrap is left off (disabled globally; long lines scroll horizontally)
+    assert.is_false(vim.opt_local.wrap:get())
     -- 't' removed so a project's editorconfig max_line_length cannot trigger
     -- live auto-hard-wrap (the bundled markdown ftplugin sets it otherwise)
     assert.is_nil(vim.bo[buf].formatoptions:find("t", 1, true))

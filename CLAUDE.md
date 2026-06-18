@@ -12,7 +12,7 @@ management with automatic bootstrapping.
 - `init.lua` — Entry point: bootstraps lazy.nvim, sets leader keys
 (`<Space>`/`\`), loads options, then calls `require("lazy").setup("plugins")`
 - `lua/config/options.lua` — Editor options and autocommands (indentation,
-search, display, diff-mode wrap fix)
+search, display, markdown writing mode)
 - `lua/plugins/*.lua` — Each file returns a lazy.nvim plugin spec (or table of
 specs). lazy.nvim auto-discovers all files in this directory.
 

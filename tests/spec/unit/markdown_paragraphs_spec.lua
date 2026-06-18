@@ -397,20 +397,12 @@ describe("config.markdown_paragraphs", function()
     }, data.headings)
   end)
 
-  it("sets colorcolumn=81 on the current window", function()
+  it("does not set a colorcolumn ruler in writing mode", function()
     vim.api.nvim_set_current_buf(bufnr)
+    vim.wo.colorcolumn = ""
     compute_for({ "line one", "line two", "line three" })
-    assert.are.equal("81", vim.wo.colorcolumn)
-  end)
-
-  it("sets ColorColumn bg darker than Normal so it stands apart from CursorLine", function()
-    vim.api.nvim_set_hl(0, "Normal", { bg = "#202020" })
-    package.loaded["config.markdown_paragraphs"] = nil
-    require("config.markdown_paragraphs")
-    local hl = vim.api.nvim_get_hl(0, { name = "ColorColumn", link = false })
-    assert.is_not_nil(hl.bg)
-    local normal_bg = vim.api.nvim_get_hl(0, { name = "Normal", link = false }).bg
-    assert.is_true(hl.bg < normal_bg)
+    -- the 80-column ruler was removed; writing mode no longer sets colorcolumn
+    assert.are.equal("", vim.wo.colorcolumn)
   end)
 
   it("sets a custom statuscolumn on the current window", function()
