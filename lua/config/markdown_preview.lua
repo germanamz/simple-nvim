@@ -19,11 +19,12 @@
 -- stays in the raw source buffer; this side pane is the reading view (it replaces
 -- the former in-buffer render-markdown.nvim decoration).
 --
--- Links get a destination tail glow would resolve against the temp file's dir:
--- wiki-style links (`[[target]]`) aren't CommonMark so glow prints them raw, and
--- standard `[text](path.md)` links to sibling docs show a noisy absolute temp
--- path. Both are rewritten to anchor-destination links so glow shows just the
--- link-styled text (no path tail). External URLs are kept. See transform_links.
+-- Links get a destination tail glow would render: wiki-style links (`[[target]]`)
+-- aren't CommonMark so glow prints them raw; standard `[text](dest)` links show
+-- their dest (a noisy absolute temp path for a sibling doc, the full URL for an
+-- external link). All are rewritten to anchor-destination links so glow shows
+-- just the link-styled text (no tail); the links stay usable via the preview's
+-- `gd`, which matches the text back to the source. See transform_links.
 --
 -- Trigger: buffer-local `<leader>mp` in markdown/mdx buffers (see setup()).
 -- `glow` is an external binary; if it is missing the toggle notifies once with
@@ -68,25 +69,15 @@ M._frontmatter_lines = frontmatter_lines
 --
 --   * Wiki-style `[[target]]` / `[[target|alias]]` links aren't CommonMark, so
 --     glow prints them literally.
---   * For a standard `[text](dest)` link, glow appends `dest` as a visible URL
---     tail -- and resolves a *relative* dest against the temp file's directory,
---     so a link to a sibling doc shows a noisy absolute temp path (e.g.
---     `/var/.../nvim.germanamz/PRODUCT.md`), meaningless in this non-navigable
---     preview.
+--   * For a standard `[text](dest)` link, glow appends `dest` as a visible tail
+--     -- a noisy absolute temp path for a relative sibling-doc link (resolved
+--     against the temp file's dir), or the full URL for an external link.
 --
--- Rewrite both so glow shows just the link-styled text: wikilinks become
--- `[text](#)`, and a local-file link's destination is replaced with the bare
--- anchor `#` (a fragment, not a path, so glow leaves no tail). External links
--- (`http(s):`, `mailto:`, ...) and pure in-doc `#fragment` anchors keep their
--- destination -- those tails are real URLs worth showing, not temp-path noise.
--- Inline code spans are protected; fenced code blocks are skipped by the caller.
-
--- A link destination glow renders verbatim instead of expanding against the temp
--- dir: one with an explicit URI scheme (`http://`, `mailto:`, ...) or a pure
--- in-document `#fragment`. These keep their tail; everything else is a local path.
-local function is_external_dest(dest)
-  return dest:match("^%a[%w+.-]*:") ~= nil or dest:sub(1, 1) == "#"
-end
+-- Rewrite both so glow shows just the link-styled text: wikilinks and every
+-- non-image standard link become `[text](#)` -- a bare fragment, so glow leaves
+-- no tail. The links stay followable: the preview's `gd` matches the rendered
+-- text back to the source (see config.wikilinks.follow_in_preview). Inline code
+-- spans are protected; fenced code blocks are skipped by the caller.
 
 local function convert_links(text)
   -- Protect inline code spans (`...`, ``...``) from rewriting.
@@ -103,11 +94,11 @@ local function convert_links(text)
   text = text:gsub("%[%[([^%]|]+)%]%]", function(target)
     return "[" .. target .. "](#)"
   end)
-  -- [text](local/path) -> [text](#)  (drop the temp-path tail glow would append).
-  -- The leading `.?` captures the char before `[` so an image (`![alt](src)`) is
-  -- detected and skipped; external URLs and `#` anchors keep their destination.
-  text = text:gsub("(.?)(%[[^%]]*%])%(([^%)]*)%)", function(prefix, label, dest)
-    if prefix == "!" or is_external_dest(dest) then
+  -- [text](dest) -> [text](#)  (drop the tail glow would append, for local paths
+  -- and external URLs alike). The leading `.?` captures the char before `[` so an
+  -- image (`![alt](src)`) is detected and left untouched.
+  text = text:gsub("(.?)(%[[^%]]*%])%([^%)]*%)", function(prefix, label)
+    if prefix == "!" then
       return nil
     end
     return prefix .. label .. "(#)"

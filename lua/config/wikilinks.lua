@@ -1,4 +1,4 @@
--- Follow wiki-style links to their target file.
+-- Follow markdown links to their target -- wiki-style and standard alike.
 --
 -- Wikilinks here are project-scoped: `[[a/b/c]]` resolves to
 -- `<project root>/a/b/c.md`, where the root is found by walking up from the
@@ -7,10 +7,17 @@
 -- supported -- the alias and heading are ignored for resolution, and `.md` is
 -- appended when the target has no extension.
 --
+-- Standard `[text](dest)` links are followed by their destination: a relative or
+-- absolute file path opens the file (resolved against the source file's own
+-- directory, CommonMark-style); an external URL (`http(s):`, `mailto:`, ...)
+-- opens via the system handler; an in-document `#anchor` is left to LSP.
+--
 -- Bound to `gd` (buffer-local) in markdown/mdx buffers as a "smart go-to": it
--- follows the wikilink under the cursor, falling back to LSP go-to-definition
--- when the cursor isn't on one. See setup() and the LspAttach branch in
--- lua/plugins/lsp.lua.
+-- follows the link under the cursor, falling back to LSP go-to-definition when
+-- the cursor isn't on one. The same logic backs the read-only preview's `gd`
+-- (config.markdown_preview), which matches the rendered text back to the source
+-- since glow's output drops link destinations. See setup() and the LspAttach
+-- branch in lua/plugins/lsp.lua.
 
 local M = {}
 
@@ -48,6 +55,52 @@ local function normalize_target(inner)
 end
 M._normalize_target = normalize_target
 
+-- Classify a standard `[text](dest)` link's destination: an explicit URI scheme
+-- (`http://`, `mailto:`, ...) is a "url" (opened by the system handler), a
+-- leading `#` is an in-document "anchor" (not followable here), and anything
+-- else is a local "file" path.
+local function classify_dest(dest)
+  if dest:sub(1, 1) == "#" then
+    return "anchor"
+  elseif dest:match("^%a[%w+.-]*:") then
+    return "url"
+  end
+  return "file"
+end
+M._classify_dest = classify_dest
+
+-- The standard markdown link `[text](dest)` covering 1-based column `col` on
+-- `line`, returned as { text, dest }, or nil. Images (`![alt](src)`) are skipped.
+local function standard_link_at(line, col)
+  local init = 1
+  while true do
+    local s, e, text, dest = line:find("%[([^%]]*)%]%(([^%)]*)%)", init)
+    if not s then
+      return nil
+    end
+    local is_image = s > 1 and line:sub(s - 1, s - 1) == "!"
+    if not is_image and col >= s and col <= e then
+      return { text = text, dest = dest }
+    end
+    init = e + 1
+  end
+end
+M._standard_link_at = standard_link_at
+
+-- Resolve a local-file link destination to an absolute path, relative to the
+-- source file's directory (CommonMark semantics). Drops a trailing `#fragment`,
+-- keeps an absolute (or `~`) dest, and collapses `.`/`..` segments.
+local function resolve_file(dest, src_dir)
+  dest = dest:gsub("#.*$", "")
+  if dest == "" then
+    return nil
+  end
+  local first = dest:sub(1, 1)
+  local path = (first == "/" or first == "~") and dest or (src_dir .. "/" .. dest)
+  return vim.fs.normalize(path)
+end
+M._resolve_file = resolve_file
+
 -- Project root for `source` (a file path); defaults to the current buffer/cwd.
 local function project_root(source)
   if not source or source == "" then
@@ -57,16 +110,28 @@ local function project_root(source)
   return vim.fs.root(source, ROOT_MARKERS) or vim.fn.getcwd()
 end
 
--- Open a project-relative target in the current window. Returns false (and
--- notifies) if the resolved file doesn't exist.
-local function open_target(target, root)
-  local path = root .. "/" .. target
+-- Open an absolute path in the current window. Returns false (and notifies) if
+-- the file doesn't exist.
+local function open_path(path)
   if vim.fn.filereadable(path) == 0 then
-    vim.notify("Wikilink target not found:\n" .. path, vim.log.levels.WARN, { title = "wikilinks" })
+    vim.notify("Link target not found:\n" .. path, vim.log.levels.WARN, { title = "wikilinks" })
     return false
   end
   vim.cmd.edit(vim.fn.fnameescape(path))
   return true
+end
+
+-- Open a project-relative wikilink target in the current window.
+local function open_target(target, root)
+  return open_path(root .. "/" .. target)
+end
+
+-- Open an external URL with the system handler (browser, mail client, ...).
+local function open_url(url)
+  local _, err = vim.ui.open(url)
+  if err then
+    vim.notify("Could not open URL:\n" .. url, vim.log.levels.WARN, { title = "wikilinks" })
+  end
 end
 
 -- Try to follow the wikilink under the cursor. Returns true when the cursor was
@@ -88,9 +153,36 @@ local function try_follow()
 end
 M._try_follow = try_follow
 
--- Smart `gd`: follow a wikilink if the cursor is on one, else LSP definition.
+-- Try to follow the standard `[text](dest)` link under the cursor in the raw
+-- source buffer (where the real dest is present). Returns true when the cursor
+-- was on a followable link -- a file opens, a URL opens externally -- and false
+-- otherwise (including in-document anchors), so the caller can fall back to LSP.
+local function try_follow_standard()
+  local line = vim.api.nvim_get_current_line()
+  local col = vim.api.nvim_win_get_cursor(0)[2] + 1
+  local link = standard_link_at(line, col)
+  if not link then
+    return false
+  end
+  local kind = classify_dest(link.dest)
+  if kind == "url" then
+    open_url(link.dest)
+    return true
+  elseif kind == "file" then
+    local name = vim.api.nvim_buf_get_name(0)
+    local src_dir = name ~= "" and vim.fs.dirname(name) or vim.fn.getcwd()
+    local path = resolve_file(link.dest, src_dir)
+    if path then
+      open_path(path)
+    end
+    return true
+  end
+  return false
+end
+
+-- Smart `gd`: follow a wiki or standard link if the cursor is on one, else LSP.
 function M.goto_definition()
-  if try_follow() then
+  if try_follow() or try_follow_standard() then
     return
   end
   vim.lsp.buf.definition()
@@ -104,8 +196,26 @@ local function display_text(inner)
   return vim.trim(pipe and inner:sub(pipe + 1) or inner)
 end
 
--- Ordered { display, target } for every wikilink in `lines`, skipping fenced
--- code (which glow renders raw, so there's no rendered link to match).
+-- The next non-image standard `[text](dest)` link at/after `init` on `line`,
+-- as (s, e, text, dest), or nil. Images (`![alt](src)`) are skipped.
+local function next_standard(line, init)
+  while true do
+    local s, e, text, dest = line:find("%[([^%]]*)%]%(([^%)]*)%)", init)
+    if not s then
+      return nil
+    end
+    if not (s > 1 and line:sub(s - 1, s - 1) == "!") then
+      return s, e, text, dest
+    end
+    init = e + 1
+  end
+end
+
+-- Ordered { display, kind, target } for every followable link in `lines` (wiki
+-- and standard, in document order), skipping fenced code (which glow renders
+-- raw, so there's no rendered link to match), images, and in-doc `#anchor`
+-- links. For wikilinks `target` is the project-relative path; for standard links
+-- it is the raw destination (a file path or a URL), resolved at follow time.
 local function links_in_lines(lines)
   local out, in_fence = {}, false
   for _, line in ipairs(lines) do
@@ -113,16 +223,24 @@ local function links_in_lines(lines)
       in_fence = not in_fence
     elseif not in_fence then
       local init = 1
-      while true do
-        local s, e, inner = line:find("%[%[(.-)%]%]", init)
-        if not s then
+      while init <= #line do
+        local ws, we, inner = line:find("%[%[(.-)%]%]", init)
+        local ss, se, text, dest = next_standard(line, init)
+        if ws and (not ss or ws <= ss) then
+          local display, target = display_text(inner), normalize_target(inner)
+          if display ~= "" and target then
+            out[#out + 1] = { display = display, kind = "wiki", target = target }
+          end
+          init = we + 1
+        elseif ss then
+          local kind = classify_dest(dest)
+          if kind ~= "anchor" and text ~= "" then
+            out[#out + 1] = { display = text, kind = kind, target = dest }
+          end
+          init = se + 1
+        else
           break
         end
-        local display, target = display_text(inner), normalize_target(inner)
-        if display ~= "" and target then
-          out[#out + 1] = { display = display, target = target }
-        end
-        init = e + 1
       end
     end
   end
@@ -130,8 +248,9 @@ local function links_in_lines(lines)
 end
 M._links_in_lines = links_in_lines
 
--- Among `links`, the distinct targets whose display text covers 1-based column
--- `col` in `line`. Longer (more specific) displays win on overlap.
+-- Among `links`, the distinct links whose display text covers 1-based column
+-- `col` in `line`. Longer (more specific) displays win on overlap; dedup is by
+-- kind+target so a file and a like-named wikilink aren't collapsed.
 local function match_at(links, line, col)
   local hits = {}
   for _, lk in ipairs(links) do
@@ -152,8 +271,9 @@ local function match_at(links, line, col)
   end)
   local seen, uniq = {}, {}
   for _, h in ipairs(hits) do
-    if not seen[h.target] then
-      seen[h.target] = true
+    local key = (h.kind or "") .. "\1" .. h.target
+    if not seen[key] then
+      seen[key] = true
       uniq[#uniq + 1] = h
     end
   end
@@ -161,9 +281,10 @@ local function match_at(links, line, col)
 end
 M._match_at = match_at
 
--- Follow the wikilink under the cursor in the (reflowed, target-less) preview by
--- matching the rendered link text against `src`'s wikilinks. Opens in the source
--- window; prompts when a display name maps to more than one target.
+-- Follow the link under the cursor in the (reflowed, target-less) preview by
+-- matching the rendered link text against `src`'s links. Files and wikilinks open
+-- in the source window, URLs open externally; prompts when a display name maps to
+-- more than one target.
 function M.follow_in_preview(src)
   if not (src and vim.api.nvim_buf_is_valid(src)) then
     return
@@ -172,28 +293,41 @@ function M.follow_in_preview(src)
   local col = vim.api.nvim_win_get_cursor(0)[2] + 1
   local matches = match_at(links_in_lines(vim.api.nvim_buf_get_lines(src, 0, -1, false)), line, col)
   if #matches == 0 then
-    vim.notify("No wikilink under the cursor", vim.log.levels.INFO, { title = "wikilinks" })
+    vim.notify("No link under the cursor", vim.log.levels.INFO, { title = "wikilinks" })
     return
   end
-  local root = project_root(vim.api.nvim_buf_get_name(src))
+  local name = vim.api.nvim_buf_get_name(src)
+  local root = project_root(name)
+  local src_dir = name ~= "" and vim.fs.dirname(name) or vim.fn.getcwd()
   local src_win = vim.fn.bufwinid(src)
-  local function go(target)
+  local function go(match)
+    if match.kind == "url" then
+      open_url(match.target)
+      return
+    end
     if src_win ~= -1 and vim.api.nvim_win_is_valid(src_win) then
       vim.api.nvim_set_current_win(src_win)
     end
-    open_target(target, root)
+    if match.kind == "file" then
+      local path = resolve_file(match.target, src_dir)
+      if path then
+        open_path(path)
+      end
+    else
+      open_target(match.target, root)
+    end
   end
   if #matches == 1 then
-    go(matches[1].target)
+    go(matches[1])
   else
     vim.ui.select(matches, {
-      prompt = "Follow wikilink:",
+      prompt = "Follow link:",
       format_item = function(m)
         return m.display .. "  →  " .. m.target
       end,
     }, function(choice)
       if choice then
-        go(choice.target)
+        go(choice)
       end
     end)
   end

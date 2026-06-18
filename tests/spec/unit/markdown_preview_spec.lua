@@ -45,11 +45,11 @@ describe("config.markdown_preview", function()
     end)
   end)
 
-  -- glow appends a markdown link's destination as a visible URL tail, resolving a
-  -- relative path against the temp file's directory -- a noisy absolute temp path
-  -- for links to sibling docs. Local-file destinations are rewritten to a bare
-  -- anchor (`#`) so glow shows just the link text; real URLs and in-doc anchors
-  -- are kept, since those tails are meaningful.
+  -- glow appends a markdown link's destination as a visible URL tail (resolving a
+  -- relative path against the temp file's dir -- a noisy absolute temp path -- and
+  -- showing external URLs in full). Every non-image link destination is rewritten
+  -- to a bare anchor (`#`) so glow shows just the link text; the links stay usable
+  -- via the preview's `gd`, which matches the text back to the source.
   describe("_transform_links (standard links)", function()
     it("neutralizes a relative file-link destination", function()
       assert.are.equal("[PRODUCT.md](#)", t("[PRODUCT.md](PRODUCT.md)"))
@@ -67,16 +67,16 @@ describe("config.markdown_preview", function()
       assert.are.equal("[p](#)", t("[p](/var/folders/x/PRODUCT.md)"))
     end)
 
-    it("keeps an http(s) URL destination", function()
-      assert.are.equal("[ex](https://example.com)", t("[ex](https://example.com)"))
+    it("neutralizes an http(s) URL destination", function()
+      assert.are.equal("[ex](#)", t("[ex](https://example.com)"))
     end)
 
-    it("keeps a mailto: destination", function()
-      assert.are.equal("[me](mailto:a@b.com)", t("[me](mailto:a@b.com)"))
+    it("neutralizes a mailto: destination", function()
+      assert.are.equal("[me](#)", t("[me](mailto:a@b.com)"))
     end)
 
-    it("keeps a pure in-doc fragment anchor", function()
-      assert.are.equal("[h](#heading)", t("[h](#heading)"))
+    it("neutralizes a pure in-doc fragment anchor", function()
+      assert.are.equal("[h](#)", t("[h](#heading)"))
     end)
 
     it("leaves images (![alt](src)) unchanged", function()

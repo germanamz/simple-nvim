@@ -59,27 +59,118 @@ describe("config.wikilinks", function()
     end)
   end)
 
+  -- Classify a standard link's destination: a URI scheme is external (opened in
+  -- the browser/mail client), a leading `#` is an in-document anchor (not
+  -- followable here), everything else is a local file path.
+  describe("_classify_dest", function()
+    it("classifies an http(s) URL as a url", function()
+      assert.are.equal("url", wl._classify_dest("https://example.com"))
+      assert.are.equal("url", wl._classify_dest("http://example.com"))
+    end)
+
+    it("classifies a mailto: destination as a url", function()
+      assert.are.equal("url", wl._classify_dest("mailto:a@b.com"))
+    end)
+
+    it("classifies a relative path as a file", function()
+      assert.are.equal("file", wl._classify_dest("PRODUCT.md"))
+      assert.are.equal("file", wl._classify_dest("../docs/cli.md"))
+    end)
+
+    it("classifies an absolute path as a file", function()
+      assert.are.equal("file", wl._classify_dest("/var/x/PRODUCT.md"))
+    end)
+
+    it("classifies a leading-# destination as an anchor", function()
+      assert.are.equal("anchor", wl._classify_dest("#heading"))
+    end)
+  end)
+
+  -- The standard markdown link `[text](dest)` covering the cursor column, used to
+  -- follow links directly in the raw source buffer (where the real dest is still
+  -- present). Images (`![alt](src)`) are skipped.
+  describe("_standard_link_at", function()
+    -- "see [spec](PRODUCT.md) end" -> [spec](PRODUCT.md) spans columns 5..22
+    local line = "see [spec](PRODUCT.md) end"
+
+    it("returns the text and dest when the column is inside the link", function()
+      assert.are.same({ text = "spec", dest = "PRODUCT.md" }, wl._standard_link_at(line, 7))
+    end)
+
+    it("matches on the opening bracket and closing paren", function()
+      assert.are.same({ text = "spec", dest = "PRODUCT.md" }, wl._standard_link_at(line, 5))
+      assert.are.same({ text = "spec", dest = "PRODUCT.md" }, wl._standard_link_at(line, 22))
+    end)
+
+    it("returns nil when the column is outside any link", function()
+      assert.is_nil(wl._standard_link_at(line, 1))
+      assert.is_nil(wl._standard_link_at(line, 24))
+    end)
+
+    it("skips images", function()
+      assert.is_nil(wl._standard_link_at("pre ![alt](img.png) post", 8))
+    end)
+
+    it("picks the link under the cursor when there are several", function()
+      local l = "[a](x.md) and [b](y.md)"
+      assert.are.same({ text = "a", dest = "x.md" }, wl._standard_link_at(l, 2))
+      assert.are.same({ text = "b", dest = "y.md" }, wl._standard_link_at(l, 16))
+    end)
+
+    it("returns nil on a wikilink (not a standard link)", function()
+      assert.is_nil(wl._standard_link_at("[[a/b]]", 3))
+    end)
+  end)
+
+  -- Resolve a local-file link's destination to an absolute path: relative to the
+  -- source file's directory (standard markdown semantics), with any `#fragment`
+  -- dropped and `.`/`..` segments collapsed. Absolute destinations are kept.
+  describe("_resolve_file", function()
+    it("resolves a relative destination against the source dir", function()
+      assert.are.equal("/home/u/notes/PRODUCT.md", wl._resolve_file("PRODUCT.md", "/home/u/notes"))
+    end)
+
+    it("collapses ../ against the source dir", function()
+      assert.are.equal("/home/u/notes/sib.md", wl._resolve_file("../sib.md", "/home/u/notes/sub"))
+    end)
+
+    it("keeps an absolute destination as-is", function()
+      assert.are.equal("/abs/x.md", wl._resolve_file("/abs/x.md", "/home/u"))
+    end)
+
+    it("drops a trailing #fragment before resolving", function()
+      assert.are.equal("/home/u/doc.md", wl._resolve_file("doc.md#sec", "/home/u"))
+    end)
+  end)
+
   describe("_links_in_lines", function()
-    it("extracts display text (alias or raw target) and resolved target", function()
+    it("extracts wiki, file, and url links with their kind and target", function()
       local got = wl._links_in_lines({
         "see [[lola/product]] and [[food/x|Tasty]] here",
+        "spec [the spec](PRODUCT.md) and site [Home](https://ex.com)",
       })
       assert.are.same({
-        { display = "lola/product", target = "lola/product.md" },
-        { display = "Tasty", target = "food/x.md" },
+        { display = "lola/product", kind = "wiki", target = "lola/product.md" },
+        { display = "Tasty", kind = "wiki", target = "food/x.md" },
+        { display = "the spec", kind = "file", target = "PRODUCT.md" },
+        { display = "Home", kind = "url", target = "https://ex.com" },
       }, got)
     end)
 
-    it("skips wikilinks inside fenced code", function()
-      assert.are.same({}, wl._links_in_lines({ "```", "[[raw]]", "```" }))
+    it("skips images and in-doc anchor links", function()
+      assert.are.same({}, wl._links_in_lines({ "![alt](img.png) and [top](#heading)" }))
+    end)
+
+    it("skips links inside fenced code", function()
+      assert.are.same({}, wl._links_in_lines({ "```", "[[raw]] [a](b.md)", "```" }))
     end)
   end)
 
   describe("_match_at", function()
     -- rendered preview line; "lola/product" spans cols 6..17
     local links = {
-      { display = "lola/product", target = "lola/product.md" },
-      { display = "food/x", target = "food/x.md" },
+      { display = "lola/product", kind = "wiki", target = "lola/product.md" },
+      { display = "food/x", kind = "wiki", target = "food/x.md" },
     }
     local line = "docs lola/product and food/x end"
 

@@ -565,14 +565,17 @@ auto-wrap fires while typing. `colorcolumn=81` shows the ruler.
 | `gq{motion}` | re-wrap one motion's worth                              |
 | `<Space>F`   | run conform's markdown formatter                        |
 | `<Space>mp`  | toggle live `glow` preview (read-only side pane)        |
-| `gd`         | follow wiki-link under cursor (else LSP definition)     |
+| `gd`         | follow wiki/standard link under cursor (else LSP definition) |
 
 `<Space>mp` opens a read-only, **full-color** preview split on the right that
 renders the buffer through [`glow`](https://github.com/charmbracelet/glow) inside a
 terminal buffer. It reflows prose *and* keeps wide tables aligned (cells wider than
 the pane are truncated with `…`, not shattered) — so it sidesteps the wrap-vs-table
-problem that plain soft-wrap can't. Wiki-style links (`[[note]]`, `[[note|alias]]`)
-are rewritten to standard links so they render too (glow doesn't grok them natively).
+problem that plain soft-wrap can't. Every link renders as just its styled text:
+wiki-style links (`[[note]]`, `[[note|alias]]`) are rewritten so glow renders them
+(it doesn't grok them natively), and standard `[text](dest)` links have their URL
+tail stripped (glow would otherwise print the full path/URL after the text). The
+links stay usable — press `gd` on one in the preview to follow it (see below).
 It renders the **live buffer** (written to a
 private temp file, so you never have to save your document) and refreshes on save,
 when you leave insert mode, and after normal-mode edits (debounced) — not on every
@@ -581,11 +584,16 @@ syncs to the source cursor (glow reflows, so the match is by % through the
 document, not line-for-line). Toggle again to close. Requires the `glow` binary
 (`brew install glow`); without it the keymap notifies once and does nothing.
 
-`gd` follows the wiki-link under the cursor, falling back to LSP go-to-definition
-when the cursor isn't on one. Wikilinks are project-scoped: `[[a/b/c]]` opens
-`<project root>/a/b/c.md`, where the root is found by walking up for a `.git` /
-`.marksman.toml` / `tusk.toml` / `.tusk` marker. `[[target|alias]]` and
-`[[target#heading]]` work too (alias/heading are ignored for resolution). `<C-^>`
+`gd` follows the link under the cursor — wiki or standard — falling back to LSP
+go-to-definition when the cursor isn't on one. It works the same in the source
+buffer and in the `glow` preview (where the rendered text is matched back to the
+source, since glow drops link destinations). Wikilinks are project-scoped:
+`[[a/b/c]]` opens `<project root>/a/b/c.md`, where the root is found by walking up
+for a `.git` / `.marksman.toml` / `tusk.toml` / `.tusk` marker. `[[target|alias]]`
+and `[[target#heading]]` work too (alias/heading are ignored for resolution).
+Standard `[text](dest)` links follow their destination: a relative or absolute
+file path opens the file (resolved against the current file's directory), and an
+external URL (`http(s):`, `mailto:`, …) opens via the system handler. `<C-^>`
 returns to the previous file.
 
 `<Space>w` is smarter than plain `gq`:
@@ -667,9 +675,11 @@ Other helpful Ex bits:
 - **TypeScript buffers (ts_ls):** custom "go to source definition" that
   follows imports through, falling back to standard `definition` if the
   command returns nothing.
-- **Markdown / MDX buffers:** follows the `[[wikilink]]` under the cursor
-  (project-root path), falling back to `vim.lsp.buf.definition` when the cursor
-  isn't on a wikilink.
+- **Markdown / MDX buffers:** follows the link under the cursor — a
+  `[[wikilink]]` (project-root path), or a standard `[text](dest)` link (file
+  opened relative to the current file, external URL opened via the system
+  handler) — falling back to `vim.lsp.buf.definition` when the cursor isn't on a
+  link.
 
 ### `<Esc>` in Telescope
 
