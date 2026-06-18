@@ -19,6 +19,20 @@ opt.listchars = {
 }
 opt.fillchars = { eob = " " }
 
+-- Go (and go.mod) keep real tabs by gofmt convention. Render those tabs with
+-- the same leading-space dots ('lead') instead of the global '»' glyph, while
+-- preserving the other whitespace markers (trailing spaces, nbsp, …). Width
+-- stays at 'tabstop' (2), so each tab shows as 'lead'-repeated columns.
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = { "go", "gomod" },
+  callback = function()
+    local chars = vim.opt.listchars:get()
+    local dot = chars.lead or "·"
+    chars.tab = dot .. dot -- 1st char shown, 2nd repeated to fill the tab width
+    vim.opt_local.listchars = chars
+  end,
+})
+
 -- Indentation
 opt.expandtab = true
 opt.shiftwidth = 2
