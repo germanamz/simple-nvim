@@ -21,8 +21,9 @@ specs). lazy.nvim auto-discovers all files in this directory.
 - Treesitter uses the `main` branch API (Neovim 0.11+): no `configs.setup()`,
 parsers installed via `require("nvim-treesitter").install()`, highlighting
 started per-buffer via `vim.treesitter.start()` in a FileType autocmd.
-- Telescope uses fzf-native extension (requires `make`). Single-escape closes
-insert mode directly.
+- Telescope uses fzf-native extension (requires `make`). Pickers open in normal
+mode (`initial_mode = "normal"`); press `i`/`a` to type. In insert mode `<esc>`
+drops back to normal mode, `<C-c>` closes; in normal mode `<esc>` closes.
 - LSP uses Neovim 0.11+ native API (`vim.lsp.config` / `vim.lsp.enable`) with
 `mason.nvim` managing server binaries. Servers are declared as a single table in
 `lua/plugins/lsp.lua`; each entry's `filetypes` gates per-buffer attach.

@@ -72,6 +72,77 @@ describe("e2e: telescope", function()
     end)
   end)
 
+  describe("normal-mode default + two-stage escape", function()
+    local function open_find_files()
+      local repo = git_fixture.repo({
+        commits = { { files = { ["a.lua"] = "return 1\n" }, message = "init" } },
+      })
+      vim.fn.chdir(repo)
+      press("<Space>ff")
+      wait.wait_for_buffer({ filetype = "TelescopePrompt", timeout = 3000 })
+    end
+
+    local function mode()
+      return vim.api.nvim_get_mode().mode
+    end
+
+    local function wait_for_mode(want, msg)
+      wait.wait_for(function()
+        return mode() == want
+      end, 2000, msg)
+    end
+
+    it("opens the picker in normal mode", function()
+      open_find_files()
+      wait_for_mode("n", "picker did not open in normal mode")
+      assert.are.equal("n", mode())
+      close_picker()
+    end)
+
+    it("closes on <Esc> from normal mode", function()
+      open_find_files()
+      wait_for_mode("n", "picker did not open in normal mode")
+
+      press("<Esc>")
+      wait.wait_for(function()
+        return not is_telescope_open()
+      end, 2000, "<Esc> did not close the picker from normal mode")
+      assert.is_false(is_telescope_open())
+    end)
+
+    -- Headless Neovim can't actually enter insert mode in a `buftype=prompt`
+    -- window (no UI attached, so even `startinsert` is a no-op). We therefore
+    -- assert the resolved insert-mode wiring instead of driving the live
+    -- transition: <Esc> must be our own callback (stopinsert -> normal mode),
+    -- NOT telescope's close action, while <C-c> must still close.
+    it("wires insert-mode <Esc> to leave insert (not close), <C-c> still closes", function()
+      open_find_files()
+      wait_for_mode("n", "picker did not open in normal mode")
+
+      local prompt_buf = assert(current_prompt_buf(), "no telescope prompt buffer")
+      local maps = {}
+      for _, m in ipairs(vim.api.nvim_buf_get_keymap(prompt_buf, "i")) do
+        maps[m.lhs] = m
+      end
+
+      local esc = assert(maps["<Esc>"], "no insert-mode <Esc> mapping on the prompt buffer")
+      assert.are.equal("function", type(esc.callback), "insert <Esc> should map to a Lua function")
+      -- Telescope tags its built-in close action with desc "telescope|close".
+      assert.is_nil(
+        (esc.desc or ""):find("close", 1, true),
+        "insert <Esc> should not be the close action, got desc: " .. tostring(esc.desc)
+      )
+
+      local cc = assert(maps["<C-C>"], "no insert-mode <C-c> mapping on the prompt buffer")
+      assert.is_truthy(
+        (cc.desc or ""):find("close", 1, true),
+        "insert <C-c> should still close, got desc: " .. tostring(cc.desc)
+      )
+
+      close_picker()
+    end)
+  end)
+
   describe("<leader>fg (live_grep)", function()
     it("opens picker", function()
       local repo = git_fixture.repo({

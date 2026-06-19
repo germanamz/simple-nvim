@@ -97,6 +97,9 @@ return {
       local actions = require("telescope.actions")
       return {
         defaults = {
+          -- Open pickers in normal mode so h/j/k/l navigate immediately;
+          -- press i/a to start typing a query.
+          initial_mode = "normal",
           prompt_prefix = "  ",
           selection_caret = "▶ ",
           entry_prefix = "  ",
@@ -114,7 +117,11 @@ return {
               ["<C-k>"] = actions.move_selection_previous,
               ["<C-n>"] = actions.cycle_history_next,
               ["<C-p>"] = actions.cycle_history_prev,
-              ["<esc>"] = actions.close,
+              -- Esc drops to normal mode (not close); Esc in normal closes.
+              -- <C-c> still closes in one press from insert.
+              ["<esc>"] = function()
+                vim.cmd("stopinsert")
+              end,
             },
           },
         },
