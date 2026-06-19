@@ -9,6 +9,16 @@ local ns = vim.api.nvim_create_namespace("lsp_refs_status")
 -- state[bufnr] = { row, col, count } — last resolved result for that buffer.
 local state = {}
 
+-- Neovim's default colorscheme links LspReferenceText to Visual, so the painted
+-- symbol occurrences look identical to a text selection — easy to mistake for a
+-- stuck selection that won't clear on a mode change. Give the group its own look
+-- (underline) so "other uses of this symbol" reads distinctly from a real
+-- selection. `default = true` still lets a real colorscheme override it; we
+-- re-apply on ColorScheme since loading one resets highlight groups.
+local function ensure_highlight()
+  vim.api.nvim_set_hl(0, "LspReferenceText", { underline = true, default = true })
+end
+
 local function clear_marks(bufnr)
   if vim.api.nvim_buf_is_valid(bufnr) then
     vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
@@ -215,6 +225,12 @@ end
 
 function M.setup()
   local group = vim.api.nvim_create_augroup("lsp_refs_status", { clear = true })
+
+  ensure_highlight()
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = group,
+    callback = ensure_highlight,
+  })
 
   vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
     group = group,

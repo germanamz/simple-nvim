@@ -43,6 +43,17 @@ describe("config.lsp_refs", function()
     nvim_env.teardown(env_root)
   end)
 
+  describe("reference highlight", function()
+    it("styles LspReferenceText distinctly from the Visual selection", function()
+      -- The default colorscheme links LspReferenceText to Visual, so painted
+      -- occurrences look identical to a text selection. setup() must break that
+      -- link and give it its own look (underline) so the two never collide.
+      local hl = vim.api.nvim_get_hl(0, { name = "LspReferenceText", link = true })
+      assert.is_nil(hl.link)
+      assert.is_true(hl.underline)
+    end)
+  end)
+
   describe("M.status", function()
     it("returns empty string when no state for current buffer", function()
       fresh_buffer_with_lines({ "x x x" })
