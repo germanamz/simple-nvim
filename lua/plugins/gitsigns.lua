@@ -15,7 +15,7 @@ return {
       signcolumn = false,
       numhl = true,
       linehl = false,
-      word_diff = true,
+      word_diff = false,
       diff_opts = { internal = true, linematch = 60 },
       current_line_blame = true,
       current_line_blame_opts = {
@@ -86,8 +86,10 @@ return {
 
     -- When hunks are toggled off (<leader>hh) we hide the line backgrounds and
     -- inline word-diff but keep gitsigns' numhl (colored line numbers) as a
-    -- minimal "changed line" marker. mark_hunks honors this flag.
-    local hunks_visible = true
+    -- minimal "changed line" marker. mark_hunks honors this flag. Default off:
+    -- buffers open in the minimal numhl-only state; <leader>hh reveals the full
+    -- highlights. Keep word_diff in opts off to match this startup state.
+    local hunks_visible = false
 
     -- When a review base is set but the file doesn't exist in that ref (added
     -- in the current branch), gitsigns has nothing to diff against and emits
