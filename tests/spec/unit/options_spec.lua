@@ -124,32 +124,30 @@ describe("config.options", function()
     pcall(vim.api.nvim_buf_delete, first, { force = true })
   end)
 
-  it("binds <leader>uh to toggle search highlight", function()
-    vim.g.mapleader = " "
+  it("binds <Esc> to clear search highlight", function()
     require("config.options")
 
     local found
     for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
-      if m.lhs == " uh" then
+      if m.lhs == "<Esc>" then
         found = m
         break
       end
     end
     assert.is_not_nil(found)
-    assert.is_not_nil(found.desc and found.desc:lower():find("toggle search highlight"))
+    assert.is_not_nil(found.desc and found.desc:lower():find("clear search highlight"))
   end)
 
-  it("<leader>uh flips the hlsearch option", function()
-    vim.g.mapleader = " "
+  it("<Esc> clears the search pattern and highlights", function()
     require("config.options")
 
-    local keys = vim.api.nvim_replace_termcodes(" uh", true, false, true)
+    local keys = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
 
     vim.opt.hlsearch = true
+    vim.fn.setreg("/", "needle")
     vim.api.nvim_feedkeys(keys, "mx", false)
-    assert.is_false(vim.opt.hlsearch:get())
 
-    vim.api.nvim_feedkeys(keys, "mx", false)
-    assert.is_true(vim.opt.hlsearch:get())
+    assert.are.equal("", vim.fn.getreg("/"))
+    assert.are.equal(0, vim.v.hlsearch)
   end)
 end)

@@ -46,9 +46,16 @@ opt.smartcase = true
 opt.hlsearch = true
 opt.incsearch = true
 
--- Toggle search-match highlighting (flips 'hlsearch'). Unlike :nohlsearch,
--- which only clears until the next search, this stays off until toggled back.
-vim.keymap.set("n", "<leader>uh", "<cmd>set hlsearch!<cr>", { desc = "Toggle search highlight" })
+-- Esc clears the active search, mirroring how VSCode/IntelliJ dismiss a find:
+-- drop the match highlights and the search pattern so `n`/`N` won't jump back to
+-- stale matches. A fresh `/` search highlights again from scratch. The trailing
+-- <esc> preserves Esc's normal job of cancelling a pending count/command.
+vim.keymap.set(
+  "n",
+  "<Esc>",
+  "<cmd>nohlsearch<cr><cmd>let @/ = ''<cr><esc>",
+  { desc = "Clear search highlight" }
+)
 
 -- netrw: tree-style listing with banner. g:netrw_treedepthstring doesn't always
 -- take effect (newer netrw caches it), so we also hide the bar character by
