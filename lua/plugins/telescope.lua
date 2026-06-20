@@ -119,7 +119,11 @@ return {
           prompt_prefix = "  ",
           selection_caret = "▶ ",
           entry_prefix = "  ",
-          path_display = { "truncate" },
+          -- Filename first (dir dimmed after it) so files are easy to scan in
+          -- deep trees; truncate would bury the name behind a long path prefix.
+          path_display = { "filename_first" },
+          -- Show the previewed entry's filename in the preview window title.
+          dynamic_preview_title = true,
           sorting_strategy = "ascending",
           layout_config = {
             horizontal = { prompt_position = "top", preview_width = 0.55 },
