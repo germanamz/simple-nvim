@@ -1,10 +1,13 @@
 local nvim_env = require("tests.helpers.nvim_env")
 local wait = require("tests.helpers.wait")
 
--- The tree is configured as an on-demand picker: it dismisses itself on exactly
--- two events — a file opened from within the tree (actions.open_file.
--- quit_on_open) and any Telescope picker opening (the User TelescopeFindPre
--- autocmd registered in the plugin's config). These specs pin both.
+-- The tree is configured as an on-demand browser: it dismisses itself when a
+-- file is actually opened — from within the tree (actions.open_file.
+-- quit_on_open) or from a Telescope picker (the select mappings in
+-- lua/plugins/telescope.lua, which close the tree first so the file lands in a
+-- full window, not the 35-col sidebar). Merely opening a picker does NOT close
+-- the tree; it stays put until a file is chosen or it's toggled. These specs
+-- pin all of that.
 describe("e2e: nvim-tree auto-close", function()
   local root, prev_cwd
 
@@ -73,7 +76,33 @@ describe("e2e: nvim-tree auto-close", function()
     assert.are.equal("hello.lua", vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t"))
   end)
 
-  it("closes the tree when a Telescope picker opens", function()
+  local function telescope_open()
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.bo[buf].filetype == "TelescopePrompt" then
+        return true
+      end
+    end
+    return false
+  end
+
+  local function current_prompt_buf()
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.bo[buf].filetype == "TelescopePrompt" then
+        return buf
+      end
+    end
+    return nil
+  end
+
+  local function close_picker()
+    local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
+    vim.api.nvim_feedkeys(esc, "mx", false)
+    wait.wait_for(function()
+      return not telescope_open()
+    end, 2000, "telescope picker did not close")
+  end
+
+  it("stays open while a Telescope picker is up, and after cancelling", function()
     require("lazy").load({ plugins = { "telescope.nvim" } })
 
     local dir = root .. "/proj"
@@ -84,24 +113,50 @@ describe("e2e: nvim-tree auto-close", function()
     local api = open_tree()
     assert.is_true(api.tree.is_visible())
 
-    -- Launching any picker fires User TelescopeFindPre, which closes the tree.
     require("telescope.builtin").find_files()
     wait.wait_for_buffer({ filetype = "TelescopePrompt", timeout = 3000 })
 
+    -- Opening a picker must NOT dismiss the tree (the old behavior).
+    assert.is_true(api.tree.is_visible(), "tree closed when the picker merely opened")
+
+    -- Cancelling the picker leaves the tree exactly where it was.
+    close_picker()
+    assert.is_true(api.tree.is_visible(), "tree closed after cancelling the picker")
+  end)
+
+  it("closes when a file is opened from a picker, filling a full window", function()
+    require("lazy").load({ plugins = { "telescope.nvim" } })
+
+    local dir = root .. "/proj"
+    vim.fn.mkdir(dir, "p")
+    write_file(dir .. "/pick_me.lua", "return 1\n")
+    vim.fn.chdir(dir)
+
+    local api = open_tree()
+
+    require("telescope.builtin").find_files()
+    wait.wait_for_buffer({ filetype = "TelescopePrompt", timeout = 3000 })
+
+    -- Wait until the picker has actually selected an entry, not just rendered
+    -- the row — selecting before then would dismiss the tree but open nothing.
+    local prompt_buf = assert(current_prompt_buf(), "no telescope prompt buffer")
+    local picker = require("telescope.actions.state").get_current_picker(prompt_buf)
+    wait.wait_for(function()
+      return picker:get_selection() ~= nil
+    end, 5000, "picker never settled on a selection")
+
+    -- <CR> runs our select wrapper: dismiss the tree, then open the file. The
+    -- tree window is gone, so the file can't land in the 35-col sidebar.
+    local cr = vim.api.nvim_replace_termcodes("<CR>", true, false, true)
+    vim.api.nvim_feedkeys(cr, "mx", false)
+
     wait.wait_for(function()
       return not api.tree.is_visible()
-    end, 3000, "tree stayed open after a Telescope picker opened")
-
-    -- Tidy up the open picker so it can't leak into the next spec.
-    local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
-    vim.api.nvim_feedkeys(esc, "mx", false)
-    wait.wait_for(function()
-      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.bo[buf].filetype == "TelescopePrompt" then
-          return false
-        end
-      end
-      return true
-    end, 2000, "telescope picker did not close")
+        and vim.fn.fnamemodify(vim.api.nvim_buf_get_name(0), ":t") == "pick_me.lua"
+    end, 3000, "file did not open after picking it from the picker")
+    assert.is_true(
+      vim.api.nvim_win_get_width(0) > 35,
+      "file opened in a narrow window (the sidebar?), width: " .. vim.api.nvim_win_get_width(0)
+    )
   end)
 end)

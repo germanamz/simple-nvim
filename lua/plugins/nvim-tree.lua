@@ -85,16 +85,9 @@ return {
         end
       end,
     })
-    -- Close the tree the moment any Telescope picker opens. Combined with
-    -- quit_on_open (files opened from the tree), these are the only two events
-    -- that dismiss the tree — it otherwise stays put until toggled.
-    vim.api.nvim_create_autocmd("User", {
-      pattern = "TelescopeFindPre",
-      callback = function()
-        if api.tree.is_visible() then
-          api.tree.close()
-        end
-      end,
-    })
+    -- The tree stays put while a Telescope picker is open; it's dismissed only
+    -- when a file is actually opened — from the tree (quit_on_open above) or
+    -- from a picker (the select mappings in lua/plugins/telescope.lua, which
+    -- close the tree first so the file lands in a full window, not the sidebar).
   end,
 }

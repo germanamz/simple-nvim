@@ -95,6 +95,22 @@ return {
     },
     opts = function()
       local actions = require("telescope.actions")
+      -- Opening a file from a picker dismisses nvim-tree first, so the file
+      -- lands in a full window instead of the 35-col sidebar (and the tree acts
+      -- as an on-demand browser, matching quit_on_open for files opened from the
+      -- tree itself). The tree stays put while the picker is up; cancelling
+      -- leaves it untouched. Telescope captured its target window before the tree
+      -- closed, so that stale handle is ignored and the file fills the window the
+      -- close leaves behind.
+      local function opening(action)
+        return function(prompt_bufnr)
+          local ok, nvt = pcall(require, "nvim-tree.api")
+          if ok and nvt.tree.is_visible() then
+            nvt.tree.close()
+          end
+          return action(prompt_bufnr)
+        end
+      end
       return {
         defaults = {
           -- Open pickers in normal mode so h/j/k/l navigate immediately;
@@ -122,6 +138,16 @@ return {
               ["<esc>"] = function()
                 vim.cmd("stopinsert")
               end,
+              ["<CR>"] = opening(actions.select_default),
+              ["<C-x>"] = opening(actions.select_horizontal),
+              ["<C-v>"] = opening(actions.select_vertical),
+              ["<C-t>"] = opening(actions.select_tab),
+            },
+            n = {
+              ["<CR>"] = opening(actions.select_default),
+              ["<C-x>"] = opening(actions.select_horizontal),
+              ["<C-v>"] = opening(actions.select_vertical),
+              ["<C-t>"] = opening(actions.select_tab),
             },
           },
         },
