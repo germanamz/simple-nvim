@@ -12,6 +12,7 @@ opt.list = true
 opt.listchars = {
   tab = "» ",
   lead = "·",
+  space = "·", -- show interior spaces too, not just leading/trailing
   trail = "·",
   extends = "›",
   precedes = "‹",
