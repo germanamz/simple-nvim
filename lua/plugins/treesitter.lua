@@ -10,46 +10,16 @@ return {
     lazy = false,
     build = ":TSUpdate",
     config = function()
-      local parsers = {
-        "markdown",
-        "markdown_inline",
-        "typescript",
-        "tsx",
-        "javascript",
-        "jsdoc",
-        "python",
-        "go",
-        "gomod",
-        "gosum",
-        "gowork",
-        "rust",
-        "c",
-        "cpp",
-        "lua",
-        "luadoc",
-        "vim",
-        "vimdoc",
-        "query",
-        "bash",
-        "json",
-        "yaml",
-        "toml",
-        "html",
-        "css",
-        "regex",
-        "diff",
-        "git_config",
-        "latex",
-      }
-
-      -- Pin parsers to lockfile revisions before install. See
-      -- lua/config/ts_pinned.lua for why this can't be done as a per-call arg.
-      -- tests/ isn't on package.path during normal startup (only the test
-      -- harness prepends it), so load by absolute path.
-      require("config.ts_pinned").apply(
-        dofile(vim.fn.stdpath("config") .. "/tests/parser-revisions.lua")
-      )
-      require("nvim-treesitter").install(parsers)
+      -- parser-revisions.lua is the single source of truth for WHICH parsers we
+      -- install and at WHAT revision: we install exactly the pinned set, so a
+      -- parser can never be downloaded without a pin (the drift that once left
+      -- `latex` installed, unpinned, and wired to nothing). See
+      -- lua/config/ts_pinned.lua for why pinning can't be a per-call arg. tests/
+      -- isn't on package.path during normal startup (only the test harness
+      -- prepends it), so load by absolute path.
+      local revisions = dofile(vim.fn.stdpath("config") .. "/tests/parser-revisions.lua")
+      require("config.ts_pinned").apply(revisions)
+      require("nvim-treesitter").install(vim.tbl_keys(revisions))
 
       -- Global filetype → parser registration. Downstream consumers resolve
       -- parser via this registry, not via our ad-hoc `ft_to_lang` table below.

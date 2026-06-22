@@ -171,7 +171,7 @@ end
 local cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = nil, time = 0 }
 
 local function ms_now()
-  return vim.loop.hrtime() / 1e6
+  return vim.uv.hrtime() / 1e6
 end
 
 local function refresh_codes(cwd, force)
@@ -376,7 +376,7 @@ local function create_legend_window(results_win, lines, ranges_by_line)
   local ns = vim.api.nvim_create_namespace("smart_files_legend")
   for lnum, ranges in ipairs(ranges_by_line) do
     for _, r in ipairs(ranges) do
-      vim.api.nvim_buf_add_highlight(buf, ns, r[1], lnum - 1, r[2], r[3])
+      vim.api.nvim_buf_set_extmark(buf, ns, lnum - 1, r[2], { end_col = r[3], hl_group = r[1] })
     end
   end
 

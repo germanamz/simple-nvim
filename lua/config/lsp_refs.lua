@@ -84,6 +84,14 @@ local function request(bufnr)
     return
   end
 
+  -- Skip the (whole-project) references request when the cursor isn't on an
+  -- identifier: idling on whitespace/punctuation/comments would query the
+  -- server only to discard an empty result.
+  if vim.fn.expand("<cword>") == "" then
+    state[bufnr] = nil
+    return
+  end
+
   local row, col = cursor_rc()
   local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
   params.context = { includeDeclaration = true }

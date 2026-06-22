@@ -116,8 +116,8 @@ local function open_legend()
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text })
   local ns = vim.api.nvim_create_namespace("review_base_legend")
-  vim.api.nvim_buf_add_highlight(buf, ns, "ReviewBaseActive", 0, 1, 4)
-  vim.api.nvim_buf_add_highlight(buf, ns, "ReviewBaseLegend", 0, 4, #text)
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 1, { end_col = 4, hl_group = "ReviewBaseActive" })
+  vim.api.nvim_buf_set_extmark(buf, ns, 0, 4, { end_col = #text, hl_group = "ReviewBaseLegend" })
   local width = vim.api.nvim_strwidth(text)
   legend:mount(buf, {
     relative = "editor",
@@ -134,13 +134,6 @@ local function open_legend()
 end
 
 local function list_branches(root)
-  local function run(args)
-    local out = vim.fn.systemlist(args)
-    if vim.v.shell_error ~= 0 then
-      return {}
-    end
-    return out
-  end
   local entries, seen = {}, {}
   local function push(ref)
     if not ref or ref == "" or seen[ref] then
@@ -149,14 +142,21 @@ local function list_branches(root)
     seen[ref] = true
     table.insert(entries, ref)
   end
-  local head = run({ "git", "-C", root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD" })
-  push(head[1])
-  local up = run({ "git", "-C", root, "rev-parse", "--abbrev-ref", "@{upstream}" })
-  push(up[1])
-  for _, b in ipairs(run({ "git", "-C", root, "branch", "--format=%(refname:short)" })) do
+  -- A failed listing (e.g. no branches yet) yields no entries rather than
+  -- iterating git's error output.
+  local function branch_list(args)
+    local lines, ok = git.run(args, { cwd = root })
+    return ok and lines or {}
+  end
+  -- Most-relevant first: the remote's default branch, then this branch's
+  -- upstream, then all local and remote branches (skipping the origin/HEAD
+  -- symref). push() dedupes, keeping the first occurrence.
+  push(git.first_line({ "symbolic-ref", "--short", "refs/remotes/origin/HEAD" }, { cwd = root }))
+  push(git.first_line({ "rev-parse", "--abbrev-ref", "@{upstream}" }, { cwd = root }))
+  for _, b in ipairs(branch_list({ "branch", "--format=%(refname:short)" })) do
     push(b)
   end
-  for _, b in ipairs(run({ "git", "-C", root, "branch", "-r", "--format=%(refname:short)" })) do
+  for _, b in ipairs(branch_list({ "branch", "-r", "--format=%(refname:short)" })) do
     if not b:match("/HEAD$") then
       push(b)
     end

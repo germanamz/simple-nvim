@@ -4,6 +4,8 @@
 --   • vim.lsp.config(name, {...}) registers each server; vim.lsp.enable(name)
 --     activates it. The server's `filetypes` list gates attach per buffer, so
 --     a server only starts when a matching filetype is opened.
+local ft_util = require("util.ft")
+
 local servers = {
   ts_ls = { filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" } },
   pyright = { filetypes = { "python" } },
@@ -97,7 +99,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
       map("gd", function()
         ts_goto_source_definition(client, args.buf)
       end, "Goto source definition (ts_ls)")
-    elseif ft == "markdown" or ft == "mdx" then
+    elseif ft_util.is_markdown(ft) then
       -- Smart gd: follow a wikilink if the cursor is on one, else LSP definition.
       -- Re-asserted here so marksman's attach doesn't overwrite the FileType map.
       map("gd", require("config.wikilinks").goto_definition, "Goto wikilink / definition")

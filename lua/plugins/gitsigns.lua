@@ -60,6 +60,7 @@ return {
     local review_base = require("config.review_base")
     local git = require("util.git")
     local inline_diff = require("util.inline_diff")
+    local path = require("util.path")
     review_base.bootstrap()
 
     require("gitsigns").setup(opts)
@@ -101,6 +102,13 @@ return {
       if fname == "" then
         return false
       end
+      -- gitsigns never attaches to new-vs-base / untracked files (see on_attach
+      -- and the BufReadPost note below), so an attached buffer can never be
+      -- new-vs-base. Bail before spawning git on the editing-time GitSignsUpdate
+      -- path; the unattached BufReadPost detection still runs.
+      if vim.b[bufnr].gitsigns_status ~= nil then
+        return false
+      end
       local root = review_base.git_root(vim.fn.fnamemodify(fname, ":h"))
       if not root then
         return false
@@ -109,7 +117,7 @@ return {
       if not ref then
         return false
       end
-      local relpath = fname:sub(#root + 2)
+      local relpath = path.relative(fname, root)
       if relpath == "" then
         return false
       end

@@ -1,6 +1,5 @@
 -- conform.nvim drives buffer-level formatting on real files. The per-filetype
--- formatter list comes from lua/config/formatters.lua (shared with the
--- markdown fence dispatch in lua/config/options.lua).
+-- formatter list comes from lua/config/formatters.lua (its `by_ft` map).
 --
 -- Behavior:
 --   • formatexpr is set globally to conform's so `gq` reflows via the

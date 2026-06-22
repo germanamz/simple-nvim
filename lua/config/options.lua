@@ -1,4 +1,5 @@
 local opt = vim.opt
+local ft_util = require("util.ft")
 
 -- Line numbers
 opt.number = true
@@ -155,7 +156,7 @@ opt.wrap = false -- no soft-wrap; long lines (incl. wide tables) scroll horizont
 -- 'max_line_length' would set 'textwidth' and start auto-hard-wrapping prose as
 -- you type.
 vim.api.nvim_create_autocmd("FileType", {
-  pattern = { "markdown", "mdx" },
+  pattern = ft_util.markdown,
   callback = function(args)
     vim.opt_local.formatoptions:remove("t") -- never auto-hard-wrap prose
     require("config.markdown_paragraphs").attach(args.buf)
@@ -166,7 +167,7 @@ vim.api.nvim_create_autocmd("BufWinEnter", {
   callback = function(args)
     local ft = vim.bo[args.buf].filetype
     local mp = require("config.markdown_paragraphs")
-    if ft == "markdown" or ft == "mdx" then
+    if ft_util.is_markdown(ft) then
       mp.apply_window()
     else
       mp.detach_window()

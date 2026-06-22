@@ -47,39 +47,56 @@ describe("smoke: boot", function()
   end)
 
   describe("globally-registered keymaps", function()
-    local expected_descriptions = {
-      "Find files",
-      "Live grep (project root)",
-      "Buffers",
-      "Help tags",
-      "Recent files (cwd)",
-      "Grep word under cursor (project root)",
-      "Diagnostics",
-      "Keymaps",
-      "Commands",
-      "Fuzzy find in buffer",
-      "Changed files (worktree + vs base)",
-      "Review base: pick branch (auto-opens files)",
-      "Review base: clear",
-      "Files (changed first)",
-      "All keymaps (which-key)",
+    local keymap_probe = require("tests.helpers.keymap_probe")
+
+    -- Keyed on lhs (the stable contract), not desc text: a cosmetic label edit
+    -- shouldn't fail the smoke suite. desc here is documentation for the test
+    -- name; we assert a desc *exists* (so a blanked label is caught) but not its
+    -- exact wording — that's a which-key UX label, intentionally free to change.
+    local expected = {
+      { lhs = "<leader>ff", desc = "Find files" },
+      { lhs = "<leader>fg", desc = "Live grep (project root)" },
+      { lhs = "<leader>fb", desc = "Buffers" },
+      { lhs = "<leader>fh", desc = "Help tags" },
+      { lhs = "<leader>fr", desc = "Recent files (cwd)" },
+      { lhs = "<leader>fs", desc = "Grep word under cursor (project root)" },
+      { lhs = "<leader>fd", desc = "Diagnostics" },
+      { lhs = "<leader>?", desc = "Keymaps" },
+      { lhs = "<leader>fc", desc = "Commands" },
+      { lhs = "<leader>f/", desc = "Fuzzy find in buffer" },
+      { lhs = "<leader>gs", desc = "Changed files (worktree + vs base)" },
+      { lhs = "<leader>gB", desc = "Review base: pick branch (auto-opens files)" },
+      { lhs = "<leader>gX", desc = "Review base: clear" },
+      { lhs = "<leader><space>", desc = "Files (changed first)" },
+      { lhs = "<leader>K", desc = "All keymaps (which-key)" },
     }
 
-    local function find_normal_keymap_by_desc(desc)
+    -- Expand <leader>/<space> the way nvim_get_keymap reports lhs.
+    local function resolve_lhs(spec)
+      local leader = vim.g.mapleader or "\\"
+      return (spec:gsub("<leader>", leader):gsub("<[Ss]pace>", " "))
+    end
+
+    local function desc_of(lhs)
       for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
-        if m.desc == desc then
-          return m
+        if m.lhs == lhs then
+          return m.desc
         end
       end
       return nil
     end
 
-    for _, desc in ipairs(expected_descriptions) do
-      it("registers keymap: " .. desc, function()
-        assert.is_not_nil(
-          find_normal_keymap_by_desc(desc),
-          "no normal-mode keymap with desc=" .. vim.inspect(desc)
+    for _, e in ipairs(expected) do
+      it("registers " .. e.lhs .. " (" .. e.desc .. ")", function()
+        local lhs = resolve_lhs(e.lhs)
+        local m = keymap_probe.resolve("n", lhs)
+        assert.is_not_nil(m, "no normal-mode keymap with lhs=" .. vim.inspect(lhs))
+        assert.is_true(
+          m.callback ~= nil or (m.rhs ~= nil and m.rhs ~= ""),
+          e.lhs .. " resolves to neither a callback nor an rhs"
         )
+        local desc = desc_of(lhs)
+        assert.is_true(desc ~= nil and desc ~= "", "missing desc for " .. e.lhs)
       end)
     end
   end)

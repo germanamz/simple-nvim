@@ -38,6 +38,7 @@ local M = {}
 -- }
 local states = {}
 local notified = false
+local ft_util = require("util.ft")
 
 local notify_missing, set_keymap, schedule_refresh, refresh, sync_scroll, setup_autocmds
 
@@ -215,7 +216,8 @@ refresh = function(src)
   -- focus from the source buffer.
   vim.api.nvim_win_call(state.preview_win, function()
     vim.api.nvim_set_current_buf(tbuf)
-    state.job = vim.fn.termopen(cmd, {
+    state.job = vim.fn.jobstart(cmd, {
+      term = true,
       on_exit = function()
         vim.schedule(function()
           local s = states[src]
@@ -398,7 +400,7 @@ function M.setup()
 
   vim.api.nvim_create_autocmd("FileType", {
     group = vim.api.nvim_create_augroup("markdown_preview_setup", { clear = true }),
-    pattern = { "markdown", "mdx" },
+    pattern = ft_util.markdown,
     callback = function(args)
       set_keymap(args.buf)
     end,
@@ -408,7 +410,7 @@ function M.setup()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(buf) then
       local ft = vim.bo[buf].filetype
-      if ft == "markdown" or ft == "mdx" then
+      if ft_util.is_markdown(ft) then
         set_keymap(buf)
       end
     end

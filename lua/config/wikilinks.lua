@@ -21,6 +21,8 @@
 
 local M = {}
 
+local ft_util = require("util.ft")
+
 local ROOT_MARKERS = { ".git", ".marksman.toml", "tusk.toml", ".tusk" }
 
 -- Return the inner text of the `[[...]]` wikilink covering 1-based column `col`
@@ -348,7 +350,7 @@ function M.setup()
 
   vim.api.nvim_create_autocmd("FileType", {
     group = vim.api.nvim_create_augroup("wikilinks_setup", { clear = true }),
-    pattern = { "markdown", "mdx" },
+    pattern = ft_util.markdown,
     callback = function(args)
       set_keymap(args.buf)
     end,
@@ -358,7 +360,7 @@ function M.setup()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(buf) then
       local ft = vim.bo[buf].filetype
-      if ft == "markdown" or ft == "mdx" then
+      if ft_util.is_markdown(ft) then
         set_keymap(buf)
       end
     end
