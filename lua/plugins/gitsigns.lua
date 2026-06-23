@@ -61,7 +61,10 @@ return {
     local git = require("util.git")
     local inline_diff = require("util.inline_diff")
     local path = require("util.path")
-    review_base.bootstrap()
+    -- Defer the per-root validation (one blocking `git rev-parse --verify` per
+    -- stored review base) off the plugin-load critical path; it only prunes
+    -- stale entries the picker would offer, and nothing below needs it now.
+    vim.schedule(review_base.bootstrap)
 
     require("gitsigns").setup(opts)
 
@@ -233,22 +236,27 @@ return {
       paint_hunks(bufnr, hunks, line_count)
     end
 
-    function _G.gitsigns_hunks_status()
+    -- Per-buffer hunk summary cache for the statusline, refreshed on
+    -- GitSignsUpdate (which fires exactly when hunks change). gs.get_hunks
+    -- rebuilds O(changed-line) patch strings we never use here, so calling it on
+    -- every statusline redraw is wasteful — worse on the large vendored/lockfile
+    -- diffs a superproject is full of. We cache the type counts + each hunk's
+    -- start line; only the cursor-relative above/below split is recomputed per
+    -- read (cheap integer work).
+    local hunk_status_cache = {} -- bufnr -> { add, change, delete, starts = {start lines} }
+
+    local function refresh_hunk_status(bufnr)
       local ok, gs = pcall(require, "gitsigns")
-      if not ok then
-        return ""
+      if not ok or not vim.api.nvim_buf_is_valid(bufnr) then
+        hunk_status_cache[bufnr] = nil
+        return
       end
-      local bufnr = vim.api.nvim_get_current_buf()
       local hunks = gs.get_hunks(bufnr)
       if not hunks or #hunks == 0 then
-        if vim.b[bufnr].gs_new_vs_base then
-          return " [new vs base] "
-        end
-        return ""
+        hunk_status_cache[bufnr] = nil
+        return
       end
-      local cursor = vim.api.nvim_win_get_cursor(0)[1]
-      local add, change, delete = 0, 0, 0
-      local above, below = 0, 0
+      local add, change, delete, starts = 0, 0, 0, {}
       for _, h in ipairs(hunks) do
         if h.type == "add" then
           add = add + 1
@@ -257,13 +265,30 @@ return {
         elseif h.type == "delete" then
           delete = delete + 1
         end
-        if h.added.start < cursor then
+        starts[#starts + 1] = h.added.start
+      end
+      hunk_status_cache[bufnr] = { add = add, change = change, delete = delete, starts = starts }
+    end
+
+    function _G.gitsigns_hunks_status()
+      local bufnr = vim.api.nvim_get_current_buf()
+      local c = hunk_status_cache[bufnr]
+      if not c then
+        if vim.b[bufnr].gs_new_vs_base then
+          return " [new vs base] "
+        end
+        return ""
+      end
+      local cursor = vim.api.nvim_win_get_cursor(0)[1]
+      local above, below = 0, 0
+      for _, s in ipairs(c.starts) do
+        if s < cursor then
           above = above + 1
         else
           below = below + 1
         end
       end
-      return string.format(" +%d ~%d -%d ↑%d ↓%d ", add, change, delete, above, below)
+      return string.format(" +%d ~%d -%d ↑%d ↓%d ", c.add, c.change, c.delete, above, below)
     end
 
     -- Statusline counts (gitsigns_hunks_status) read gs.get_hunks directly and
@@ -318,13 +343,28 @@ return {
     vim.api.nvim_create_autocmd("User", {
       pattern = "GitSignsUpdate",
       callback = function(args)
-        vim.cmd("redrawstatus")
         local buf = args.data and args.data.buffer
         if buf then
+          refresh_hunk_status(buf)
           mark_hunks(buf)
         else
+          for _, b in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_loaded(b) then
+              refresh_hunk_status(b)
+            end
+          end
           repaint_all()
         end
+        -- After the cache is fresh, so the statusline reads the new counts.
+        vim.cmd("redrawstatus")
+      end,
+    })
+
+    -- Drop the cached hunk summary when a buffer goes away, so a reused bufnr
+    -- never shows another file's stale counts before its first GitSignsUpdate.
+    vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+      callback = function(args)
+        hunk_status_cache[args.buf] = nil
       end,
     })
 
@@ -346,6 +386,13 @@ return {
     -- them explicitly when their file is read instead.
     vim.api.nvim_create_autocmd("BufReadPost", {
       callback = function(args)
+        -- Only real, named file buffers. mark_hunks → file_new_vs_base can shell
+        -- out to git (root + cat-file) when a review base is set, and this fires
+        -- on every read. Special buffers (terminals, prompts, help) and unnamed
+        -- scratch buffers can never be new-vs-base, so skip them entirely.
+        if vim.bo[args.buf].buftype ~= "" or vim.api.nvim_buf_get_name(args.buf) == "" then
+          return
+        end
         vim.defer_fn(function()
           mark_hunks(args.buf)
         end, 200)

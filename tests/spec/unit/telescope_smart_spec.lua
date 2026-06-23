@@ -267,7 +267,30 @@ describe("config.telescope_smart", function()
         end,
       })
       local out = M._list_all()
-      assert.are.same({ "find", ".", "-type", "f", "-not", "-path", "*/.git/*" }, captured)
+      assert.are.same({
+        "find",
+        ".",
+        "-type",
+        "f",
+        "-not",
+        "-path",
+        "*/.git/*",
+        "-not",
+        "-path",
+        "*/node_modules/*",
+        "-not",
+        "-path",
+        "*/.venv/*",
+        "-not",
+        "-path",
+        "*/target/*",
+        "-not",
+        "-path",
+        "*/build/*",
+        "-not",
+        "-path",
+        "*/dist/*",
+      }, captured)
       assert.are.same({ "find-ok" }, out)
     end)
   end)

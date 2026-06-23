@@ -156,10 +156,28 @@ return {
           },
         },
         pickers = {
-          find_files = { hidden = true },
+          -- `--glob !.git` prunes the WALK so the picker never descends into a
+          -- repo's (or, in a superproject, every submodule's) .git object store
+          -- — tens of thousands of pack/loose-object paths. file_ignore_patterns
+          -- only filters the *display* after the walk, so excluding .git here is
+          -- what actually saves the traversal. find_command is a function so it
+          -- returns a FRESH table each open: telescope mutates the command in
+          -- place to append --hidden / --no-ignore from opts (keeping <leader>fi's
+          -- gitignored-file listing), and a shared table would accumulate them.
+          find_files = {
+            hidden = true,
+            find_command = function()
+              if vim.fn.executable("rg") == 1 then
+                return { "rg", "--files", "--color", "never", "--glob", "!.git" }
+              elseif vim.fn.executable("fd") == 1 then
+                return { "fd", "--type", "f", "--color", "never", "--exclude", ".git" }
+              end
+              return { "find", ".", "-type", "f", "-not", "-path", "*/.git/*" }
+            end,
+          },
           live_grep = {
             additional_args = function()
-              return { "--hidden" }
+              return { "--hidden", "--glob", "!.git" }
             end,
           },
         },

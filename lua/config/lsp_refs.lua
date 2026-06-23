@@ -9,6 +9,10 @@ local ns = vim.api.nvim_create_namespace("lsp_refs_status")
 -- state[bufnr] = { row, col, count } — last resolved result for that buffer.
 local state = {}
 
+-- inflight[bufnr] = true while a references request is pending, so a steady
+-- idle on one identifier doesn't re-issue the (whole-project) scan every tick.
+local inflight = {}
+
 -- Neovim's default colorscheme links LspReferenceText to Visual, so the painted
 -- symbol occurrences look identical to a text selection — easy to mistake for a
 -- stuck selection that won't clear on a mode change. Give the group its own look
@@ -93,17 +97,32 @@ local function request(bufnr)
   end
 
   local row, col = cursor_rc()
+
+  -- Dedup: skip when we already have a result for this exact position, or a
+  -- request for this buffer is still in flight. Without this, idling on one
+  -- identifier re-issues a whole-project references scan every `updatetime`
+  -- (250ms) — costly against a large superproject server root.
+  local prev = state[bufnr]
+  if prev and prev.row == row and prev.col == col then
+    return
+  end
+  if inflight[bufnr] then
+    return
+  end
+
   local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
   params.context = { includeDeclaration = true }
 
   local buf_uri = vim.uri_from_bufnr(bufnr)
 
+  inflight[bufnr] = true
   local ok = pcall(
     vim.lsp.buf_request,
     bufnr,
     "textDocument/references",
     params,
     function(err, result)
+      inflight[bufnr] = nil
       if err or not result then
         return
       end
@@ -133,6 +152,7 @@ local function request(bufnr)
   )
 
   if not ok then
+    inflight[bufnr] = nil
     state[bufnr] = nil
   end
 end
@@ -154,6 +174,9 @@ end
 
 local function invalidate_on_move()
   local bufnr = vim.api.nvim_get_current_buf()
+  -- A moved cursor makes any pending request stale (its handler drops the
+  -- result anyway), so release the in-flight guard for the next position.
+  inflight[bufnr] = nil
   local s = state[bufnr]
   if not s then
     return
@@ -240,7 +263,9 @@ function M.setup()
     callback = ensure_highlight,
   })
 
-  vim.api.nvim_create_autocmd({ "CursorHold", "CursorHoldI" }, {
+  -- CursorHold only (not CursorHoldI): an idle pause while typing shouldn't
+  -- fire a whole-project references scan.
+  vim.api.nvim_create_autocmd("CursorHold", {
     group = group,
     callback = function(args)
       request(args.buf)
@@ -256,6 +281,7 @@ function M.setup()
     group = group,
     callback = function(args)
       state[args.buf] = nil
+      inflight[args.buf] = nil
       clear_marks(args.buf)
     end,
   })

@@ -82,7 +82,14 @@ end
 -- diagnostic on the exact cursor position, so when a line has several you can
 -- move the cursor across each token to read them one at a time.
 vim.api.nvim_create_autocmd("CursorHold", {
-  callback = function()
+  callback = function(args)
+    -- Skip the float window/sort/format work entirely when the cursor line
+    -- carries no diagnostic (the common case) — open_float would otherwise
+    -- materialize and filter the whole buffer's diagnostic set every CursorHold.
+    local lnum = vim.api.nvim_win_get_cursor(0)[1] - 1
+    if vim.tbl_isempty(vim.diagnostic.get(args.buf, { lnum = lnum })) then
+      return
+    end
     vim.diagnostic.open_float(nil, { focus = false, scope = "cursor" })
   end,
 })
@@ -166,9 +173,19 @@ return {
       -- that actually fires the requests lives in nvim-tree's config.
       local blink = require("blink.cmp")
       local file_ops_caps = require("lsp-file-operations").default_capabilities()
+      -- Disable workspace/didChangeWatchedFiles for every server. With no
+      -- watchman/fswatch on this box, Neovim services those registrations with a
+      -- recursive libuv FSEvents walk rooted at each server's workspace — in a
+      -- superproject that's one walk per submodule root, and every external file
+      -- event then runs an lpeg glob match on the main loop (a storm during
+      -- builds / branch switches / codegen). Turning it off trades server
+      -- auto-refresh on out-of-editor changes (recover with <leader>lr or :edit)
+      -- for a quiet UI thread. mdx_analyzer already sets this for its own reason;
+      -- merged before cfg.capabilities so any explicit per-server value wins.
+      local no_watch = { workspace = { didChangeWatchedFiles = { dynamicRegistration = false } } }
       for name, cfg in pairs(servers) do
         cfg.capabilities = blink.get_lsp_capabilities(
-          vim.tbl_deep_extend("force", file_ops_caps, cfg.capabilities or {})
+          vim.tbl_deep_extend("force", file_ops_caps, no_watch, cfg.capabilities or {})
         )
         vim.lsp.config(name, cfg)
         vim.lsp.enable(name)

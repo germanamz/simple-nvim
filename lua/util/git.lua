@@ -32,8 +32,32 @@ end
 
 -- Repo toplevel containing `start` (or the cwd when `start` is nil), or nil
 -- outside a work tree.
+--
+-- Memoized by directory: a directory's git toplevel is invariant for a session,
+-- and this is on hot paths that re-resolve the same dirs constantly (gitsigns
+-- attach + new-vs-base per buffer, the smart picker, the tree decorator). In a
+-- superproject that collapses N blocking `rev-parse` spawns — one per buffer
+-- across submodules — to one per distinct directory. Only successful lookups are
+-- cached (a non-repo dir is cheap to re-probe and could later become a repo).
+local root_cache = {}
+
 function M.root(start)
-  return M.first_line({ "rev-parse", "--show-toplevel" }, { cwd = start })
+  local key = start or vim.fn.getcwd()
+  local cached = root_cache[key]
+  if cached then
+    return cached
+  end
+  local r = M.first_line({ "rev-parse", "--show-toplevel" }, { cwd = start })
+  if r then
+    root_cache[key] = r
+  end
+  return r
+end
+
+-- Drop the memoized roots. For tests and for the rare case a directory's repo
+-- membership changes mid-session (git init, submodule add/remove).
+function M._clear_root_cache()
+  root_cache = {}
 end
 
 -- Current branch name for `root`, or nil on detached HEAD / outside a repo.

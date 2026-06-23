@@ -74,6 +74,19 @@ return {
       vim.api.nvim_create_autocmd("FileType", {
         pattern = ft_pattern,
         callback = function(args)
+          -- Large-file guard. treesitter highlight + the foldexpr's first
+          -- whole-buffer parse can stall for seconds on the giant generated /
+          -- vendored files a polyglot superproject is full of (bundled JS,
+          -- *.pb.go, minified assets, sqlite3.c) — exactly the files you land in
+          -- by accident via a grep hit or definition jump. Past these bounds,
+          -- skip TS entirely (start + fold/indent wiring together, no half-wired
+          -- state) and fall back to regex syntax + core indent. Bump if you
+          -- routinely hand-edit large sources.
+          local lc = vim.api.nvim_buf_line_count(args.buf)
+          local ok_bytes, bytes = pcall(vim.api.nvim_buf_get_offset, args.buf, lc)
+          if lc > 5000 or (ok_bytes and bytes > 512 * 1024) then
+            return
+          end
           local ft = vim.bo[args.buf].filetype
           local lang = ft_to_lang[ft] or ft
           local ok = pcall(vim.treesitter.start, args.buf, lang)

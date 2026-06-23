@@ -27,9 +27,21 @@ return {
     -- netrw's :Explore command alone for the <leader>E fallback.
     disable_netrw = false,
     hijack_netrw = true,
-    -- Expand the tree to highlight whatever buffer is focused.
-    update_focused_file = { enable = true },
+    -- Expand the tree to highlight whatever buffer is focused — but NOT for
+    -- non-file buffers (terminals, prompts, help). Revealing crosses into
+    -- whichever submodule the file lives in, and with git_ignored on that fires
+    -- a *synchronous* `git status --ignored` for that submodule's toplevel, so a
+    -- plain buffer switch into an unscanned submodule shouldn't pay for it.
+    update_focused_file = {
+      enable = true,
+      exclude = function(args)
+        return vim.bo[args.buf].buftype ~= ""
+      end,
+    },
     view = { width = 35 },
+    -- Coalesce fs-watcher churn. A superproject's many submodule .git dirs and
+    -- build outputs emit bursts of events; the 50ms default reloads too eagerly.
+    filesystem_watchers = { enable = true, debounce_delay = 200 },
     -- Treat the tree as an on-demand picker: close it once a file is opened so
     -- it's only visible when you're actively browsing, not all the time.
     actions = { open_file = { quit_on_open = true } },
@@ -78,9 +90,40 @@ return {
     -- against the old base or branch.
     vim.api.nvim_create_autocmd("User", {
       pattern = { "ReviewBaseChanged", "HeadChanged" },
-      callback = function()
-        if api.tree.is_visible() then
-          require("config.telescope_smart")._refresh(vim.fn.getcwd(), true)
+      callback = function(args)
+        -- Both events carry their repo root in data.root and fire per-submodule
+        -- (each watched root has its own HEAD watcher). The decorator only ever
+        -- computes codes for getcwd(), so a change in a *different* root can't
+        -- alter any displayed label — skip the refresh for it. resolve() both
+        -- sides so a symlinked cwd still matches.
+        local root = args.data and args.data.root
+        if root and vim.fn.resolve(root) ~= vim.fn.resolve(vim.fn.getcwd()) then
+          return
+        end
+        if not api.tree.is_visible() then
+          return
+        end
+        -- Fetch fresh codes for the new base/HEAD off the main thread, then
+        -- reload so the decorator repaints with them. Going through the async
+        -- core directly (not the deduped non-blocking read) guarantees a refresh
+        -- with the *current* inputs even if a prior refresh is still in flight.
+        require("config.telescope_smart")._refresh_async(vim.fn.getcwd(), function()
+          if api.tree.is_visible() then
+            api.tree.reload()
+          end
+        end)
+      end,
+    })
+    -- The codes cache now refreshes asynchronously, so the decorator's first
+    -- render on a cold cache shows no git labels. When a refresh for the
+    -- displayed cwd lands, reload the tree so the labels appear. The reload runs
+    -- a fresh decorator pass that reads the now-warm cache (no further async
+    -- kick), so this does not loop.
+    vim.api.nvim_create_autocmd("User", {
+      pattern = "SmartCodesRefreshed",
+      callback = function(args)
+        local cwd = args.data and args.data.cwd
+        if cwd and cwd == vim.fn.getcwd() and api.tree.is_visible() then
           api.tree.reload()
         end
       end,

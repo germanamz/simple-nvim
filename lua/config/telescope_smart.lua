@@ -53,15 +53,9 @@ end
 M._parse_status_path = parse_status_path
 M._format_prefix = git_status_codes.code_to_display
 
--- Parse `git status --porcelain` into per-path XY codes and worktree counts.
-local function parse_worktree_status(root, codes, counts)
-  -- --untracked-files=all lists each untracked file individually; without it
-  -- git collapses a fully-untracked directory to a single "dir/" entry, which
-  -- would show (and try to open) the directory instead of the new file.
-  local lines, ok = git.run({ "status", "--porcelain", "--untracked-files=all" }, { cwd = root })
-  if not ok then
-    return
-  end
+-- Apply `git status --porcelain` lines to per-path XY codes and worktree counts.
+-- Pure (no shellout) so the sync and async fetch paths share it.
+local function apply_worktree_lines(lines, codes, counts)
   for _, line in ipairs(lines) do
     if #line >= 4 then
       local x = line:sub(1, 1)
@@ -85,13 +79,22 @@ local function parse_worktree_status(root, codes, counts)
   end
 end
 
--- Parse `git diff --name-status base..HEAD` into base-only 'b<letter>' codes
--- (only for paths not already changed in the worktree) and base counts.
-local function parse_committed_history(root, base, codes, counts)
-  local lines, ok = git.run({ "diff", "--name-status", base .. "..HEAD" }, { cwd = root })
+-- Sync fetch + parse of `git status --porcelain`.
+-- --untracked-files=all lists each untracked file individually; without it git
+-- collapses a fully-untracked directory to a single "dir/" entry, which would
+-- show (and try to open) the directory instead of the new file.
+local function parse_worktree_status(root, codes, counts)
+  local lines, ok = git.run({ "status", "--porcelain", "--untracked-files=all" }, { cwd = root })
   if not ok then
     return
   end
+  apply_worktree_lines(lines, codes, counts)
+end
+
+-- Apply `git diff --name-status base..HEAD` lines to base-only 'b<letter>'
+-- codes (only for paths not already changed in the worktree) and base counts.
+-- Pure (no shellout) so the sync and async fetch paths share it.
+local function apply_committed_lines(lines, codes, counts)
   for _, line in ipairs(lines) do
     if line ~= "" then
       local status_char = line:sub(1, 1)
@@ -116,9 +119,16 @@ local function parse_committed_history(root, base, codes, counts)
   end
 end
 
-function M._git_changes(root, base)
-  local codes = {}
-  local counts = {
+local function parse_committed_history(root, base, codes, counts)
+  local lines, ok = git.run({ "diff", "--name-status", base .. "..HEAD" }, { cwd = root })
+  if not ok then
+    return
+  end
+  apply_committed_lines(lines, codes, counts)
+end
+
+local function fresh_counts()
+  return {
     added = 0,
     modified = 0,
     deleted = 0,
@@ -129,6 +139,11 @@ function M._git_changes(root, base)
     committed = 0,
     base = { added = 0, modified = 0, deleted = 0, renamed = 0 },
   }
+end
+
+function M._git_changes(root, base)
+  local codes = {}
+  local counts = fresh_counts()
 
   parse_worktree_status(root, codes, counts)
   if base and review_base.resolve(root, base) then
@@ -138,14 +153,99 @@ function M._git_changes(root, base)
   return codes, counts
 end
 
-function M._list_all()
-  if vim.fn.executable("rg") == 1 then
-    return vim.fn.systemlist({ "rg", "--files", "--hidden", "--glob", "!.git" })
-  elseif vim.fn.executable("fd") == 1 then
-    return vim.fn.systemlist({ "fd", "--type", "f", "--hidden", "--exclude", ".git" })
-  else
-    return vim.fn.systemlist({ "find", ".", "-type", "f", "-not", "-path", "*/.git/*" })
+local function split_lines(s)
+  return vim.split(s or "", "\n", { trimempty = true })
+end
+
+-- Async sibling of _git_changes: fetch `git status` (and, when a base is set,
+-- `git diff`) via vim.system so the UI never blocks on git over a large
+-- superproject tree. vim.system callbacks run in a fast context where most of
+-- the API is off-limits, so all parsing is vim.schedule'd back onto the main
+-- loop. Calls cb(codes, counts).
+local function git_changes_async(root, base, cb)
+  local function finish(wt_lines, df_lines)
+    local codes, counts = {}, fresh_counts()
+    apply_worktree_lines(wt_lines, codes, counts)
+    if df_lines then
+      apply_committed_lines(df_lines, codes, counts)
+    end
+    cb(codes, counts)
   end
+  vim.system(
+    { "git", "-C", root, "status", "--porcelain", "--untracked-files=all" },
+    { text = true },
+    function(wt)
+      local wt_lines = wt.code == 0 and split_lines(wt.stdout) or {}
+      vim.schedule(function()
+        if base and review_base.resolve(root, base) then
+          vim.system(
+            { "git", "-C", root, "diff", "--name-status", base .. "..HEAD" },
+            { text = true },
+            function(df)
+              local df_lines = df.code == 0 and split_lines(df.stdout) or {}
+              vim.schedule(function()
+                finish(wt_lines, df_lines)
+              end)
+            end
+          )
+        else
+          finish(wt_lines, nil)
+        end
+      end)
+    end
+  )
+end
+
+-- The command that lists every file from the cwd. rg/fd honor each (sub)repo's
+-- .gitignore; the `find` fallback honors nothing, so it gets explicit excludes
+-- for the heavy dirs a polyglot superproject is full of — a bare find would
+-- otherwise walk every node_modules / target / .venv across every submodule.
+local function list_all_cmd()
+  if vim.fn.executable("rg") == 1 then
+    return { "rg", "--files", "--hidden", "--glob", "!.git" }
+  elseif vim.fn.executable("fd") == 1 then
+    return { "fd", "--type", "f", "--hidden", "--exclude", ".git" }
+  else
+    return {
+      "find",
+      ".",
+      "-type",
+      "f",
+      "-not",
+      "-path",
+      "*/.git/*",
+      "-not",
+      "-path",
+      "*/node_modules/*",
+      "-not",
+      "-path",
+      "*/.venv/*",
+      "-not",
+      "-path",
+      "*/target/*",
+      "-not",
+      "-path",
+      "*/build/*",
+      "-not",
+      "-path",
+      "*/dist/*",
+    }
+  end
+end
+
+function M._list_all()
+  return vim.fn.systemlist(list_all_cmd())
+end
+
+-- Async sibling of _list_all: stream the file list off the main thread so a big
+-- superproject doesn't freeze the editor while a picker is opening.
+function M._list_all_async(cwd, cb)
+  vim.system(list_all_cmd(), { cwd = cwd, text = true }, function(out)
+    local files = out.code == 0 and split_lines(out.stdout) or {}
+    vim.schedule(function()
+      cb(files)
+    end)
+  end)
 end
 
 function M._merge_results(codes, all_files)
@@ -174,26 +274,58 @@ local function ms_now()
   return vim.uv.hrtime() / 1e6
 end
 
+-- Async core: resolve root, fetch git changes off the main thread, rewrite the
+-- per-path keys relative to cwd, store them in the cache, then hand them to cb.
+local function refresh_codes_async(cwd, cb)
+  cwd = cwd or vim.fn.getcwd()
+  local root = git.root(cwd)
+  if not root then
+    cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = cwd, time = ms_now() }
+    if cb then
+      cb({}, nil, nil, nil)
+    end
+    return
+  end
+  local base = review_base.get(root)
+  git_changes_async(root, base, function(raw_codes, counts)
+    local codes = {}
+    for p, c in pairs(raw_codes) do
+      codes[path_util.relative(root .. "/" .. p, cwd)] = c
+    end
+    cache = { codes = codes, counts = counts, base = base, root = root, cwd = cwd, time = ms_now() }
+    if cb then
+      cb(codes, counts, base, root)
+    end
+  end)
+end
+M._refresh_async = refresh_codes_async
+
+-- Non-blocking read of the codes cache. On a fresh hit it returns immediately;
+-- otherwise it kicks a deduped async refresh and returns whatever is cached now
+-- (possibly empty, or for a prior cwd). Consumers that need the fresh result
+-- listen for `User SmartCodesRefreshed`. Nothing here shells out synchronously
+-- for git status — that synchronous call was the picker/tree open-time freeze.
+local refreshing = {}
+
 local function refresh_codes(cwd, force)
   cwd = cwd or vim.fn.getcwd()
   local now = ms_now()
   if not force and cache.cwd == cwd and (now - cache.time) < 500 then
     return cache.codes, cache.counts, cache.base, cache.root
   end
-  local root = git.root(cwd)
-  if not root then
-    cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = cwd, time = now }
+  if not refreshing[cwd] then
+    refreshing[cwd] = true
+    refresh_codes_async(cwd, function()
+      refreshing[cwd] = nil
+      vim.api.nvim_exec_autocmds("User", { pattern = "SmartCodesRefreshed", data = { cwd = cwd } })
+    end)
+  end
+  if cache.cwd == cwd then
     return cache.codes, cache.counts, cache.base, cache.root
   end
-  local base = review_base.get(root)
-  local raw_codes, counts = M._git_changes(root, base)
-  local codes = {}
-  for p, c in pairs(raw_codes) do
-    local abs = root .. "/" .. p
-    codes[path_util.relative(abs, cwd)] = c
-  end
-  cache = { codes = codes, counts = counts, base = base, root = root, cwd = cwd, time = now }
-  return codes, counts, base, root
+  local root = git.root(cwd)
+  local base = root and review_base.get(root) or nil
+  return {}, nil, base, root
 end
 
 function M._refresh(cwd, force)
@@ -451,46 +583,60 @@ local function open_picker(opts)
     :find()
 end
 
+-- Both pickers fetch git status (and the file list) asynchronously and open in
+-- the callback: the editor never blocks while git/rg run over the superproject,
+-- and by the time open_picker builds its entries the cache is fresh, so the
+-- status prefixes (via the patched gen_from_file) are correct on first render.
 function M.smart_files()
   local cwd = vim.fn.getcwd()
-  local codes, counts, base = refresh_codes(cwd, true)
-  local all = M._list_all()
-  if vim.v.shell_error ~= 0 then
-    all = {}
+  local codes_res, files_res
+  local function maybe_open()
+    if not (codes_res and files_res) then
+      return
+    end
+    local base = codes_res.base
+    open_picker({
+      title = base and ("Files (base: " .. base .. ")") or "Files",
+      results = M._merge_results(codes_res.codes, files_res),
+      cwd = cwd,
+      counts = codes_res.counts,
+      base = base,
+    })
   end
-  local results = M._merge_results(codes, all)
-  open_picker({
-    title = base and ("Files (base: " .. base .. ")") or "Files",
-    results = results,
-    cwd = cwd,
-    counts = counts,
-    base = base,
-  })
+  refresh_codes_async(cwd, function(codes, counts, base)
+    codes_res = { codes = codes, counts = counts, base = base }
+    maybe_open()
+  end)
+  M._list_all_async(cwd, function(files)
+    files_res = files or {}
+    maybe_open()
+  end)
 end
 
 function M.smart_files_changed()
   local cwd = vim.fn.getcwd()
-  local codes, counts, base, root = refresh_codes(cwd, true)
-  if not root then
-    vim.notify("Not a git repo", vim.log.levels.WARN)
-    return
-  end
-  local results = {}
-  for f in pairs(codes) do
-    table.insert(results, f)
-  end
-  table.sort(results)
-  if #results == 0 then
-    vim.notify("No changes vs " .. (base or "index"), vim.log.levels.INFO)
-    return
-  end
-  open_picker({
-    title = base and ("Changed files (base: " .. base .. ")") or "Changed files",
-    results = results,
-    cwd = cwd,
-    counts = counts,
-    base = base,
-  })
+  refresh_codes_async(cwd, function(codes, counts, base, root)
+    if not root then
+      vim.notify("Not a git repo", vim.log.levels.WARN)
+      return
+    end
+    local results = {}
+    for f in pairs(codes) do
+      table.insert(results, f)
+    end
+    table.sort(results)
+    if #results == 0 then
+      vim.notify("No changes vs " .. (base or "index"), vim.log.levels.INFO)
+      return
+    end
+    open_picker({
+      title = base and ("Changed files (base: " .. base .. ")") or "Changed files",
+      results = results,
+      cwd = cwd,
+      counts = counts,
+      base = base,
+    })
+  end)
 end
 
 -- ===================== telescope integration =====================
