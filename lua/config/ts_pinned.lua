@@ -15,6 +15,13 @@
 -- `parser_config[lang].install_info.revision` (in nvim-treesitter/parsers.lua).
 -- The installer reads that field when downloading. Override it before calling
 -- install() and the install pulls our pinned ref instead of the bundled one.
+--
+-- IMPORTANT: this only takes effect for parsers not yet installed. install()
+-- early-returns for an already-installed parser without consulting the revision,
+-- so editing a pin in parser-revisions.lua and RESTARTING does nothing — the
+-- in-memory override is discarded and the existing parser is left in place. To
+-- actually re-pin an installed parser, run `make update` (or `make warm`);
+-- `:TSUpdate` compares the bundled revision, not our pin, so it won't do it.
 local M = {}
 
 ---Apply pinned revisions to nvim-treesitter's parser registry.

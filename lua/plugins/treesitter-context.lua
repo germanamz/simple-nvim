@@ -13,8 +13,11 @@ return {
     -- on big generated / deeply-nested files (deep JSON, generated structs).
     -- should_attach stores this per-buffer, so only large buffers skip; normal
     -- files are unaffected and <leader>ut still toggles the plugin globally.
+    -- Uses the same predicate as the treesitter highlight guard so a single-line
+    -- multi-MB asset (which passes a line-only check) doesn't spin up a parser
+    -- the main highlighter intentionally skipped.
     on_attach = function(buf)
-      return vim.api.nvim_buf_line_count(buf) <= 5000
+      return not require("util.largefile").is_large(buf)
     end,
   },
   keys = {

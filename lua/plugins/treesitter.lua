@@ -40,6 +40,10 @@ return {
         mdx = "markdown",
         jsonc = "json",
         gohtmltmpl = "html",
+        -- ft "help" is parsed by the vimdoc parser; without this, start() is
+        -- called with the nonexistent "help" lang and the fold/indent wiring is
+        -- silently skipped (core still TS-highlights help via its own ftplugin).
+        help = "vimdoc",
       }
 
       local ft_pattern = {
@@ -78,13 +82,11 @@ return {
           -- whole-buffer parse can stall for seconds on the giant generated /
           -- vendored files a polyglot superproject is full of (bundled JS,
           -- *.pb.go, minified assets, sqlite3.c) — exactly the files you land in
-          -- by accident via a grep hit or definition jump. Past these bounds,
-          -- skip TS entirely (start + fold/indent wiring together, no half-wired
-          -- state) and fall back to regex syntax + core indent. Bump if you
-          -- routinely hand-edit large sources.
-          local lc = vim.api.nvim_buf_line_count(args.buf)
-          local ok_bytes, bytes = pcall(vim.api.nvim_buf_get_offset, args.buf, lc)
-          if lc > 5000 or (ok_bytes and bytes > 512 * 1024) then
+          -- by accident via a grep hit or definition jump. Past the shared
+          -- threshold (util.largefile), skip TS entirely (start + fold/indent
+          -- wiring together, no half-wired state) and fall back to regex syntax
+          -- + core indent.
+          if require("util.largefile").is_large(args.buf) then
             return
           end
           local ft = vim.bo[args.buf].filetype
