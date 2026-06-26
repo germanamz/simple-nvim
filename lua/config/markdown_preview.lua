@@ -206,6 +206,12 @@ refresh = function(src)
   vim.keymap.set("n", "gd", function()
     require("config.wikilinks").follow_in_preview(src)
   end, { buffer = tbuf, silent = true, desc = "Follow wikilink (preview)" })
+  -- `<leader>mp` only lives on the source buffer, so once focus is in the preview
+  -- window it can't toggle the pane shut. Mirror it here (closing the source's
+  -- preview) so the same key dismisses it from either side.
+  vim.keymap.set("n", "<leader>mp", function()
+    M.close(src)
+  end, { buffer = tbuf, silent = true, desc = "Toggle markdown preview" })
   local old_buf = state.preview_buf
   state.gen = state.gen + 1
   local gen = state.gen
