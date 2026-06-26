@@ -13,6 +13,10 @@
 --     black needs ~150ms warm, more cold — then the write proceeds anyway).
 --     lsp_format = "fallback" means filetypes
 --     without a conform entry are formatted by their LSP server instead.
+--     Skipped on large files (util.largefile): prettier on a big generated
+--     json/yaml/markdown artifact would hit the 1s cap and stall every save —
+--     the same files skip treesitter and gitsigns painting. <leader>F still
+--     formats them on demand.
 return {
   "stevearc/conform.nvim",
   event = { "BufReadPre", "BufNewFile" },
@@ -23,7 +27,12 @@ return {
       formatters_by_ft = formatters.by_ft,
       default_format_opts = { lsp_format = "fallback" },
       notify_on_error = true,
-      format_on_save = { timeout_ms = 1000, lsp_format = "fallback" },
+      format_on_save = function(buf)
+        if require("util.largefile").is_large(buf) then
+          return nil
+        end
+        return { timeout_ms = 1000, lsp_format = "fallback" }
+      end,
     })
 
     vim.o.formatexpr = "v:lua.require'conform'.formatexpr()"
