@@ -223,12 +223,22 @@ function M.toggle()
 end
 
 function M.setup()
+  -- Idempotent like the sibling modules (markdown_preview, wikilinks): a second
+  -- call (:Lazy reload, a re-requiring test) would otherwise stack a second copy
+  -- of every handler, including the per-redraw CursorMoved chain-signature one.
+  if M._did_setup then
+    return
+  end
+  M._did_setup = true
+  local group = vim.api.nvim_create_augroup("block_guides_setup", { clear = true })
+
   ensure_highlights()
-  vim.api.nvim_create_autocmd("ColorScheme", { callback = ensure_highlights })
+  vim.api.nvim_create_autocmd("ColorScheme", { group = group, callback = ensure_highlights })
   vim.api.nvim_set_decoration_provider(ns, { on_win = on_win, on_line = on_line })
 
   -- Drop the per-buffer cache when a buffer is wiped.
   vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+    group = group,
     callback = function(args)
       cache[args.buf] = nil
     end,
@@ -241,6 +251,7 @@ function M.setup()
   local last_sig = {} -- [win] = last rendered chain signature
   local redraw_pending = {} -- [win] = true while a repaint is queued
   vim.api.nvim_create_autocmd({ "CursorMoved", "CursorMovedI" }, {
+    group = group,
     callback = function()
       if not enabled then
         return
@@ -272,6 +283,7 @@ function M.setup()
 
   -- Forget per-window chain state when a window closes.
   vim.api.nvim_create_autocmd("WinClosed", {
+    group = group,
     callback = function(args)
       local win = tonumber(args.match)
       if win then
