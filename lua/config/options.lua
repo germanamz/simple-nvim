@@ -91,24 +91,42 @@ opt.termguicolors = true
 opt.mouse = "a"
 opt.clipboard = "unnamedplus"
 
--- Delete the current buffer without closing its window. When other buffers
--- remain, switch to the previous one first so the window stays on a real file
--- instead of collapsing (which would quit nvim if it's the last window). When
--- this is the *last* listed buffer, fall back to the nvim-tree explorer — the
--- same default view `nvim .` opens — instead of leaving a stuck empty buffer.
+-- Delete the current buffer without closing its window. When other *real*
+-- buffers remain, switch to one first so the window stays on a file instead of
+-- collapsing (which would quit nvim if it's the last window). When the last real
+-- buffer is closed, fall back to the nvim-tree explorer — the same default view
+-- `nvim .` opens — instead of leaving a stuck empty buffer.
+--
+-- "Real" excludes throwaway [No Name] scratch buffers (the empty startup buffer
+-- left listed when you open a file from the tree). Counting those made closing
+-- your last file land on the scratch buffer, needing a second <leader>bd to
+-- reach the tree; here they don't keep you out of the explorer.
 vim.keymap.set("n", "<leader>bd", function()
   local cur = vim.api.nvim_get_current_buf()
-  local listed = vim.tbl_filter(function(b)
-    return vim.bo[b].buflisted
+
+  local function is_real(b)
+    return vim.bo[b].buflisted and (vim.api.nvim_buf_get_name(b) ~= "" or vim.bo[b].modified)
+  end
+
+  local others = vim.tbl_filter(function(b)
+    return b ~= cur and is_real(b)
   end, vim.api.nvim_list_bufs())
 
-  if #listed > 1 then
-    vim.cmd("bprevious")
+  if #others > 0 then
+    -- Move to a real sibling (prefer the alternate buffer) before deleting, so
+    -- the window stays on a file. Don't move off a modified `cur`: skipping the
+    -- pre-move keeps `bdelete`'s E89 loud without the view jumping away from a
+    -- buffer that wasn't deleted.
+    if not vim.bo[cur].modified then
+      local alt = vim.fn.bufnr("#")
+      local target = (alt ~= -1 and vim.tbl_contains(others, alt)) and alt or others[#others]
+      vim.api.nvim_set_current_buf(target)
+    end
     vim.cmd("bdelete " .. cur)
     return
   end
 
-  -- Last listed buffer: delete it first so unsaved-changes errors still abort
+  -- No real buffers left: delete cur first so unsaved-changes errors still abort
   -- loudly (nvim leaves a throwaway empty [No Name] in the window), then open
   -- nvim-tree and drop every other window so we land on just the tree.
   vim.cmd("bdelete " .. cur)
@@ -118,6 +136,19 @@ vim.keymap.set("n", "<leader>bd", function()
   for _, win in ipairs(vim.api.nvim_list_wins()) do
     if win ~= tree_win then
       pcall(vim.api.nvim_win_close, win, false)
+    end
+  end
+  -- Sweep up the throwaway [No Name] buffers (the startup one, plus the empty
+  -- buffer nvim spawns when the last file is deleted) now that they're hidden
+  -- behind the tree, so they don't pile up across a session.
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if
+      vim.bo[b].buflisted
+      and vim.bo[b].buftype == ""
+      and not vim.bo[b].modified
+      and vim.api.nvim_buf_get_name(b) == ""
+    then
+      pcall(vim.api.nvim_buf_delete, b, { force = false })
     end
   end
 end, { desc = "Delete buffer" })
