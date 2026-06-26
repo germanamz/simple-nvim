@@ -309,6 +309,27 @@ describe("config.markdown_paragraphs", function()
     assert.are.same({ [1] = b({}, 1), [3] = b({}, 2), [5] = b({}, 3) }, data.blocks)
   end)
 
+  it("does not let an unclosed lowercase void tag swallow following ¶ numbers", function()
+    -- <img> has no close on its line, so it leaves MDX tag balance at +1. Only
+    -- PascalCase components open the multi-line swallow; a lowercase HTML tag
+    -- must NOT, or every following block loses its ¶ marker.
+    local data = compute_for({
+      "Para one",
+      "",
+      '<img src="cat.png">',
+      "",
+      "Para two",
+      "",
+      "Para three",
+    })
+    assert.are.same({
+      [1] = b({}, 1),
+      [3] = b({}, 2),
+      [5] = b({}, 3),
+      [7] = b({}, 4),
+    }, data.blocks)
+  end)
+
   it("continues numbering after a scratchpad inside a section", function()
     local data = compute_for({
       "## §1",

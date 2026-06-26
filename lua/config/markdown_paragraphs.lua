@@ -79,17 +79,7 @@ local function mdx_balance(line)
   return bal
 end
 
-local function find_frontmatter_end(lines)
-  if lines[1] ~= "---" then
-    return 0
-  end
-  for i = 2, #lines do
-    if lines[i] == "---" then
-      return i
-    end
-  end
-  return 0
-end
+local find_frontmatter_end = require("util.markdown").frontmatter_end
 
 function M.frontmatter_end(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
@@ -269,7 +259,13 @@ local function compute(bufnr)
             blocks[i] = { path = copy_path(path), paragraph = paragraph }
             last_paragraph_line = i
             in_block = true
-            if bal > 0 then
+            -- Only PascalCase tags (MDX components: <Aside>, <Image>) open the
+            -- multi-line swallow that keeps consuming lines until tag balance
+            -- returns to zero. A lowercase HTML tag with no close on its line —
+            -- a void element like <img src="x">, <br>, <hr> — would otherwise
+            -- leave balance at +1 and silently strip ¶ markers from every
+            -- following block. Lowercase tags fall through as a one-line ¶.
+            if bal > 0 and line:match("^%s*<%u") then
               in_mdx = true
               mdx_depth = bal
             end
@@ -315,8 +311,54 @@ _G._markdown_paragraph_marker = M.marker
 
 local STATUSCOLUMN = "%s%C%{%v:lua._markdown_paragraph_marker()%}%l "
 
+-- bufnr -> uv_timer that debounces compute on rapid edits.
+local timers = {}
+
+-- Stop and close a buffer's debounce timer (idempotent), releasing the libuv
+-- handle so it isn't leaked when the buffer goes away.
+local function stop_timer(bufnr)
+  local t = timers[bufnr]
+  if t then
+    t:stop()
+    if not t:is_closing() then
+      t:close()
+    end
+    timers[bufnr] = nil
+  end
+end
+M._stop_timer = stop_timer
+
+-- Coalesce rapid TextChanged/TextChangedI into one compute ~80ms after the last
+-- edit. compute walks the whole buffer and render_markers measures each marker's
+-- width in a second pass, so running it per keystroke is wasted work on a long
+-- document (the long-form writing this feature targets).
+local function schedule_compute(bufnr)
+  local t = timers[bufnr]
+  if not t then
+    t = vim.uv.new_timer()
+    timers[bufnr] = t
+  end
+  t:stop()
+  t:start(
+    80,
+    0,
+    vim.schedule_wrap(function()
+      if not vim.api.nvim_buf_is_valid(bufnr) then
+        stop_timer(bufnr)
+        return
+      end
+      compute(bufnr)
+      -- compute only refreshed the cache; nudge the statuscolumn so the new
+      -- markers show without waiting for the next incidental redraw.
+      pcall(vim.api.nvim__redraw, { buf = bufnr, statuscolumn = true })
+    end)
+  )
+end
+
 function M.attach(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
+  -- Initial pass is synchronous so the gutter is correct the moment the buffer
+  -- opens; subsequent edits are debounced.
   compute(bufnr)
 
   local group = vim.api.nvim_create_augroup("markdown_paragraphs_buf_" .. bufnr, { clear = true })
@@ -324,13 +366,14 @@ function M.attach(bufnr)
     group = group,
     buffer = bufnr,
     callback = function()
-      compute(bufnr)
+      schedule_compute(bufnr)
     end,
   })
   vim.api.nvim_create_autocmd("BufWipeout", {
     group = group,
     buffer = bufnr,
     callback = function()
+      stop_timer(bufnr)
       cache[bufnr] = nil
     end,
   })

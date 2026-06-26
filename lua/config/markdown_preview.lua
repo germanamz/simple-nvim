@@ -59,21 +59,12 @@ local function glow_style()
   return vim.o.background == "light" and "light" or "dark"
 end
 
--- Number of leading YAML-frontmatter lines (0 if none) for a list of buffer
--- lines, counting both `---` fences. glow strips frontmatter from its output, so
--- the preview's first line corresponds to the first source line after it; the
--- scroll sync offsets by this so the % mapping stays aligned.
-local function frontmatter_lines(lines)
-  if lines[1] ~= "---" then
-    return 0
-  end
-  for i = 2, #lines do
-    if lines[i] == "---" then
-      return i
-    end
-  end
-  return 0
-end
+-- Number of leading YAML-frontmatter lines (0 if none), counting both `---`
+-- fences. glow strips frontmatter from its output, so the preview's first line
+-- corresponds to the first source line after it; the scroll sync offsets by this
+-- so the % mapping stays aligned. Shared with the paragraph gutter via
+-- util.markdown so the frontmatter format is defined once.
+local frontmatter_lines = require("util.markdown").frontmatter_end
 M._frontmatter_lines = frontmatter_lines
 
 -- glow renders both wiki-style and standard links in ways that need rewriting
@@ -296,6 +287,24 @@ setup_win_autocmds = function(state)
   })
   vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
     group = grp,
+    callback = function()
+      schedule_refresh(state)
+    end,
+  })
+  -- glow's -s style is read from vim.o.background at each render, so a theme
+  -- switch while the preview is open would leave the pane mismatched until the
+  -- next edit/resize. Re-render on a colorscheme change (and on a bare
+  -- `:set background=...`, which fires no ColorScheme). Lives in win_group, so a
+  -- hidden preview isn't refreshed.
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = grp,
+    callback = function()
+      schedule_refresh(state)
+    end,
+  })
+  vim.api.nvim_create_autocmd("OptionSet", {
+    group = grp,
+    pattern = "background",
     callback = function()
       schedule_refresh(state)
     end,
