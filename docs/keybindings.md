@@ -57,7 +57,6 @@ Leader = `<Space>` · Local leader = `\`
 | `]d` / `[d`       | Next / previous diagnostic (Nvim 0.11 default)        |
 | `]r` / `[r`       | Next / previous LSP reference in current buffer       |
 | `<Space>gB`       | Pick a review base branch                             |
-| `<Space>w`        | (markdown) re-wrap cursor → EOF using textwidth=80    |
 | `<Space>F`        | Format buffer (or selection)                          |
 | `<C-w>` then `hjkl` | Move between split windows                          |
 | `:q` / `:wq` / `ZZ` | Close / save+close / save+close                     |
@@ -281,7 +280,7 @@ uppercase = case-sensitive. `incsearch` + `hlsearch` are on.
 | `*` / `#`        | search word under cursor forward / backward  |
 | `g*` / `g#`      | …without word boundaries                     |
 | `:noh`           | clear current highlight                      |
-| `<Space>uh`      | toggle search highlight (flips `hlsearch`)   |
+| `<Esc>`          | clear search highlight + pattern (normal mode) |
 | `<Space>fs`      | Telescope grep-string of word under cursor   |
 | `<Space>fg`      | Telescope live grep across project           |
 | `<Space>f/`      | Fuzzy find within current buffer             |
@@ -556,13 +555,13 @@ Stored per repo on disk; auto-applies on buffer attach.
 
 ## 18. Markdown / MDX
 
-Active in `markdown` and `mdx` buffers. `textwidth=80`; `formatoptions+=t` so
-auto-wrap fires while typing. `colorcolumn=81` shows the ruler.
+Active in `markdown` and `mdx` buffers. Prose is never auto-hard-wrapped
+(`formatoptions` has `t` removed), and long lines scroll horizontally rather than
+soft-wrapping. The gutter shows section / paragraph numbers (see below).
 
 | Keys         | Action                                                  |
 | ------------ | ------------------------------------------------------- |
-| `<Space>w`   | re-wrap from cursor → EOF using textwidth (gq + smart) |
-| `gq{motion}` | re-wrap one motion's worth                              |
+| `gq{motion}` | reflow one motion's worth (via `formatexpr`)            |
 | `<Space>F`   | run conform's markdown formatter                        |
 | `<Space>mp`  | toggle live `glow` preview (read-only side pane)        |
 | `gd`         | follow wiki/standard link under cursor (else LSP definition) |
@@ -596,16 +595,6 @@ file path opens the file (resolved against the current file's directory), and an
 external URL (`http(s):`, `mailto:`, …) opens via the system handler. `<C-^>`
 returns to the previous file.
 
-`<Space>w` is smarter than plain `gq`:
-
-- skips YAML frontmatter
-- skips tables (lines starting with `|`)
-- isolates fenced code blocks, dispatches their contents to per-language
-  formatters declared in `lua/config/formatters.lua`
-- temporarily clears `formatexpr` so vim's internal reflow runs (LSP
-  formatters don't honor `textwidth`)
-- saves & restores cursor position
-
 The gutter shows section / paragraph numbers (`§1.2¶3` style). Headings
 H2–H6 form the dotted path; H1 is ignored. Scratchpad blockquotes
 (`> Mental Note`, `> TODO`, `> Note to self`, `> Draft note`) and HTML
@@ -625,7 +614,9 @@ filetypes without a conform entry.
 | `gq{motion}` | format one motion's worth via `formatexpr`      |
 | `:ConformInfo` | which formatter applies to current buffer     |
 
-No format-on-save — always explicit.
+Format-on-save is on: `BufWritePre` runs conform synchronously (1000 ms cap, LSP
+fallback), skipped on very large files (see `lua/util/largefile.lua`). `<Space>F`
+and `gq{motion}` remain the on-demand paths.
 
 ---
 
