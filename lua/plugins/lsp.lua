@@ -75,6 +75,15 @@ local function ts_goto_source_definition(client, bufnr)
   end, bufnr)
 end
 
+-- A named group so these top-level autocmds are replaced (not stacked) if this
+-- spec is ever re-evaluated (:Lazy reload, a test clearing package.loaded).
+local lsp_group = vim.api.nvim_create_augroup("lsp_user", { clear = true })
+
+-- Sort diagnostics by severity so the highest-severity one wins the single sign
+-- slot (equal sign priorities otherwise let a Warning mask an Error on a shared
+-- line) and the cursor float lists errors first.
+vim.diagnostic.config({ severity_sort = true })
+
 -- Show the diagnostic under the cursor in a floating window after the cursor
 -- sits still for `updatetime` (250ms, set in options.lua). Virtual text is off
 -- by default, so this is how full messages surface inline. `focus = false`
@@ -82,6 +91,7 @@ end
 -- diagnostic on the exact cursor position, so when a line has several you can
 -- move the cursor across each token to read them one at a time.
 vim.api.nvim_create_autocmd("CursorHold", {
+  group = lsp_group,
   callback = function(args)
     -- Skip the float window/sort/format work entirely when the cursor line
     -- carries no diagnostic (the common case) — open_float would otherwise
@@ -95,6 +105,7 @@ vim.api.nvim_create_autocmd("CursorHold", {
 })
 
 vim.api.nvim_create_autocmd("LspAttach", {
+  group = lsp_group,
   callback = function(args)
     local client = vim.lsp.get_client_by_id(args.data.client_id)
     local function map(lhs, rhs, desc)

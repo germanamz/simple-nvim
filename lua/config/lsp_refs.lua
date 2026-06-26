@@ -13,6 +13,12 @@ local state = {}
 -- idle on one identifier doesn't re-issue the (whole-project) scan every tick.
 local inflight = {}
 
+-- Below this many in-buffer occurrences there's nothing useful to show: a lone
+-- use isn't worth painting or a navigation affordance. One constant so the paint
+-- gate and the statusline segment can't drift to different thresholds (which
+-- showed "⇄1" with no highlight and the ]r/[r jumps as no-ops).
+local MIN_HIGHLIGHTED_REFS = 2
+
 -- Neovim's default colorscheme links LspReferenceText to Visual, so the painted
 -- symbol occurrences look identical to a text selection — easy to mistake for a
 -- stuck selection that won't clear on a mode change. Give the group its own look
@@ -88,9 +94,10 @@ local function request(bufnr)
     return
   end
 
-  -- Skip the (whole-project) references request when the cursor isn't on an
-  -- identifier: idling on whitespace/punctuation/comments would query the
-  -- server only to discard an empty result.
+  -- Skip the (whole-project) references request when <cword> is empty — i.e. the
+  -- cursor isn't on a keyword character at all (whitespace/punctuation). Note a
+  -- keyword or a word inside a comment still has a non-empty <cword>, so those
+  -- do issue a request; per-position caching bounds it to one per distinct spot.
   if vim.fn.expand("<cword>") == "" then
     state[bufnr] = nil
     return
@@ -142,7 +149,7 @@ local function request(bufnr)
       local ranges, count = dedup_refs(result, buf_uri)
 
       clear_marks(bufnr)
-      if count >= 2 then
+      if count >= MIN_HIGHLIGHTED_REFS then
         paint_refs(bufnr, ranges)
       end
 
@@ -244,7 +251,7 @@ end
 function M.status()
   local bufnr = vim.api.nvim_get_current_buf()
   local s = state[bufnr]
-  if not s or s.count <= 0 then
+  if not s or s.count < MIN_HIGHLIGHTED_REFS then
     return ""
   end
   local row, col = cursor_rc()
