@@ -7,6 +7,7 @@ local M = {}
 
 local git = require("util.git")
 local Overlay = require("util.overlay")
+local palette = require("config.palette")
 
 -- Resolved per call, not at require time: stdpath("data") follows
 -- $XDG_DATA_HOME at call time, and the test harness swaps that per test for
@@ -52,14 +53,6 @@ local function fire(root, ref)
   })
 end
 
-function M.git_root(start_path)
-  return git.root(start_path)
-end
-
-function M.resolve(root, ref)
-  return git.resolve(root, ref)
-end
-
 function M.get(root)
   if not root then
     return nil
@@ -91,7 +84,7 @@ function M.bootstrap()
   local state = read_state()
   local changed = false
   for root, ref in pairs(state) do
-    if vim.fn.isdirectory(root) == 0 or not M.resolve(root, ref) then
+    if vim.fn.isdirectory(root) == 0 or not git.resolve(root, ref) then
       state[root] = nil
       changed = true
     end
@@ -111,7 +104,7 @@ end
 
 local function open_legend()
   vim.api.nvim_set_hl(0, "ReviewBaseActive", { fg = "#5aa0d4", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "ReviewBaseLegend", { fg = "#888888", default = true })
+  vim.api.nvim_set_hl(0, "ReviewBaseLegend", { fg = palette.muted, default = true })
   local text = " ● active base "
   local buf = vim.api.nvim_create_buf(false, true)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text })
@@ -119,14 +112,16 @@ local function open_legend()
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 1, { end_col = 4, hl_group = "ReviewBaseActive" })
   vim.api.nvim_buf_set_extmark(buf, ns, 0, 4, { end_col = #text, hl_group = "ReviewBaseLegend" })
   local width = vim.api.nvim_strwidth(text)
+  -- Borderless to match the prevailing float style (telescope strip, LSP hover,
+  -- diagnostic float are all borderless); the rounded badge was the lone accent.
   legend:mount(buf, {
     relative = "editor",
     row = vim.o.lines - 4,
-    col = math.floor((vim.o.columns - width - 2) / 2),
+    col = math.floor((vim.o.columns - width) / 2),
     width = width,
     height = 1,
     style = "minimal",
-    border = "rounded",
+    border = "none",
     focusable = false,
     noautocmd = true,
     zindex = 250,
@@ -203,7 +198,7 @@ local function apply_selection(root, value, on_done)
     vim.notify("Review base cleared")
     return done(nil)
   end
-  if not M.resolve(root, value) then
+  if not git.resolve(root, value) then
     vim.notify("Ref does not exist: " .. value, vim.log.levels.ERROR)
     return done(nil)
   end
@@ -216,9 +211,27 @@ M._CLEAR_SENTINEL = CLEAR_SENTINEL
 M._build_branch_entry = build_branch_entry
 M._apply_selection = apply_selection
 
+-- One shared message so the "outside a repo" warning reads identically wherever
+-- it surfaces (here, the smart picker).
+M.MSG_NOT_A_REPO = "Not a git repo"
+
+-- Interactive "clear the active base" entry point. M.clear is the silent
+-- programmatic setter; this is the user-facing flow (resolve the repo, warn if
+-- outside one, else clear + confirm), routed through apply_selection so the
+-- "Review base cleared" notice lives in exactly one place. `<leader>gX` delegates
+-- here instead of re-implementing the whole flow.
+function M.clear_active(start_path)
+  local root = git.root(start_path)
+  if not root then
+    vim.notify(M.MSG_NOT_A_REPO, vim.log.levels.WARN)
+    return
+  end
+  apply_selection(root, CLEAR_SENTINEL)
+end
+
 function M.pick(root, on_done)
   if not root then
-    vim.notify("Not a git repo", vim.log.levels.WARN)
+    vim.notify(M.MSG_NOT_A_REPO, vim.log.levels.WARN)
     if on_done then
       on_done(nil)
     end

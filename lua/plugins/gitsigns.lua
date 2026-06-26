@@ -3,10 +3,11 @@ return {
   event = { "BufReadPre", "BufNewFile" },
   opts = function()
     local review_base = require("config.review_base")
+    local git = require("util.git")
     local path = require("util.path")
 
     local function apply_base(bufnr)
-      local root = review_base.git_root(path.buf_start_dir(bufnr))
+      local root = git.root(path.buf_start_dir(bufnr))
       local ref = root and review_base.get(root) or nil
       require("gitsigns").change_base(ref, true)
     end
@@ -40,12 +41,34 @@ return {
         end, "Prev hunk")
         map("n", "<leader>hp", gs.preview_hunk, "Preview hunk")
         map("n", "<leader>hs", gs.stage_hunk, "Stage hunk")
-        map("n", "<leader>hr", gs.reset_hunk, "Reset hunk")
+        -- With a review base set, apply_base points gitsigns at that ref, so
+        -- reset_hunk reverts working-tree lines to the BASE content (not the
+        -- index) — it can clobber branch-committed work. Confirm first in that
+        -- mode; without a base it's the ordinary reset-to-index. Checked per
+        -- press because change_base fires from ReviewBaseChanged without
+        -- re-running on_attach, so attach-time state would go stale.
+        map("n", "<leader>hr", function()
+          local root = git.root(path.buf_start_dir(bufnr))
+          local ref = root and review_base.get(root)
+          if ref then
+            local ok = vim.fn.confirm(
+              ("Review base '%s' is active — reset reverts lines to that ref, not the index. Continue?"):format(
+                ref
+              ),
+              "&Yes\n&No",
+              2
+            )
+            if ok ~= 1 then
+              return
+            end
+          end
+          gs.reset_hunk()
+        end, "Reset hunk")
         map("n", "<leader>hb", function()
           gs.blame_line({ full = true })
         end, "Blame line")
         map("n", "<leader>hB", gs.toggle_current_line_blame, "Toggle line blame virtual text")
-        map("n", "<leader>hd", gs.diffthis, "Diff against index")
+        map("n", "<leader>hd", gs.diffthis, "Diff against review base / index")
         map("n", "<leader>ht", gs.toggle_deleted, "Toggle deleted lines inline")
         map("n", "<leader>hi", gs.preview_hunk_inline, "Inline preview hunk")
         -- <leader>hh (toggle hunk highlights) is intentionally NOT mapped here.
@@ -69,22 +92,36 @@ return {
     require("gitsigns").setup(opts)
 
     local function paint()
+      -- Nr (colored line numbers) carry their own fg, so one saturated palette
+      -- reads on both backgrounds.
       vim.api.nvim_set_hl(0, "GitSignsAddNr", { fg = "#ffffff", bg = "#4ea862" })
       vim.api.nvim_set_hl(0, "GitSignsChangeNr", { fg = "#ffffff", bg = "#7a5d1a" })
       vim.api.nvim_set_hl(0, "GitSignsDeleteNr", { fg = "#ffffff", bg = "#c85050" })
 
-      vim.api.nvim_set_hl(0, "GitSignsAddLn", { bg = "#b8e0c4" })
-      vim.api.nvim_set_hl(0, "GitSignsChangeLn", { bg = "#ead090" })
+      -- Line backgrounds (Ln) set only bg and inherit the buffer's own fg
+      -- (treesitter/syntax). Light pastels assume a light theme — on the dark
+      -- default colorscheme they put light fg on a light tint, near-illegible.
+      -- Pick the tint from the active background, re-applied on the events below.
+      local dark = vim.o.background == "dark"
+      local add_ln = dark and "#1e3a28" or "#b8e0c4"
+      local change_ln = dark and "#3a3320" or "#ead090"
+      local add_inline = dark and "#2f6f47" or "#8fd4a3"
+
+      vim.api.nvim_set_hl(0, "GitSignsAddLn", { bg = add_ln })
+      vim.api.nvim_set_hl(0, "GitSignsChangeLn", { bg = change_ln })
       vim.api.nvim_set_hl(0, "GitSignsDeleteLn", { sp = "#c85050", underdashed = true })
 
-      vim.api.nvim_set_hl(0, "GitSignsAddLnInline", { bg = "#8fd4a3" })
-      vim.api.nvim_set_hl(0, "GitSignsChangeLnInline", { bg = "#8fd4a3" })
+      vim.api.nvim_set_hl(0, "GitSignsAddLnInline", { bg = add_inline })
+      vim.api.nvim_set_hl(0, "GitSignsChangeLnInline", { bg = add_inline })
       vim.api.nvim_set_hl(0, "GitSignsDeleteLnInline", {})
 
       vim.api.nvim_set_hl(0, "GitSignsDelPrev", { sp = "#c85050", underdashed = true })
     end
     paint()
+    -- ColorScheme resets highlight groups; OptionSet catches a bare
+    -- `:set background=dark` that fires no ColorScheme.
     vim.api.nvim_create_autocmd("ColorScheme", { callback = paint })
+    vim.api.nvim_create_autocmd("OptionSet", { pattern = "background", callback = paint })
 
     local ns = vim.api.nvim_create_namespace("gs_custom")
 
@@ -112,7 +149,7 @@ return {
       if vim.b[bufnr].gitsigns_status ~= nil then
         return false
       end
-      local root = review_base.git_root(vim.fn.fnamemodify(fname, ":h"))
+      local root = git.root(vim.fn.fnamemodify(fname, ":h"))
       if not root then
         return false
       end
@@ -208,7 +245,10 @@ return {
       end
     end
 
-    local function mark_hunks(bufnr)
+    -- `hunks`, when provided (always a table, possibly empty), is used as-is so a
+    -- caller that already fetched them — the GitSignsUpdate path — doesn't pay a
+    -- second gs.get_hunks (which rebuilds O(changed-line) patch strings).
+    local function mark_hunks(bufnr, hunks)
       if not vim.api.nvim_buf_is_valid(bufnr) then
         return
       end
@@ -217,13 +257,20 @@ return {
       if not ok then
         return
       end
-      local hunks = gs.get_hunks(bufnr) or {}
+      hunks = hunks or gs.get_hunks(bufnr) or {}
       local line_count = vim.api.nvim_buf_line_count(bufnr)
 
       local new_vs_base = #hunks == 0 and file_new_vs_base(bufnr)
       vim.b[bufnr].gs_new_vs_base = new_vs_base
       if new_vs_base then
-        paint_new_vs_base(bufnr, line_count)
+        -- A newly-added file vs the base is painted one extmark per line in a
+        -- synchronous loop — fine for normal files, a freeze on a 50k-line
+        -- vendored/lockfile add. Past the shared threshold skip the paint (the
+        -- gs_new_vs_base flag above still drives the "[new vs base]" statusline
+        -- marker); the same files skip treesitter and format-on-save too.
+        if not require("util.largefile").is_large(bufnr) then
+          paint_new_vs_base(bufnr, line_count)
+        end
         return
       end
 
@@ -245,13 +292,15 @@ return {
     -- read (cheap integer work).
     local hunk_status_cache = {} -- bufnr -> { add, change, delete, starts = {start lines} }
 
-    local function refresh_hunk_status(bufnr)
+    -- `hunks` optional (see mark_hunks): the GitSignsUpdate path passes the same
+    -- fetched table to both helpers so each update costs one gs.get_hunks, not two.
+    local function refresh_hunk_status(bufnr, hunks)
       local ok, gs = pcall(require, "gitsigns")
       if not ok or not vim.api.nvim_buf_is_valid(bufnr) then
         hunk_status_cache[bufnr] = nil
         return
       end
-      local hunks = gs.get_hunks(bufnr)
+      hunks = hunks or gs.get_hunks(bufnr)
       if not hunks or #hunks == 0 then
         hunk_status_cache[bufnr] = nil
         return
@@ -345,8 +394,12 @@ return {
       callback = function(args)
         local buf = args.data and args.data.buffer
         if buf then
-          refresh_hunk_status(buf)
-          mark_hunks(buf)
+          -- Fetch once, feed both: refresh_hunk_status and mark_hunks each used
+          -- to call gs.get_hunks(buf) independently — two full rebuilds per update.
+          local ok, gs = pcall(require, "gitsigns")
+          local hunks = (ok and gs.get_hunks(buf)) or {}
+          refresh_hunk_status(buf, hunks)
+          mark_hunks(buf, hunks)
         else
           for _, b in ipairs(vim.api.nvim_list_bufs()) do
             if vim.api.nvim_buf_is_loaded(b) then

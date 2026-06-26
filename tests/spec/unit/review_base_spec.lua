@@ -57,64 +57,9 @@ describe("config.review_base", function()
     end)
   end)
 
-  describe("git_root", function()
-    it("returns the toplevel for a git repo", function()
-      local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
-      local root = M.git_root(repo)
-      assert.is_not_nil(root)
-      assert.are.equal(vim.fn.resolve(repo), vim.fn.resolve(root))
-    end)
-
-    it("returns nil for a non-git directory", function()
-      local dir = vim.fn.tempname() .. "-not-a-repo"
-      vim.fn.mkdir(dir, "p")
-      assert.is_nil(M.git_root(dir))
-      vim.fn.delete(dir, "rf")
-    end)
-
-    it("returns nil for a nonexistent path", function()
-      assert.is_nil(M.git_root("/nonexistent"))
-    end)
-  end)
-
-  describe("resolve", function()
-    local repo
-    before_each(function()
-      repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
-    end)
-
-    it("returns true for HEAD", function()
-      assert.is_true(M.resolve(repo, "HEAD"))
-    end)
-
-    it("returns true for a created branch", function()
-      vim.fn.system({ "git", "-C", repo, "branch", "feature", "HEAD" })
-      assert.are.equal(0, vim.v.shell_error)
-      assert.is_true(M.resolve(repo, "feature"))
-    end)
-
-    it("returns true for a created tag", function()
-      vim.fn.system({ "git", "-C", repo, "tag", "v1", "HEAD" })
-      assert.are.equal(0, vim.v.shell_error)
-      assert.is_true(M.resolve(repo, "v1"))
-    end)
-
-    it("returns false for a nonexistent ref", function()
-      assert.is_false(M.resolve(repo, "deadbeef"))
-    end)
-
-    it("returns false for an empty ref", function()
-      assert.is_false(M.resolve(repo, ""))
-    end)
-
-    it("returns false for a nil ref", function()
-      assert.is_false(M.resolve(repo, nil))
-    end)
-
-    it("returns false when root is nil", function()
-      assert.is_false(M.resolve(nil, "HEAD"))
-    end)
-  end)
+  -- git_root / resolve were thin re-exports of util.git.{root,resolve}; they were
+  -- removed so root/ref resolution has a single home. Their behavior is covered
+  -- by tests/spec/unit/util_git_spec.lua.
 
   describe("set / get round-trip", function()
     it("persists ref and fires User ReviewBaseChanged exactly once", function()
@@ -156,6 +101,31 @@ describe("config.review_base", function()
       assert.are.equal(repo, fires[1].root)
       assert.is_nil(fires[1].ref)
       assert.is_nil(M.get(repo))
+    end)
+  end)
+
+  describe("clear_active", function()
+    it("clears the stored base for the repo containing start_path", function()
+      local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+      -- clear_active resolves start_path to the canonical toplevel (git.root),
+      -- which is how the picker flow stores the base, so key the fixture the
+      -- same way (tempname() lands under a symlinked /var on macOS).
+      local root = require("util.git").root(repo)
+      M.set(root, "main")
+      assert.are.equal("main", M.get(root))
+
+      M.clear_active(repo)
+
+      assert.is_nil(M.get(root))
+    end)
+
+    it("is a no-op outside a git repo", function()
+      local dir = vim.fn.tempname() .. "-not-a-repo"
+      vim.fn.mkdir(dir, "p")
+      assert.has_no.errors(function()
+        M.clear_active(dir)
+      end)
+      vim.fn.delete(dir, "rf")
     end)
   end)
 

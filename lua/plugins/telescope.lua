@@ -25,7 +25,10 @@ return {
       {
         "<leader>fi",
         "<cmd>Telescope find_files no_ignore=true hidden=true<cr>",
-        desc = "Find files (incl. gitignored)",
+        -- no_ignore lifts .gitignore so dist/, build/, *.log etc. surface, but
+        -- the global file_ignore_patterns (node_modules/.git/.DS_Store) still
+        -- apply — those are deliberate noise excludes, not gitignore.
+        desc = "Find files (incl. gitignored, except node_modules/.git)",
       },
       {
         "<leader>fg",
@@ -63,7 +66,7 @@ return {
         "<leader>gB",
         function()
           local rb = require("config.review_base")
-          rb.pick(rb.git_root(), function(ref)
+          rb.pick(require("util.git").root(), function(ref)
             if ref then
               require("config.telescope_smart").smart_files()
             end
@@ -74,14 +77,7 @@ return {
       {
         "<leader>gX",
         function()
-          local rb = require("config.review_base")
-          local root = rb.git_root()
-          if not root then
-            vim.notify("Not a git repo", vim.log.levels.WARN)
-            return
-          end
-          rb.clear(root)
-          vim.notify("Review base cleared")
+          require("config.review_base").clear_active()
         end,
         desc = "Review base: clear",
       },
@@ -172,10 +168,43 @@ return {
               elseif vim.fn.executable("fd") == 1 then
                 return { "fd", "--type", "f", "--color", "never", "--exclude", ".git" }
               end
-              return { "find", ".", "-type", "f", "-not", "-path", "*/.git/*" }
+              -- find honors no .gitignore, so without these prunes it descends
+              -- into every submodule's node_modules/.venv/target/build/dist (the
+              -- superproject-freeze the list_all_cmd find branch also guards).
+              return {
+                "find",
+                ".",
+                "-type",
+                "f",
+                "-not",
+                "-path",
+                "*/.git/*",
+                "-not",
+                "-path",
+                "*/node_modules/*",
+                "-not",
+                "-path",
+                "*/.venv/*",
+                "-not",
+                "-path",
+                "*/target/*",
+                "-not",
+                "-path",
+                "*/build/*",
+                "-not",
+                "-path",
+                "*/dist/*",
+              }
             end,
           },
           live_grep = {
+            additional_args = function()
+              return { "--hidden", "--glob", "!.git" }
+            end,
+          },
+          -- Match live_grep: search hidden files (.env, .github/workflows) so the
+          -- two grep verbs don't return different match sets for the same query.
+          grep_string = {
             additional_args = function()
               return { "--hidden", "--glob", "!.git" }
             end,

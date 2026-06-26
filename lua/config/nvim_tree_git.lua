@@ -43,6 +43,16 @@ function M.decorator()
 
   Decorator = require("nvim-tree.api").Decorator:extend()
 
+  -- The status highlight groups are static (default=true), so define them once
+  -- here (this builder runs once, memoized) and re-apply on ColorScheme — which
+  -- resets highlight groups — instead of on every Decorator:new() (i.e. every
+  -- tree render: scroll, expand, focus, SmartCodesRefreshed). Matches the
+  -- block_guides/lsp_refs/gitsigns ColorScheme pattern.
+  git_status_codes.define_highlights()
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    callback = git_status_codes.define_highlights,
+  })
+
   -- Constructed once per tree render: snapshot the codes cache (500ms TTL, so
   -- repeated renders don't re-shell to git) and the derived directory markers.
   function Decorator:new()
@@ -50,7 +60,6 @@ function M.decorator()
     self.highlight_range = "none"
     self.icon_placement = "before"
 
-    git_status_codes.define_highlights()
     self.cwd = vim.fn.getcwd()
     self.codes = require("config.telescope_smart")._refresh(self.cwd)
     self.dirs = M._dir_markers(self.codes)

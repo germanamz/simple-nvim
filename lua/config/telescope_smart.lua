@@ -37,6 +37,7 @@ local git = require("util.git")
 local git_status_codes = require("config.git_status_codes")
 local Overlay = require("util.overlay")
 local path_util = require("util.path")
+local palette = require("config.palette")
 
 -- ===================== helpers =====================
 
@@ -107,12 +108,15 @@ local function apply_committed_lines(lines, codes, counts)
       end
       if path and path ~= "" then
         counts.committed = counts.committed + 1
-        local cat = git_status_codes.category(status_char)
-        if cat and counts.base[cat] ~= nil then
-          counts.base[cat] = counts.base[cat] + 1
-        end
+        -- The base count must match the visible b<letter> rows: a path also
+        -- changed in the worktree keeps its worktree code (no b row), so only
+        -- bump the base category when this path actually receives a b code.
         if not codes[path] then
           codes[path] = "b" .. status_char
+          local cat = git_status_codes.category(status_char)
+          if cat and counts.base[cat] ~= nil then
+            counts.base[cat] = counts.base[cat] + 1
+          end
         end
       end
     end
@@ -146,7 +150,7 @@ function M._git_changes(root, base)
   local counts = fresh_counts()
 
   parse_worktree_status(root, codes, counts)
-  if base and review_base.resolve(root, base) then
+  if base and git.resolve(root, base) then
     parse_committed_history(root, base, codes, counts)
   end
 
@@ -177,7 +181,11 @@ local function git_changes_async(root, base, cb)
     function(wt)
       local wt_lines = wt.code == 0 and split_lines(wt.stdout) or {}
       vim.schedule(function()
-        if base and review_base.resolve(root, base) then
+        -- No synchronous `git rev-parse --verify` guard here: that would block
+        -- the main loop on every async refresh. An invalid base just makes the
+        -- diff below exit nonzero (df_lines = {}), which degrades to no
+        -- committed history — the same outcome the guard produced.
+        if base then
           vim.system(
             { "git", "-C", root, "diff", "--name-status", base .. "..HEAD" },
             { text = true },
@@ -307,10 +315,10 @@ M._refresh_async = refresh_codes_async
 -- for git status — that synchronous call was the picker/tree open-time freeze.
 local refreshing = {}
 
-local function refresh_codes(cwd, force)
+local function refresh_codes(cwd)
   cwd = cwd or vim.fn.getcwd()
   local now = ms_now()
-  if not force and cache.cwd == cwd and (now - cache.time) < 500 then
+  if cache.cwd == cwd and (now - cache.time) < 500 then
     return cache.codes, cache.counts, cache.base, cache.root
   end
   if not refreshing[cwd] then
@@ -328,15 +336,15 @@ local function refresh_codes(cwd, force)
   return {}, nil, base, root
 end
 
-function M._refresh(cwd, force)
-  return refresh_codes(cwd, force)
+function M._refresh(cwd)
+  return refresh_codes(cwd)
 end
 
 -- ===================== highlights & legend =====================
 
 local function set_legend_highlights()
   git_status_codes.define_highlights()
-  vim.api.nvim_set_hl(0, "SmartFilesLegend", { fg = "#888888", default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesLegend", { fg = palette.muted, default = true })
   vim.api.nvim_set_hl(0, "SmartFilesLegendCount", { fg = "#cccccc", bold = true, default = true })
 end
 
@@ -577,6 +585,18 @@ local function open_picker(opts)
           once = true,
           callback = close_legend,
         })
+        -- Telescope repositions its own windows in place on a terminal resize
+        -- (same prompt_bufnr), so the editor-anchored legend would be left
+        -- stranded. Re-render it at the new results-window position. The
+        -- buffer-local autocmd is auto-removed when the prompt buffer is wiped.
+        vim.api.nvim_create_autocmd("VimResized", {
+          buffer = prompt_bufnr,
+          callback = function()
+            vim.schedule(function()
+              open_legend(prompt_bufnr, opts.counts, opts.base)
+            end)
+          end,
+        })
         return true
       end,
     })
@@ -617,7 +637,7 @@ function M.smart_files_changed()
   local cwd = vim.fn.getcwd()
   refresh_codes_async(cwd, function(codes, counts, base, root)
     if not root then
-      vim.notify("Not a git repo", vim.log.levels.WARN)
+      vim.notify(review_base.MSG_NOT_A_REPO, vim.log.levels.WARN)
       return
     end
     local results = {}
