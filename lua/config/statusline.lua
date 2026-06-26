@@ -34,9 +34,10 @@ local function refresh(buf)
       vim.b[buf].nvim_git_branch = (root and branch) or ""
       -- Lazily start the repo's HEAD watcher; its HeadChanged broadcast drives
       -- refresh_all_buffers, so external checkouts repaint without waiting for
-      -- a buffer event.
+      -- a buffer event. Hand it the branch we just resolved so its first watch
+      -- doesn't re-spawn git.branch (normalize detached HEAD "" → nil).
       if root then
-        require("config.git_head").watch(root)
+        require("config.git_head").watch(root, branch ~= "" and branch or nil)
       end
       vim.cmd("redrawstatus!")
     end)
@@ -100,7 +101,23 @@ function M.setup()
   -- another nvim instance (the JSON store is shared), or a root whose watcher
   -- failed to start. Best-effort — it needs the terminal (and tmux's
   -- focus-events option) to forward focus.
-  vim.api.nvim_create_autocmd({ "BufEnter", "BufWritePost", "DirChanged", "FocusGained" }, {
+  -- BufEnter only needs to resolve a buffer's branch/base the first time it is
+  -- seen; afterward the HEAD watcher (HeadChanged) and ReviewBaseChanged keep it
+  -- live, so re-spawning git on every buffer switch is wasted work. nil = never
+  -- resolved, "" = resolved-to-none. BufWritePost is dropped entirely — a write
+  -- changes neither branch nor base.
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group = group,
+    callback = function(args)
+      if vim.b[args.buf].nvim_git_branch == nil then
+        refresh(args.buf)
+      end
+    end,
+  })
+  -- A cwd change can move which repo an unnamed buffer resolves to; FocusGained
+  -- is the cross-instance net (another nvim changed the shared review-base store,
+  -- or a watcher that never started). Both refresh unconditionally.
+  vim.api.nvim_create_autocmd({ "DirChanged", "FocusGained" }, {
     group = group,
     callback = function(args)
       refresh(args.buf)
@@ -126,10 +143,17 @@ function M.setup()
   vim.api.nvim_create_autocmd({ "FileType", "BufWinEnter", "BufEnter" }, {
     group = group,
     callback = function(args)
-      if vim.bo[args.buf].filetype == "netrw" then
-        refresh(args.buf)
-        clear_netrw_statusline(args.buf)
+      if vim.bo[args.buf].filetype ~= "netrw" then
+        return
       end
+      -- Only FileType reliably resolves the actually-browsed directory: a subdir
+      -- buffer's name is empty at BufEnter/BufWinEnter, so refresh there would
+      -- resolve the cwd, not the browsed submodule. Re-clearing the statusline
+      -- must still run on every event since netrw reapplies it on each render.
+      if args.event == "FileType" then
+        refresh(args.buf)
+      end
+      clear_netrw_statusline(args.buf)
     end,
   })
 
@@ -146,7 +170,8 @@ function M.setup()
     pattern = { "ReviewBaseChanged", "HeadChanged" },
     callback = refresh_all_buffers,
   })
-  refresh(vim.api.nvim_get_current_buf())
+  -- Startup is covered by the VimEnter pass above (which also handles starting
+  -- directly into netrw); no separate immediate refresh needed here.
 
   vim.o.statusline =
     "%f %m%r   %{v:lua.git_branch_status()}%=%{v:lua.lsp_refs_status()}%{v:lua.gitsigns_hunks_status()} %y %l:%c %p%% "

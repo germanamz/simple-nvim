@@ -1,6 +1,9 @@
--- Thin git-shellout layer. Single home for the `systemlist` + `shell_error`
--- guard + `-C <cwd>` plumbing that was hand-rolled (with subtly inconsistent
--- error handling) across telescope_smart, review_base, statusline and gitsigns.
+-- Thin git-shellout layer. Single home for the synchronous `systemlist` +
+-- `shell_error` guard + `-C <cwd>` plumbing that was hand-rolled (with subtly
+-- inconsistent error handling) across telescope_smart, review_base and gitsigns.
+-- (statusline is the deliberate exception: it needs an async vim.system spawn
+-- that resolves toplevel + branch in one call off the main thread, which this
+-- synchronous layer can't express, so it keeps its own shellout.)
 --
 -- Deliberately thin: it shells out and reports success/first-line. Higher-level
 -- parsing (porcelain status, name-status diffs) stays in its owning module.

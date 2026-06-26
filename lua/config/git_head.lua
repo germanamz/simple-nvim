@@ -42,7 +42,12 @@ end
 -- Idempotently start watching `root`'s gitdir for HEAD movement. Returns true
 -- when a watcher is (already) running, false when one could not be started
 -- (not a repo, fs_event unavailable).
-function M.watch(root)
+--
+-- `branch` (optional) seeds the last-seen branch with a value the caller already
+-- resolved, sparing a duplicate blocking git.branch() spawn on the first watch
+-- of each root. Pass nil for detached HEAD / unknown (NOT "" — the module's
+-- invariant is nil-on-detached); nil falls back to resolving here.
+function M.watch(root, branch)
   if not root or root == "" then
     return false
   end
@@ -59,7 +64,11 @@ function M.watch(root)
   end
   -- Watch the gitdir, not the HEAD file: git replaces HEAD atomically
   -- (write + rename), which strands a watcher pinned to the old inode.
-  local w = { handle = handle, branch = git.branch(root), pending = false }
+  local seed = branch
+  if seed == nil then
+    seed = git.branch(root)
+  end
+  local w = { handle = handle, branch = seed, pending = false }
   local ok = handle:start(gitdir, {}, function(_, filename)
     if filename and filename ~= "HEAD" then
       return
