@@ -339,6 +339,12 @@ function M.attach(bufnr)
 end
 
 function M.apply_window()
+  -- LSP hover/diagnostic popups (K) render their markdown into a floating
+  -- window whose buffer gets filetype=markdown, which would otherwise drag the
+  -- §/¶ gutter into the popup. Keep the gutter in real markdown buffers only.
+  if vim.api.nvim_win_get_config(0).relative ~= "" then
+    return
+  end
   vim.opt_local.statuscolumn = STATUSCOLUMN
   vim.w.markdown_writing_active = true
 end
