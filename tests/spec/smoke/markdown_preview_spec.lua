@@ -55,4 +55,83 @@ describe("smoke: markdown preview (glow)", function()
     assert.are.equal(before, #vim.api.nvim_list_wins())
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
+
+  -- The preview belongs to its file: it is shown only while that file is on
+  -- screen, hides when the editor window swaps to another file, and restores
+  -- when the file comes back. These need a real preview pane, so they require
+  -- glow; without it they no-op (consistent with the rest of this file).
+  it("auto-hides on switch away and restores on return", function()
+    if vim.fn.executable("glow") ~= 1 then
+      return
+    end
+    local wait = require("tests.helpers.wait")
+    vim.cmd("only")
+    vim.cmd("enew")
+    local a = vim.api.nvim_get_current_buf()
+    vim.bo[a].filetype = "markdown"
+    vim.api.nvim_buf_set_lines(a, 0, -1, false, { "# A", "", "alpha" })
+    local b = vim.api.nvim_create_buf(true, false)
+    vim.bo[b].filetype = "markdown"
+    vim.api.nvim_buf_set_lines(b, 0, -1, false, { "# B", "", "beta" })
+
+    local mp = require("config.markdown_preview")
+    local base = #vim.api.nvim_list_wins()
+
+    mp.open(a)
+    wait.wait_for(function()
+      return #vim.api.nvim_list_wins() == base + 1
+    end, 2000, "preview window never opened")
+
+    -- Swap the editor window to B: A leaves view -> preview hides.
+    vim.cmd("buffer " .. b)
+    wait.wait_for(function()
+      return #vim.api.nvim_list_wins() == base
+    end, 2000, "preview did not auto-hide when its file left the window")
+
+    -- Swap back to A: preview restores alongside it.
+    vim.cmd("buffer " .. a)
+    wait.wait_for(function()
+      return #vim.api.nvim_list_wins() == base + 1
+    end, 2000, "preview did not restore when its file returned")
+
+    mp.close(a)
+    assert.are.equal(base, #vim.api.nvim_list_wins())
+    vim.api.nvim_buf_delete(a, { force = true })
+    vim.api.nvim_buf_delete(b, { force = true })
+  end)
+
+  it("closing the preview disables it: switching back does not restore", function()
+    if vim.fn.executable("glow") ~= 1 then
+      return
+    end
+    local wait = require("tests.helpers.wait")
+    vim.cmd("only")
+    vim.cmd("enew")
+    local a = vim.api.nvim_get_current_buf()
+    vim.bo[a].filetype = "markdown"
+    vim.api.nvim_buf_set_lines(a, 0, -1, false, { "# A" })
+    local b = vim.api.nvim_create_buf(true, false)
+    vim.bo[b].filetype = "markdown"
+
+    local mp = require("config.markdown_preview")
+    local base = #vim.api.nvim_list_wins()
+
+    mp.open(a)
+    wait.wait_for(function()
+      return #vim.api.nvim_list_wins() == base + 1
+    end, 2000, "preview window never opened")
+
+    -- A real close (as <leader>mp / :q on the pane does) forgets the file.
+    mp.close(a)
+    assert.are.equal(base, #vim.api.nvim_list_wins())
+
+    -- Switching away and back must NOT bring the preview back.
+    vim.cmd("buffer " .. b)
+    vim.cmd("buffer " .. a)
+    vim.wait(100)
+    assert.are.equal(base, #vim.api.nvim_list_wins())
+
+    vim.api.nvim_buf_delete(a, { force = true })
+    vim.api.nvim_buf_delete(b, { force = true })
+  end)
 end)

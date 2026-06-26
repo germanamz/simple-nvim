@@ -34,13 +34,24 @@ local M = {}
 
 -- src bufnr -> {
 --   src, preview_win, preview_buf, src_win,
---   tmpfile, timer, job, gen, group, fm_lines
+--   tmpfile, timer, job, gen, life_group, win_group, fm_lines
 -- }
+--
+-- The preview belongs to its file as a group: a state persists for as long as
+-- the preview is *enabled* for `src` (you toggled it on), independent of whether
+-- the preview window currently exists. A state is in one of two sub-states:
+--   * shown  -- preview_win is a valid window (the file is on screen)
+--   * hidden -- preview_win is nil (the file left view); auto-restores when the
+--               file returns to a window.
+-- `life_group` (the lifecycle augroup) watches the file's visibility and lives
+-- until a real close; `win_group` holds the refresh/scroll/WinClosed handlers and
+-- is recreated on each show, torn down on each hide. See show/hide.
 local states = {}
 local notified = false
 local ft_util = require("util.ft")
 
-local notify_missing, set_keymap, schedule_refresh, refresh, sync_scroll, setup_autocmds
+local notify_missing, set_keymap, schedule_refresh, refresh, sync_scroll
+local setup_win_autocmds, ensure_lifecycle, ensure_state, show, hide
 
 local DEBOUNCE_MS = 300
 
@@ -267,9 +278,12 @@ schedule_refresh = function(state)
   )
 end
 
-setup_autocmds = function(state)
-  local grp = vim.api.nvim_create_augroup("markdown_preview_buf_" .. state.src, { clear = true })
-  state.group = grp
+-- Window-scoped autocmds: live only while the preview pane is shown, recreated on
+-- each show() and torn down on each hide(). They drive the rendered output and
+-- handle the user closing the pane directly.
+setup_win_autocmds = function(state)
+  local grp = vim.api.nvim_create_augroup("markdown_preview_win_" .. state.src, { clear = true })
+  state.win_group = grp
 
   -- Refresh on save, on leaving insert, and on debounced normal-mode edits --
   -- deliberately NOT TextChangedI, so it doesn't flicker on every keystroke.
@@ -293,13 +307,8 @@ setup_autocmds = function(state)
       sync_scroll(state)
     end,
   })
-  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
-    group = grp,
-    buffer = state.src,
-    callback = function()
-      M.close(state.src)
-    end,
-  })
+  -- Closing the preview window directly (`:q` in the pane) is a real disable, not
+  -- a hide -- the file is no longer in the preview group.
   vim.api.nvim_create_autocmd("WinClosed", {
     group = grp,
     callback = function(ev)
@@ -310,21 +319,91 @@ setup_autocmds = function(state)
   })
 end
 
-function M.open(src)
-  if vim.fn.executable("glow") ~= 1 then
-    notify_missing()
+-- Lifecycle autocmds: created once when the preview is first enabled, removed only
+-- on a real close. They tie the pane's existence to the file's visibility so the
+-- two move as a group.
+ensure_lifecycle = function(state)
+  local grp = vim.api.nvim_create_augroup("markdown_preview_life_" .. state.src, { clear = true })
+  state.life_group = grp
+
+  -- File left a window -> hide the pane, but only once the file is gone from
+  -- *every* window (closing one split of a file shown in two keeps the preview).
+  vim.api.nvim_create_autocmd("BufWinLeave", {
+    group = grp,
+    buffer = state.src,
+    callback = function()
+      local src = state.src
+      vim.schedule(function()
+        if states[src] and vim.fn.bufwinid(src) == -1 then
+          hide(src)
+        end
+      end)
+    end,
+  })
+  -- File came back to a window -> restore the pane next to it.
+  vim.api.nvim_create_autocmd("BufWinEnter", {
+    group = grp,
+    buffer = state.src,
+    callback = function()
+      local src = state.src
+      vim.schedule(function()
+        if states[src] then
+          show(src, vim.fn.bufwinid(src))
+        end
+      end)
+    end,
+  })
+  -- The file itself is gone -> tear the whole group down.
+  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+    group = grp,
+    buffer = state.src,
+    callback = function()
+      M.close(state.src)
+    end,
+  })
+end
+
+-- Create (once) the persistent state for an enabled preview, along with the
+-- lifecycle autocmds. Does not open any window -- that's show()'s job.
+ensure_state = function(src)
+  local state = states[src]
+  if state then
+    return state
+  end
+  state = {
+    src = src,
+    preview_win = nil,
+    preview_buf = nil,
+    src_win = nil,
+    tmpfile = vim.fn.tempname() .. ".md",
+    gen = 0,
+    fm_lines = 0,
+  }
+  states[src] = state
+  ensure_lifecycle(state)
+  return state
+end
+
+-- Open the preview pane for an already-enabled file in a split to the right of
+-- `target_win` (the window showing the file). No-op if already shown.
+show = function(src, target_win)
+  local state = states[src]
+  if not state then
     return
   end
-  src = src or vim.api.nvim_get_current_buf()
-  local existing = states[src]
-  if existing and existing.preview_win and vim.api.nvim_win_is_valid(existing.preview_win) then
+  if state.preview_win and vim.api.nvim_win_is_valid(state.preview_win) then
+    return
+  end
+  if not vim.api.nvim_buf_is_valid(src) then
+    return
+  end
+  if not (target_win and target_win ~= -1 and vim.api.nvim_win_is_valid(target_win)) then
     return
   end
 
   -- Placeholder buffer to create the split; replaced by the terminal on refresh.
   local placeholder = vim.api.nvim_create_buf(false, true)
-  local src_win = vim.api.nvim_get_current_win()
-  local win = vim.api.nvim_open_win(placeholder, false, { win = src_win, split = "right" })
+  local win = vim.api.nvim_open_win(placeholder, false, { win = target_win, split = "right" })
 
   vim.wo[win].number = false
   vim.wo[win].relativenumber = false
@@ -338,17 +417,51 @@ function M.open(src)
   vim.wo[win].spell = false
   vim.wo[win].winfixwidth = true
 
-  states[src] = {
-    src = src,
-    preview_win = win,
-    preview_buf = placeholder,
-    src_win = src_win,
-    tmpfile = vim.fn.tempname() .. ".md",
-    gen = 0,
-    fm_lines = 0,
-  }
-  setup_autocmds(states[src])
+  state.preview_win = win
+  state.preview_buf = placeholder
+  state.src_win = target_win
+  setup_win_autocmds(state)
   refresh(src)
+end
+
+-- Tear down the preview pane while keeping the file enabled (state + lifecycle
+-- survive, so it auto-restores when the file is back on screen).
+hide = function(src)
+  local state = states[src]
+  if not state then
+    return
+  end
+  -- Drop the window-scoped autocmds FIRST so closing the pane doesn't trip
+  -- WinClosed -> M.close, which would forget the file was enabled.
+  if state.win_group then
+    pcall(vim.api.nvim_del_augroup_by_id, state.win_group)
+    state.win_group = nil
+  end
+  if state.timer then
+    state.timer:stop()
+  end
+  if state.job then
+    pcall(vim.fn.jobstop, state.job)
+    state.job = nil
+  end
+  if state.preview_win and vim.api.nvim_win_is_valid(state.preview_win) then
+    pcall(vim.api.nvim_win_close, state.preview_win, true)
+  end
+  if state.preview_buf and vim.api.nvim_buf_is_valid(state.preview_buf) then
+    pcall(vim.api.nvim_buf_delete, state.preview_buf, { force = true })
+  end
+  state.preview_win = nil
+  state.preview_buf = nil
+end
+
+function M.open(src)
+  if vim.fn.executable("glow") ~= 1 then
+    notify_missing()
+    return
+  end
+  src = src or vim.api.nvim_get_current_buf()
+  ensure_state(src)
+  show(src, vim.api.nvim_get_current_win())
 end
 
 function M.close(src)
@@ -357,9 +470,13 @@ function M.close(src)
   if not state then
     return
   end
-  -- Delete the augroup first so closing the window doesn't re-enter via WinClosed.
-  if state.group then
-    pcall(vim.api.nvim_del_augroup_by_id, state.group)
+  -- Delete the augroups first so closing the window doesn't re-enter via
+  -- WinClosed and tearing the file down doesn't re-enter via the lifecycle group.
+  if state.life_group then
+    pcall(vim.api.nvim_del_augroup_by_id, state.life_group)
+  end
+  if state.win_group then
+    pcall(vim.api.nvim_del_augroup_by_id, state.win_group)
   end
   if state.timer then
     state.timer:stop()
