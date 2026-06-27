@@ -59,6 +59,11 @@ local function refresh_all_buffers()
   vim.cmd("redrawstatus!")
 end
 
+-- Public manual-refresh entry point for the <leader>gR git refresh keymap. Does
+-- the same work as the event-driven path (ReviewBaseChanged/HeadChanged):
+-- re-resolve every loaded buffer's branch/base and repaint the statusline.
+M.refresh_all = refresh_all_buffers
+
 function _G.git_branch_status()
   -- nvim_git_branch is kept live by config.git_head's watcher (HeadChanged →
   -- refresh) and exists for every buffer, attached or not; gitsigns_head is

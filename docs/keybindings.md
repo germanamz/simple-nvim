@@ -562,6 +562,12 @@ background highlights (no sign column — `signcolumn=false`).
 | `<Space>hB`  | toggle the always-on line blame virtual text |
 | `<Space>hd`  | diff against index                           |
 | `<Space>ht`  | toggle deleted-lines display                 |
+| `<Space>gR`  | refresh git hunks & status (manual)          |
+
+All git displays auto-refresh when nvim regains focus (so an external
+commit/stage shows up on return): gitsigns hunks, the statusline branch/base
+and hunk counts, and the file-tree's git decorations. `<Space>gR` forces the
+same refresh for terminals that don't forward focus events.
 
 Statusline: ` +A ~C -D ↑above ↓below ` summary.
 

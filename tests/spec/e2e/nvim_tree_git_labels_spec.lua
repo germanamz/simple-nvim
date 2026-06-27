@@ -108,4 +108,51 @@ describe("e2e: nvim-tree git labels", function()
       return table.concat(tree_lines(), "\n"):find("bM") == nil
     end, 3000, "bM label survived clearing the review base")
   end)
+
+  -- An external commit / `git add` from another terminal changes file status
+  -- without moving HEAD, so neither ReviewBaseChanged nor HeadChanged fires; the
+  -- decorations would stay stale. The config refreshes the codes + reloads on
+  -- FocusGained instead. These pin that handler (the _refresh_async spy isolates
+  -- it from nvim-tree's own fs/git watchers, which could also trigger a reload).
+  it("refreshes the git decorations on FocusGained while the tree is visible", function()
+    local repo = git_fixture.repo({
+      commits = { { files = { ["committed.lua"] = "return 1\n" }, message = "init" } },
+    })
+    vim.fn.chdir(repo)
+    open_tree(repo)
+
+    local smart = require("config.telescope_smart")
+    local orig = smart._refresh_async
+    local calls = 0
+    smart._refresh_async = function(cwd, cb)
+      calls = calls + 1
+      return orig(cwd, cb)
+    end
+    local ok, err = pcall(function()
+      vim.api.nvim_exec_autocmds("FocusGained", {})
+    end)
+    smart._refresh_async = orig
+    assert.is_true(ok, "FocusGained handler errored: " .. tostring(err))
+    assert.is_true(calls >= 1, "FocusGained did not refresh the tree git codes")
+  end)
+
+  it("skips the FocusGained refresh when the tree is closed", function()
+    pcall(function()
+      require("nvim-tree.api").tree.close()
+    end)
+    wait.wait_for(function()
+      return not require("nvim-tree.api").tree.is_visible()
+    end, 3000, "tree did not close")
+
+    local smart = require("config.telescope_smart")
+    local orig = smart._refresh_async
+    local calls = 0
+    smart._refresh_async = function(cwd, cb)
+      calls = calls + 1
+      return orig(cwd, cb)
+    end
+    vim.api.nvim_exec_autocmds("FocusGained", {})
+    smart._refresh_async = orig
+    assert.are.equal(0, calls, "tree refreshed git codes on FocusGained while closed")
+  end)
 end)

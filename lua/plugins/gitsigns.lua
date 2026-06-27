@@ -403,6 +403,54 @@ return {
       _G.gitsigns_toggle_hunks()
     end, { desc = "Toggle hunk highlights" })
 
+    -- gitsigns watches the gitdir to self-refresh, but changes made from another
+    -- terminal while nvim is backgrounded (a commit, a `git add`, a stash) often
+    -- arrive as a coalesced or dropped fs event — and a plain commit moves
+    -- refs/heads/<branch>, not HEAD, so config.git_head's HEAD watcher never
+    -- fires either. The signs stay diffed against the pre-commit state until the
+    -- buffer is reopened. Re-diff whenever focus returns so coming back to nvim
+    -- always reflects the current index/HEAD. refresh() is async and
+    -- FocusGained is rare (once per alt-tab, not per edit), so the re-diff is off
+    -- the hot path; each attached buffer's update fires GitSignsUpdate, which
+    -- repaints the highlights and statusline counts. The other git displays
+    -- re-sync on the same FocusGained event from their own modules:
+    -- config.statusline re-resolves the focused buffer's branch/base, and
+    -- nvim-tree reloads its git decorations (see lua/plugins/nvim-tree.lua).
+    vim.api.nvim_create_autocmd("FocusGained", {
+      callback = function()
+        require("gitsigns").refresh()
+        -- Attached buffers repaint via the GitSignsUpdate that refresh() triggers;
+        -- untracked / new-vs-base buffers get no such event, so repaint them here.
+        repaint_all()
+      end,
+    })
+
+    -- Manual full refresh, for terminals/tmux that don't forward focus events
+    -- (the FocusGained path above is best-effort — see config.statusline). Does
+    -- everything that path does, plus repainting unattached new-vs-base buffers,
+    -- re-resolving branch/base for *every* buffer, and reloading the file tree's
+    -- git labels.
+    vim.keymap.set("n", "<leader>gR", function()
+      require("gitsigns").refresh()
+      -- Catch untracked / new-vs-base buffers gitsigns never attaches to (so
+      -- they get no GitSignsUpdate); refresh() above already covers attached ones.
+      repaint_all()
+      require("config.statusline").refresh_all()
+      -- Reload the tree's git decorator against fresh codes, if it's on screen
+      -- (mirrors nvim-tree.lua's own ReviewBaseChanged refresh).
+      if package.loaded["nvim-tree"] then
+        local api = require("nvim-tree.api")
+        if api.tree.is_visible() then
+          require("config.telescope_smart")._refresh_async(vim.fn.getcwd(), function()
+            if api.tree.is_visible() then
+              api.tree.reload()
+            end
+          end)
+        end
+      end
+      vim.notify("Refreshed git hunks & status")
+    end, { desc = "Refresh git hunks & status" })
+
     -- Repaint only the buffer whose hunks changed (the event carries it in
     -- data.buffer); repainting every loaded buffer on each update made every
     -- edit O(open buffers). The full repaint stays on the <leader>hh toggle

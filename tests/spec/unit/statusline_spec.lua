@@ -76,6 +76,14 @@ describe("config.statusline", function()
     end)
   end)
 
+  describe("refresh_all", function()
+    it("exposes a public manual-refresh entry point", function()
+      -- Backs the <leader>gR keymap and the FocusGained git refresh; the keymap
+      -- breaks silently if this stops being a callable public function.
+      assert.is_function(require("config.statusline").refresh_all)
+    end)
+  end)
+
   describe("plugin-owned stubs", function()
     it("defines no-op lsp_refs_status and gitsigns_hunks_status", function()
       assert.is_function(_G.lsp_refs_status)

@@ -332,4 +332,87 @@ describe("e2e: gitsigns", function()
 
     require("config.review_base").clear(vim.fn.getcwd())
   end)
+
+  it("registers <leader>gR and refreshes gitsigns when invoked", function()
+    open_modified_repo()
+    -- Global map (set in config), so it exists regardless of attach state.
+    local found
+    wait.wait_for(function()
+      for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
+        if m.lhs == " gR" then
+          found = m
+          return true
+        end
+      end
+      return false
+    end, 5000, "<leader>gR never registered")
+    assert.is_not_nil(found, "<leader>gR not registered")
+    assert.is_not_nil(found.desc and found.desc:lower():find("refresh git"))
+
+    -- Invoking the map re-diffs gitsigns (alongside the statusline/tree refresh).
+    local gs = require("gitsigns")
+    local orig = gs.refresh
+    local calls = 0
+    gs.refresh = function(...)
+      calls = calls + 1
+      return orig(...)
+    end
+    local ok, err = pcall(found.callback)
+    gs.refresh = orig
+    assert.is_true(ok, "<leader>gR callback errored: " .. tostring(err))
+    assert.is_true(calls >= 1, "<leader>gR did not trigger gitsigns.refresh()")
+  end)
+
+  it("re-diffs gitsigns hunks when focus returns to nvim", function()
+    open_modified_repo()
+    -- gitsigns' gitdir watcher can miss events made while nvim is backgrounded,
+    -- so the config re-diffs on FocusGained. Patch refresh to prove the handler
+    -- is wired, independent of any watcher timing.
+    local gs = require("gitsigns")
+    local orig = gs.refresh
+    local calls = 0
+    gs.refresh = function(...)
+      calls = calls + 1
+      return orig(...)
+    end
+    local ok, err = pcall(function()
+      vim.api.nvim_exec_autocmds("FocusGained", {})
+    end)
+    gs.refresh = orig
+    assert.is_true(ok, "FocusGained handler errored: " .. tostring(err))
+    assert.is_true(calls >= 1, "FocusGained did not trigger gitsigns.refresh()")
+  end)
+
+  it("clears stale hunks after an external commit on FocusGained", function()
+    local bufnr = open_modified_repo()
+    wait.wait_for(function()
+      return #(require("gitsigns").get_hunks(bufnr) or {}) > 0
+    end, 5000, "expected hunks before the external commit")
+
+    -- Commit the working-tree changes from "another terminal": the tree now
+    -- matches HEAD/index, so a re-diff yields zero hunks — but gitsigns still
+    -- holds the pre-commit hunks until something refreshes it.
+    local cwd = vim.fn.getcwd()
+    vim.fn.system({ "git", "-C", cwd, "add", "-A" })
+    vim.fn.system({
+      "git",
+      "-C",
+      cwd,
+      "-c",
+      "user.email=t@e.invalid",
+      "-c",
+      "user.name=t",
+      "commit",
+      "-q",
+      "-m",
+      "external",
+      "--no-gpg-sign",
+    })
+
+    vim.api.nvim_exec_autocmds("FocusGained", {})
+    wait.wait_for(function()
+      return #(require("gitsigns").get_hunks(bufnr) or {}) == 0
+    end, 5000, "hunks not cleared after external commit + FocusGained")
+    assert.are.equal(0, #(require("gitsigns").get_hunks(bufnr) or {}))
+  end)
 end)

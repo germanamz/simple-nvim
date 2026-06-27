@@ -138,6 +138,26 @@ return {
         end
       end,
     })
+    -- Re-sync the git decorations when focus returns to nvim. A commit or
+    -- `git add` from another terminal changes file status without moving HEAD,
+    -- so config.git_head's HEAD watcher never fires ReviewBaseChanged/HeadChanged
+    -- and the labels would stay stale until a manual reload. Force-refresh the
+    -- codes cache for the cwd off the main thread, then reload so the decorator
+    -- repaints. Only when the tree is on screen — skip the git spawn otherwise.
+    -- (gitsigns hunks and the statusline re-sync on the same FocusGained event
+    -- from their own modules.)
+    vim.api.nvim_create_autocmd("FocusGained", {
+      callback = function()
+        if not api.tree.is_visible() then
+          return
+        end
+        require("config.telescope_smart")._refresh_async(vim.fn.getcwd(), function()
+          if api.tree.is_visible() then
+            api.tree.reload()
+          end
+        end)
+      end,
+    })
     -- The tree stays put while a Telescope picker is open; it's dismissed only
     -- when a file is actually opened — from the tree (quit_on_open above) or
     -- from a picker (the select mappings in lua/plugins/telescope.lua, which
