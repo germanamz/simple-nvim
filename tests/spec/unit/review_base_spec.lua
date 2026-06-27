@@ -104,6 +104,42 @@ describe("config.review_base", function()
     end)
   end)
 
+  describe("no-op guards", function()
+    it("does not re-fire when M.set is called with the unchanged ref", function()
+      local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+      M.set(repo, "main")
+
+      local fires = {}
+      vim.api.nvim_create_autocmd("User", {
+        pattern = "ReviewBaseChanged",
+        callback = function(args)
+          table.insert(fires, args.data)
+        end,
+      })
+
+      M.set(repo, "main")
+
+      assert.are.equal(0, #fires)
+      assert.are.equal("main", M.get(repo))
+    end)
+
+    it("does not fire when clearing an already-absent base", function()
+      local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+
+      local fires = {}
+      vim.api.nvim_create_autocmd("User", {
+        pattern = "ReviewBaseChanged",
+        callback = function(args)
+          table.insert(fires, args.data)
+        end,
+      })
+
+      M.clear(repo)
+
+      assert.are.equal(0, #fires)
+    end)
+  end)
+
   describe("clear_active", function()
     it("clears the stored base for the repo containing start_path", function()
       local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })

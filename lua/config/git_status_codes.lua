@@ -17,6 +17,9 @@ function M.define_highlights()
   vim.api.nvim_set_hl(0, "SmartFilesDeleted", { fg = "#9a9a9a", bold = true, default = true })
   vim.api.nvim_set_hl(0, "SmartFilesRenamed", { fg = "#4cb0a0", bold = true, default = true })
   vim.api.nvim_set_hl(0, "SmartFilesBase", { fg = "#d896ff", bold = true, default = true })
+  -- Merge-conflict (unmerged) codes — UU/UA/UD — carry a dominant U; red so a
+  -- conflict stands out from ordinary staged/worktree changes.
+  vim.api.nvim_set_hl(0, "SmartFilesConflict", { fg = "#d05a5a", bold = true, default = true })
   vim.api.nvim_set_hl(0, "SmartFilesUnstaged", { fg = palette.muted, default = true })
 end
 
@@ -38,6 +41,11 @@ function M.hl_for_letter(c)
     return "SmartFilesModified"
   elseif c == "?" then
     return "SmartFilesUntracked"
+  elseif c == "U" then
+    -- Unmerged: dominant letter of merge-conflict codes (UU/UA/UD). Without
+    -- this the conflict letter rendered uncolored. category("U") stays nil —
+    -- conflicts aren't one of the worktree count buckets.
+    return "SmartFilesConflict"
   end
 end
 

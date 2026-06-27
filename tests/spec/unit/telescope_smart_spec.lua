@@ -144,13 +144,14 @@ describe("config.telescope_smart", function()
   end)
 
   describe("_merge_results", function()
-    it("lists code-tagged files first then dedupes the full file list", function()
+    it("lists code-tagged files first (sorted) then dedupes the full file list", function()
       local codes = { ["a.lua"] = " M", ["d.lua"] = "bA" }
       local all_files = { "./b.lua", "e.lua", "a.lua" }
 
+      -- Changed files come first in sorted order (matching smart_files_changed),
+      -- then the remaining listed files in their original order, deduped.
       local result = M._merge_results(codes, all_files)
-      table.sort(result)
-      assert.are.same({ "a.lua", "b.lua", "d.lua", "e.lua" }, result)
+      assert.are.same({ "a.lua", "d.lua", "b.lua", "e.lua" }, result)
     end)
 
     it("strips a leading ./ from listed files before deduping", function()

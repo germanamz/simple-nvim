@@ -55,6 +55,21 @@ return {
         "<cmd>Telescope current_buffer_fuzzy_find<cr>",
         desc = "Fuzzy find in buffer",
       },
+      { "<leader>fR", "<cmd>Telescope resume<cr>", desc = "Resume last picker" },
+      {
+        "<leader>fS",
+        function()
+          require("telescope.builtin").lsp_dynamic_workspace_symbols()
+        end,
+        desc = "Workspace symbols (LSP)",
+      },
+      {
+        "<leader>fo",
+        function()
+          require("telescope.builtin").lsp_document_symbols()
+        end,
+        desc = "Document symbols (LSP)",
+      },
       {
         "<leader>gs",
         function()
@@ -81,6 +96,9 @@ return {
         end,
         desc = "Review base: clear",
       },
+      { "<leader>gc", "<cmd>Telescope git_commits<cr>", desc = "Git commits" },
+      { "<leader>gC", "<cmd>Telescope git_bcommits<cr>", desc = "Git commits (current file)" },
+      { "<leader>gt", "<cmd>Telescope git_status<cr>", desc = "Git status (telescope)" },
       {
         "<leader><space>",
         function()
@@ -100,9 +118,16 @@ return {
       -- close leaves behind.
       local function opening(action)
         return function(prompt_bufnr)
-          local ok, nvt = pcall(require, "nvim-tree.api")
-          if ok and nvt.tree.is_visible() then
-            nvt.tree.close()
+          -- This wrapper is installed on the default select mappings, so it also
+          -- fires for non-file pickers (help_tags, commands, keymaps). Only drop
+          -- the tree when the selection is an actual file/path — otherwise picking
+          -- a help tag or command would needlessly close the sidebar.
+          local entry = require("telescope.actions.state").get_selected_entry()
+          if entry and (entry.path or entry.filename) then
+            local ok, nvt = pcall(require, "nvim-tree.api")
+            if ok and nvt.tree.is_visible() then
+              nvt.tree.close()
+            end
           end
           return action(prompt_bufnr)
         end
@@ -162,39 +187,12 @@ return {
           -- gitignored-file listing), and a shared table would accumulate them.
           find_files = {
             hidden = true,
+            -- Body lives in util.fs (shared with telescope_smart's list_all).
+            -- Still a function so it returns a FRESH table each open per the note
+            -- above. color_never is this picker's dialect of the shared command —
+            -- telescope appends --hidden itself (find_files.hidden, just above).
             find_command = function()
-              if vim.fn.executable("rg") == 1 then
-                return { "rg", "--files", "--color", "never", "--glob", "!.git" }
-              elseif vim.fn.executable("fd") == 1 then
-                return { "fd", "--type", "f", "--color", "never", "--exclude", ".git" }
-              end
-              -- find honors no .gitignore, so without these prunes it descends
-              -- into every submodule's node_modules/.venv/target/build/dist (the
-              -- superproject-freeze the list_all_cmd find branch also guards).
-              return {
-                "find",
-                ".",
-                "-type",
-                "f",
-                "-not",
-                "-path",
-                "*/.git/*",
-                "-not",
-                "-path",
-                "*/node_modules/*",
-                "-not",
-                "-path",
-                "*/.venv/*",
-                "-not",
-                "-path",
-                "*/target/*",
-                "-not",
-                "-path",
-                "*/build/*",
-                "-not",
-                "-path",
-                "*/dist/*",
-              }
+              return require("util.fs").list_files_cmd({ color_never = true })
             end,
           },
           live_grep = {

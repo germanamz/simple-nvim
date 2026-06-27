@@ -21,8 +21,6 @@
 
 local M = {}
 
-local ft_util = require("util.ft")
-
 local ROOT_MARKERS = { ".git", ".marksman.toml", "tusk.toml", ".tusk" }
 
 -- Return the inner text of the `[[...]]` wikilink covering 1-based column `col`
@@ -113,7 +111,9 @@ local function project_root(source)
 end
 
 -- Open an absolute path in the current window. Returns false (and notifies) if
--- the file doesn't exist.
+-- the file doesn't exist. Standard `[text](dest)` file links route through this
+-- and stay fail-fast -- a broken path there is a typo to fix, not a file to
+-- conjure (only wikilinks create; see open_or_create).
 local function open_path(path)
   if vim.fn.filereadable(path) == 0 then
     vim.notify("Link target not found:\n" .. path, vim.log.levels.WARN, { title = "wikilinks" })
@@ -123,9 +123,32 @@ local function open_path(path)
   return true
 end
 
--- Open a project-relative wikilink target in the current window.
+-- The blocking y/n prompt, behind an indirection so headless tests can stub it
+-- (vim.fn.confirm needs a UI to answer) and the resolution logic stays testable
+-- without it. Defaults to "No" (button 2) so a stray <cr> never creates a file.
+M._confirm = vim.fn.confirm
+
+-- Open an absolute path, offering to create it when missing. Backs wikilink
+-- following only: following `[[new-note]]` to a file that doesn't exist yet
+-- prompts, then spawns it (parent dirs and all) -- Obsidian/zk-style forward
+-- references, where you link a note into being before writing it.
+local function open_or_create(path)
+  if vim.fn.filereadable(path) == 1 then
+    vim.cmd.edit(vim.fn.fnameescape(path))
+    return true
+  end
+  if M._confirm("Create " .. path .. "?", "&Yes\n&No", 2) ~= 1 then
+    return false
+  end
+  vim.fn.mkdir(vim.fs.dirname(path), "p")
+  vim.cmd.edit(vim.fn.fnameescape(path))
+  return true
+end
+
+-- Open a project-relative wikilink target in the current window, creating it on
+-- confirmation when it doesn't exist yet (see open_or_create).
 local function open_target(target, root)
-  return open_path(root .. "/" .. target)
+  return open_or_create(root .. "/" .. target)
 end
 
 -- Open an external URL with the system handler (browser, mail client, ...).
@@ -335,36 +358,24 @@ function M.follow_in_preview(src)
   end
 end
 
-local function set_keymap(buf)
+-- Install the buffer-local smart `gd` (follow link, else LSP go-to). Called from
+-- config.options' single markdown FileType autocmd (the one entry point for the
+-- markdown family), not from a FileType autocmd here.
+function M.set_keymap(buf)
   vim.keymap.set("n", "gd", M.goto_definition, {
     buffer = buf,
     desc = "Goto wikilink / definition",
   })
 end
 
+-- Kept callable (init.lua calls it) and idempotent, but a no-op now: keymap
+-- registration moved to config.options' markdown FileType autocmd, so this no
+-- longer registers a duplicate FileType handler or backfills open buffers.
 function M.setup()
   if M._did_setup then
     return
   end
   M._did_setup = true
-
-  vim.api.nvim_create_autocmd("FileType", {
-    group = vim.api.nvim_create_augroup("wikilinks_setup", { clear = true }),
-    pattern = ft_util.markdown,
-    callback = function(args)
-      set_keymap(args.buf)
-    end,
-  })
-
-  -- Backfill any markdown buffers already open when setup() runs.
-  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(buf) then
-      local ft = vim.bo[buf].filetype
-      if ft_util.is_markdown(ft) then
-        set_keymap(buf)
-      end
-    end
-  end
 end
 
 return M

@@ -49,6 +49,16 @@ return {
       dotfiles = false, -- show dotfiles (toggle with H)
       git_ignored = true, -- hide gitignored, e.g. node_modules (toggle with I)
     },
+    -- Raise the git timeout well above the 400ms default: a slow submodule scan
+    -- can blow past it, and 5 such timeouts trip nvim-tree's kill-switch that
+    -- *permanently* disables git integration for the session — which would
+    -- silently break the git_ignored filter above and stop hiding
+    -- node_modules/target. Keep git.enable on (the smart decorator and the .git
+    -- watcher both depend on it; see config.nvim_tree_git).
+    git = { enable = true, timeout = 2000 },
+    -- The "Diagnostics" decorator listed in renderer.decorators below is inert
+    -- unless diagnostics integration is enabled here.
+    diagnostics = { enable = true },
   },
   config = function(_, opts)
     -- Swap the builtin Git decorator for the smart-picker-aligned one (same

@@ -11,6 +11,7 @@
   "marksman": "2026-02-08",
   "mdx-analyzer": "0.6.3",
   "prettier": "3.8.3",
+  "prettierd": "0.28.0",
   "pyright": "1.1.409",
   "ruff": "0.15.14",
   "rust-analyzer": "2026-04-13",

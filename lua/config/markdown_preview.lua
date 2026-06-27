@@ -34,7 +34,7 @@ local M = {}
 
 -- src bufnr -> {
 --   src, preview_win, preview_buf, src_win,
---   tmpfile, timer, job, gen, life_group, win_group, fm_lines
+--   tmpfile, timer, job, gen, life_group, win_group, fm_lines, last_src_line
 -- }
 --
 -- The preview belongs to its file as a group: a state persists for as long as
@@ -48,9 +48,8 @@ local M = {}
 -- is recreated on each show, torn down on each hide. See show/hide.
 local states = {}
 local notified = false
-local ft_util = require("util.ft")
 
-local notify_missing, set_keymap, schedule_refresh, refresh, sync_scroll
+local notify_missing, schedule_refresh, refresh, sync_scroll
 local setup_win_autocmds, ensure_lifecycle, ensure_state, show, hide
 
 local DEBOUNCE_MS = 300
@@ -168,6 +167,10 @@ sync_scroll = function(state)
   local first = (state.fm_lines or 0) + 1
   local src_total = vim.api.nvim_buf_line_count(state.src)
   local src_line = vim.api.nvim_win_get_cursor(src_win)[1]
+  -- Record the line we synced to so the CursorMoved handler can skip purely
+  -- horizontal moves (same line). on_exit calls sync_scroll directly, bypassing
+  -- that guard, so a preview-length change still re-syncs.
+  state.last_src_line = src_line
   local denom = src_total - first
   local pct = denom > 0 and (src_line - first) / denom or 0
   pct = math.max(0, math.min(1, pct))
@@ -313,6 +316,13 @@ setup_win_autocmds = function(state)
     group = grp,
     buffer = state.src,
     callback = function()
+      -- sync_scroll maps the source *line* to a preview %, so a horizontal move
+      -- that leaves the line unchanged would recompute the identical position.
+      -- Early-return on it; the full sync runs only when the line actually moves.
+      local src_win = vim.fn.bufwinid(state.src)
+      if src_win ~= -1 and vim.api.nvim_win_get_cursor(src_win)[1] == state.last_src_line then
+        return
+      end
       sync_scroll(state)
     end,
   })
@@ -517,36 +527,24 @@ function M.toggle()
   end
 end
 
-set_keymap = function(buf)
+-- Install the buffer-local preview toggle. Called from config.options' single
+-- markdown FileType autocmd (the one entry point for the markdown family), not
+-- from a FileType autocmd here.
+function M.set_keymap(buf)
   vim.keymap.set("n", "<leader>mp", M.toggle, {
     buffer = buf,
     desc = "Toggle markdown preview",
   })
 end
 
+-- Kept callable (init.lua calls it) and idempotent, but a no-op now: keymap
+-- registration moved to config.options' markdown FileType autocmd, so this no
+-- longer registers a duplicate FileType handler or backfills open buffers.
 function M.setup()
   if M._did_setup then
     return
   end
   M._did_setup = true
-
-  vim.api.nvim_create_autocmd("FileType", {
-    group = vim.api.nvim_create_augroup("markdown_preview_setup", { clear = true }),
-    pattern = ft_util.markdown,
-    callback = function(args)
-      set_keymap(args.buf)
-    end,
-  })
-
-  -- Backfill any markdown buffers already open when setup() runs.
-  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(buf) then
-      local ft = vim.bo[buf].filetype
-      if ft_util.is_markdown(ft) then
-        set_keymap(buf)
-      end
-    end
-  end
 end
 
 return M

@@ -47,8 +47,25 @@ return {
       end,
     })
 
+    -- The python formatter choice (black vs ruff_format) is memoized per dir in
+    -- formatters.lua. Saving a pyproject.toml is the one in-session event that
+    -- can flip a [tool.black] decision, so drop the cache on that write and the
+    -- next python save re-reads the freshly-edited config.
+    vim.api.nvim_create_autocmd("BufWritePost", {
+      group = vim.api.nvim_create_augroup("conform_pyproject_cache", { clear = true }),
+      pattern = "pyproject.toml",
+      callback = function()
+        require("config.formatters")._clear_python_cache()
+      end,
+    })
+
+    -- On-demand format. Unlike on-save (capped at 1000ms and skipped entirely
+    -- on large files), <leader>F is an explicit ask, so give it a generous
+    -- 10s budget — a multi-MB file genuinely takes a few seconds to format and
+    -- the default 1s cap would silently no-op on exactly the files we skip on
+    -- save and expect <leader>F to handle.
     vim.keymap.set({ "n", "x" }, "<leader>F", function()
-      require("conform").format({ async = false, lsp_format = "fallback" })
+      require("conform").format({ async = false, timeout_ms = 10000, lsp_format = "fallback" })
     end, { desc = "Format buffer / selection" })
   end,
 }

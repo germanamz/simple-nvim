@@ -38,6 +38,7 @@ local git_status_codes = require("config.git_status_codes")
 local Overlay = require("util.overlay")
 local path_util = require("util.path")
 local palette = require("config.palette")
+local fs = require("util.fs")
 
 -- ===================== helpers =====================
 
@@ -92,7 +93,7 @@ local function parse_worktree_status(root, codes, counts)
   apply_worktree_lines(lines, codes, counts)
 end
 
--- Apply `git diff --name-status base..HEAD` lines to base-only 'b<letter>'
+-- Apply `git diff --name-status base...HEAD` lines to base-only 'b<letter>'
 -- codes (only for paths not already changed in the worktree) and base counts.
 -- Pure (no shellout) so the sync and async fetch paths share it.
 local function apply_committed_lines(lines, codes, counts)
@@ -124,7 +125,11 @@ local function apply_committed_lines(lines, codes, counts)
 end
 
 local function parse_committed_history(root, base, codes, counts)
-  local lines, ok = git.run({ "diff", "--name-status", base .. "..HEAD" }, { cwd = root })
+  -- Three-dot (base...HEAD) diffs against the merge-base of base and HEAD, not
+  -- base's current tip: it shows what changed on my branch since it forked off
+  -- base — the "changed since base" intent — and matches the `git log base..HEAD`
+  -- preview semantics. (base advancing upstream doesn't masquerade as my work.)
+  local lines, ok = git.run({ "diff", "--name-status", base .. "...HEAD" }, { cwd = root })
   if not ok then
     return
   end
@@ -181,13 +186,24 @@ local function git_changes_async(root, base, cb)
     function(wt)
       local wt_lines = wt.code == 0 and split_lines(wt.stdout) or {}
       vim.schedule(function()
+        -- `git status` and `git diff` run SERIALLY (diff spawned only after the
+        -- status process has exited), never concurrently. Both commands
+        -- opportunistically take `.git/index.lock` to refresh the index stat
+        -- cache, so two overlapping git processes in the same repo intermittently
+        -- collide on the lock: one exits nonzero and its output is dropped — a
+        -- lost `git diff` means the b<letter> base labels silently vanish. Serial
+        -- is marginally slower on a huge tree but correct; a "parallel join"
+        -- traded that correctness for an unproven latency win.
+        --
         -- No synchronous `git rev-parse --verify` guard here: that would block
         -- the main loop on every async refresh. An invalid base just makes the
-        -- diff below exit nonzero (df_lines = {}), which degrades to no
-        -- committed history — the same outcome the guard produced.
+        -- diff below exit nonzero (df_lines = {}), which degrades to no committed
+        -- history — the same outcome the guard produced.
         if base then
           vim.system(
-            { "git", "-C", root, "diff", "--name-status", base .. "..HEAD" },
+            -- Three-dot base...HEAD: diff against the merge-base of base and HEAD
+            -- (see parse_committed_history) — "changed on my branch since base".
+            { "git", "-C", root, "diff", "--name-status", base .. "...HEAD" },
             { text = true },
             function(df)
               local df_lines = df.code == 0 and split_lines(df.stdout) or {}
@@ -204,41 +220,12 @@ local function git_changes_async(root, base, cb)
   )
 end
 
--- The command that lists every file from the cwd. rg/fd honor each (sub)repo's
--- .gitignore; the `find` fallback honors nothing, so it gets explicit excludes
--- for the heavy dirs a polyglot superproject is full of — a bare find would
--- otherwise walk every node_modules / target / .venv across every submodule.
+-- The command that lists every file from the cwd, shared with find_files via
+-- util.fs (which carries the rg/fd/find dialects and the heavy-dir excludes the
+-- find fallback needs for a polyglot superproject). list_all hardcodes --hidden
+-- because it lists dotfiles itself rather than leaning on telescope to append it.
 local function list_all_cmd()
-  if vim.fn.executable("rg") == 1 then
-    return { "rg", "--files", "--hidden", "--glob", "!.git" }
-  elseif vim.fn.executable("fd") == 1 then
-    return { "fd", "--type", "f", "--hidden", "--exclude", ".git" }
-  else
-    return {
-      "find",
-      ".",
-      "-type",
-      "f",
-      "-not",
-      "-path",
-      "*/.git/*",
-      "-not",
-      "-path",
-      "*/node_modules/*",
-      "-not",
-      "-path",
-      "*/.venv/*",
-      "-not",
-      "-path",
-      "*/target/*",
-      "-not",
-      "-path",
-      "*/build/*",
-      "-not",
-      "-path",
-      "*/dist/*",
-    }
-  end
+  return fs.list_files_cmd({ hidden = true })
 end
 
 function M._list_all()
@@ -264,7 +251,15 @@ function M._merge_results(codes, all_files)
       table.insert(results, f)
     end
   end
+  -- Emit the changed-files cluster in sorted order so this picker matches its
+  -- sibling smart_files_changed (which table.sorts): pairs() order is otherwise
+  -- nondeterministic, which would shuffle the leading rows between the two.
+  local changed = {}
   for f in pairs(codes) do
+    table.insert(changed, f)
+  end
+  table.sort(changed)
+  for _, f in ipairs(changed) do
     add(f)
   end
   for _, f in ipairs(all_files) do
@@ -501,8 +496,10 @@ local function render_legend_lines(groups, width)
   return lines, ranges_by_line
 end
 
--- Create the floating legend buffer + window anchored to the bottom of the
--- telescope results window. No-op if the legend would be taller than results.
+-- Create the floating legend buffer + window anchored just BELOW the telescope
+-- results window (so it never occludes result rows), falling back to overlaying
+-- the window's bottom rows only when there's no room beneath it. No-op if the
+-- legend would be taller than results.
 local function create_legend_window(results_win, lines, ranges_by_line)
   local pos = vim.api.nvim_win_get_position(results_win)
   local width = vim.api.nvim_win_get_width(results_win)
@@ -520,9 +517,18 @@ local function create_legend_window(results_win, lines, ranges_by_line)
     end
   end
 
+  -- Prefer the row directly under the results window; only overlay the bottom
+  -- rows (the old anchor) when sitting below would run into the command line.
+  -- vim.o.lines counts the cmdline rows, so reserve cmdheight of them.
+  local below_row = pos[1] + height
+  local row = below_row
+  if below_row + #lines > vim.o.lines - vim.o.cmdheight then
+    row = pos[1] + height - #lines
+  end
+
   legend:mount(buf, {
     relative = "editor",
-    row = pos[1] + height - #lines,
+    row = row,
     col = pos[2],
     width = width,
     height = #lines,

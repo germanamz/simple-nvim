@@ -141,6 +141,23 @@ local function advance_heading(path, counters, hl)
 end
 M._advance_heading = advance_heading
 
+-- §heading anchors get their own brighter highlight so the section structure
+-- stands out from the dim per-block ¶ counts (which stay linked to Comment).
+-- Linked to Function with default=true so a colorscheme can override it, and
+-- re-applied on ColorScheme like block_guides since a :colorscheme clears custom
+-- links. Module-level (this file is required once, lazily, on the first markdown
+-- buffer), so the apply + autocmd register exactly once.
+local function ensure_section_highlight()
+  vim.api.nvim_set_hl(0, "MarkdownSectionAnchor", { link = "Function", default = true })
+end
+ensure_section_highlight()
+-- Named group with clear=true so re-requiring this module (a test, :Lazy reload)
+-- replaces the handler instead of stacking a second copy.
+vim.api.nvim_create_autocmd("ColorScheme", {
+  group = vim.api.nvim_create_augroup("markdown_section_anchor", { clear = true }),
+  callback = ensure_section_highlight,
+})
+
 -- Build the padded statuscolumn marker for each numbered line. Headings render
 -- as "§<path>", blocks as "§<path>¶<n>" (or just "¶<n>" before any heading).
 -- Returns the per-line markers table and the blank pad for non-numbered lines,
@@ -164,7 +181,9 @@ local function render_markers(blocks, headings)
   local markers = {}
   for lnum, s in pairs(raw) do
     local pad = string.rep(" ", total - vim.api.nvim_strwidth(s))
-    markers[lnum] = "%#Comment#" .. s .. pad .. "%*"
+    -- Heading lines get the brighter anchor group; block ¶ counts stay dim.
+    local hl = headings[lnum] and "MarkdownSectionAnchor" or "Comment"
+    markers[lnum] = "%#" .. hl .. "#" .. s .. pad .. "%*"
   end
   return markers, string.rep(" ", total)
 end
@@ -234,10 +253,23 @@ local function compute(bufnr)
         in_block = false
         prev_was_text = false
       elseif is_setext_underline(line) and prev_was_text then
+        -- A setext underline retroactively turns the previous text line into a
+        -- heading, so undo the ¶ we counted for that title line. last_paragraph_
+        -- line == i - 1 here: prev_was_text is set only in the plain-text branch,
+        -- which also recorded the title as that line's block.
         if last_paragraph_line and blocks[last_paragraph_line] then
           blocks[last_paragraph_line] = nil
           paragraph = paragraph - 1
           last_paragraph_line = nil
+        end
+        -- "Title" + "---" is a setext H2: number it like an ATX H2 (advance §,
+        -- reset ¶) and tag the title line (i - 1) as the heading. "Title" + "==="
+        -- is H1, which we ignore (the title lives in frontmatter) -- delete-only,
+        -- matching the ATX H1 path above.
+        if line:match("^%s*%-+%s*$") then
+          advance_heading(path, counters, 2)
+          paragraph = 0
+          headings[i - 1] = { path = copy_path(path) }
         end
         in_block = false
         prev_was_text = false

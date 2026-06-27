@@ -1,6 +1,8 @@
--- Count LSP references to the symbol under the cursor within the current buffer
--- and expose the result as a statusline segment (`_G.lsp_refs_status`).
--- Also highlights the in-buffer occurrences via extmarks in a dedicated namespace.
+-- Highlight other occurrences of the symbol under the cursor in the current
+-- buffer and expose their count as a statusline segment (`_G.lsp_refs_status`).
+-- Driven by textDocument/documentHighlight — the purpose-built single-document
+-- primitive, so this is a cheap in-document query, not a whole-project scan.
+-- The occurrences are painted via extmarks in a dedicated namespace.
 
 local M = {}
 
@@ -9,8 +11,8 @@ local ns = vim.api.nvim_create_namespace("lsp_refs_status")
 -- state[bufnr] = { row, col, count } — last resolved result for that buffer.
 local state = {}
 
--- inflight[bufnr] = true while a references request is pending, so a steady
--- idle on one identifier doesn't re-issue the (whole-project) scan every tick.
+-- inflight[bufnr] = true while a documentHighlight request is pending, so a
+-- steady idle on one identifier doesn't re-issue the request every tick.
 local inflight = {}
 
 -- Below this many in-buffer occurrences there's nothing useful to show: a lone
@@ -35,9 +37,9 @@ local function clear_marks(bufnr)
   end
 end
 
-local function has_refs_client(bufnr)
+local function has_highlight_client(bufnr)
   for _, c in ipairs(vim.lsp.get_clients({ bufnr = bufnr })) do
-    if c.server_capabilities and c.server_capabilities.referencesProvider then
+    if c.server_capabilities and c.server_capabilities.documentHighlightProvider then
       return c
     end
   end
@@ -49,19 +51,19 @@ local function cursor_rc()
   return pos[1] - 1, pos[2]
 end
 
--- Keep only reference locations in `buf_uri`, deduped by start position.
--- Returns the in-buffer ranges and their count.
-local function dedup_refs(result, buf_uri)
+-- documentHighlight returns DocumentHighlight[] = { range, kind } scoped to this
+-- document already (no uri), so there's nothing to filter by buffer — just dedup
+-- by start position (a server can return overlapping read/write highlights at
+-- the same spot). Returns the ranges and their count.
+local function dedup_refs(result)
   local seen, ranges, count = {}, {}, 0
-  for _, loc in ipairs(result) do
-    if loc.uri == buf_uri then
-      local s = loc.range.start
-      local key = s.line .. ":" .. s.character
-      if not seen[key] then
-        seen[key] = true
-        count = count + 1
-        ranges[#ranges + 1] = loc.range
-      end
+  for _, hl in ipairs(result) do
+    local s = hl.range.start
+    local key = s.line .. ":" .. s.character
+    if not seen[key] then
+      seen[key] = true
+      count = count + 1
+      ranges[#ranges + 1] = hl.range
     end
   end
   return ranges, count
@@ -88,16 +90,16 @@ local function request(bufnr)
     return
   end
 
-  local client = has_refs_client(bufnr)
+  local client = has_highlight_client(bufnr)
   if not client then
     state[bufnr] = nil
     return
   end
 
-  -- Skip the (whole-project) references request when <cword> is empty — i.e. the
-  -- cursor isn't on a keyword character at all (whitespace/punctuation). Note a
-  -- keyword or a word inside a comment still has a non-empty <cword>, so those
-  -- do issue a request; per-position caching bounds it to one per distinct spot.
+  -- Skip the documentHighlight request when <cword> is empty — i.e. the cursor
+  -- isn't on a keyword character at all (whitespace/punctuation). A keyword or a
+  -- word inside a comment still has a non-empty <cword>, so those do issue a
+  -- request; per-position caching bounds it to one per distinct spot.
   if vim.fn.expand("<cword>") == "" then
     state[bufnr] = nil
     return
@@ -105,10 +107,11 @@ local function request(bufnr)
 
   local row, col = cursor_rc()
 
-  -- Dedup: skip when we already have a result for this exact position, or a
-  -- request for this buffer is still in flight. Without this, idling on one
-  -- identifier re-issues a whole-project references scan every `updatetime`
-  -- (250ms) — costly against a large superproject server root.
+  -- Skip when we already have a result for this exact position, or a request for
+  -- this buffer is still in flight. documentHighlight is cheap (in-document, no
+  -- project walk), but re-asking the server for the same position every
+  -- `updatetime` (250ms) buys nothing — the per-position cache doubles as a
+  -- debounce so a steady idle on one identifier issues at most one request.
   local prev = state[bufnr]
   if prev and prev.row == row and prev.col == col then
     return
@@ -117,16 +120,17 @@ local function request(bufnr)
     return
   end
 
+  -- documentHighlight takes no context (unlike references), just a position.
   local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
-  params.context = { includeDeclaration = true }
-
-  local buf_uri = vim.uri_from_bufnr(bufnr)
 
   inflight[bufnr] = true
+  -- client:request scopes the request to this client handle (the one server we
+  -- already confirmed advertises documentHighlightProvider); pass it positionally
+  -- through pcall so a throwing client doesn't leave the inflight guard stuck.
   local ok = pcall(
-    vim.lsp.buf_request,
-    bufnr,
-    "textDocument/references",
+    client.request,
+    client,
+    "textDocument/documentHighlight",
     params,
     function(err, result)
       inflight[bufnr] = nil
@@ -146,7 +150,7 @@ local function request(bufnr)
         return
       end
 
-      local ranges, count = dedup_refs(result, buf_uri)
+      local ranges, count = dedup_refs(result)
 
       clear_marks(bufnr)
       if count >= MIN_HIGHLIGHTED_REFS then
@@ -155,7 +159,8 @@ local function request(bufnr)
 
       state[bufnr] = { row = row, col = col, count = count }
       vim.cmd("redrawstatus")
-    end
+    end,
+    bufnr
   )
 
   if not ok then
@@ -270,8 +275,9 @@ function M.setup()
     callback = ensure_highlight,
   })
 
-  -- CursorHold only (not CursorHoldI): an idle pause while typing shouldn't
-  -- fire a whole-project references scan.
+  -- CursorHold only (not CursorHoldI): documentHighlight is cheap, but there's
+  -- no value in re-highlighting mid-keystroke while the identifier is still being
+  -- typed — wait for the cursor to settle on an idle pause.
   vim.api.nvim_create_autocmd("CursorHold", {
     group = group,
     callback = function(args)

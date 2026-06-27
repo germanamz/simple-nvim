@@ -172,7 +172,7 @@ describe("config.markdown_paragraphs", function()
     }, data.blocks)
   end)
 
-  it("skips Setext headings (text + === / ---)", function()
+  it("ignores a setext H1 (===) but numbers a setext H2 (---) like an ATX H2", function()
     local data = compute_for({
       "Title",
       "=====",
@@ -184,7 +184,27 @@ describe("config.markdown_paragraphs", function()
       "",
       "Paragraph two",
     })
-    assert.are.same({ [4] = b({}, 1), [9] = b({}, 2) }, data.blocks)
+    -- "Title"/"=====" is H1 -> ignored (delete-only). "Subtitle"/"--------" is a
+    -- setext H2 -> opens §1 (its title line is the heading), so "Paragraph two"
+    -- lands in §1, not as a bare ¶3.
+    assert.are.same({ [4] = b({}, 1), [9] = b({ 1 }, 1) }, data.blocks)
+    assert.are.same({ [6] = h({ 1 }) }, data.headings)
+  end)
+
+  it("advances § across successive setext H2 headings", function()
+    local data = compute_for({
+      "Alpha",
+      "-----",
+      "",
+      "Body in section one",
+      "",
+      "Beta",
+      "----",
+      "",
+      "Body in section two",
+    })
+    assert.are.same({ [4] = b({ 1 }, 1), [9] = b({ 2 }, 1) }, data.blocks)
+    assert.are.same({ [1] = h({ 1 }), [6] = h({ 2 }) }, data.headings)
   end)
 
   it("counts fenced code blocks as one ¶", function()
@@ -594,7 +614,9 @@ describe("config.markdown_paragraphs", function()
         { [2] = { path = { 1 }, paragraph = 3 } },
         { [1] = { path = { 1 } } }
       )
-      assert.are.equal("%#Comment#§1    %*", markers[1])
+      -- Heading lines carry the brighter MarkdownSectionAnchor group; block ¶
+      -- counts stay dim (Comment).
+      assert.are.equal("%#MarkdownSectionAnchor#§1    %*", markers[1])
       assert.are.equal("%#Comment#§1¶3  %*", markers[2])
       assert.are.equal("      ", empty)
     end)

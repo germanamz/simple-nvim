@@ -31,6 +31,7 @@ describe("config.git_status_codes", function()
       assert.are.equal("SmartFilesModified", git_status_codes.hl_for_letter("M"))
       assert.are.equal("SmartFilesModified", git_status_codes.hl_for_letter("T"))
       assert.are.equal("SmartFilesUntracked", git_status_codes.hl_for_letter("?"))
+      assert.are.equal("SmartFilesConflict", git_status_codes.hl_for_letter("U"))
     end)
 
     it("returns nil for an unknown letter", function()
@@ -53,6 +54,8 @@ describe("config.git_status_codes", function()
     it("returns nil for a non-status letter", function()
       assert.is_nil(git_status_codes.category(" "))
       assert.is_nil(git_status_codes.category("X"))
+      -- Merge conflicts get a highlight but no count bucket.
+      assert.is_nil(git_status_codes.category("U"))
     end)
   end)
 
@@ -94,6 +97,15 @@ describe("config.git_status_codes", function()
       assert.are.same({
         { { 0, 1 }, "SmartFilesBase" },
         { { 1, 2 }, "SmartFilesDeleted" },
+      }, hls)
+    end)
+
+    it("colors a merge-conflict code with the conflict highlight", function()
+      local t, hls = git_status_codes.code_to_display("UU")
+      assert.are.equal("U*", t)
+      assert.are.same({
+        { { 0, 1 }, "SmartFilesConflict" },
+        { { 1, 2 }, "SmartFilesUnstaged" },
       }, hls)
     end)
   end)

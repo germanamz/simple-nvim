@@ -9,7 +9,20 @@ return {
     local function apply_base(bufnr)
       local root = git.root(path.buf_start_dir(bufnr))
       local ref = root and review_base.get(root) or nil
-      require("gitsigns").change_base(ref, true)
+      -- gitsigns has only ONE global base (config.base), shared by every attached
+      -- buffer across every repo/submodule. change_base re-diffs ALL attached
+      -- buffers against the ref, so calling it on each attach clobbered things:
+      --   * change_base(nil, true) wiped the global base, re-diffing everything
+      --     against the index even when this buffer has no review base.
+      --   * a buffer in one submodule forced every other repo's buffers to
+      --     re-diff against a ref that may not exist there.
+      -- gitsigns already inherits config.base on attach, so a nil ref needs no
+      -- action; only push a change when this root's base genuinely differs from
+      -- the current global base. (Cross-repo base correctness is inherently
+      -- limited by that single global base — we can't hold a per-repo base here.)
+      if ref and ref ~= require("gitsigns.config").config.base then
+        require("gitsigns").change_base(ref, true)
+      end
     end
 
     return {
@@ -84,6 +97,7 @@ return {
     local git = require("util.git")
     local inline_diff = require("util.inline_diff")
     local path = require("util.path")
+    local palette = require("config.palette")
     -- Defer the per-root validation (one blocking `git rev-parse --verify` per
     -- stored review base) off the plugin-load critical path; it only prunes
     -- stale entries the picker would offer, and nothing below needs it now.
@@ -92,30 +106,34 @@ return {
     require("gitsigns").setup(opts)
 
     local function paint()
+      -- Saturated tints live in config.palette (git.*) so the literal hex has a
+      -- single home; the dark/light selection + the deliberate colorscheme
+      -- override (no default=true) stay here.
+      local g = palette.git
       -- Nr (colored line numbers) carry their own fg, so one saturated palette
       -- reads on both backgrounds.
-      vim.api.nvim_set_hl(0, "GitSignsAddNr", { fg = "#ffffff", bg = "#4ea862" })
-      vim.api.nvim_set_hl(0, "GitSignsChangeNr", { fg = "#ffffff", bg = "#7a5d1a" })
-      vim.api.nvim_set_hl(0, "GitSignsDeleteNr", { fg = "#ffffff", bg = "#c85050" })
+      vim.api.nvim_set_hl(0, "GitSignsAddNr", { fg = "#ffffff", bg = g.add_nr })
+      vim.api.nvim_set_hl(0, "GitSignsChangeNr", { fg = "#ffffff", bg = g.change_nr })
+      vim.api.nvim_set_hl(0, "GitSignsDeleteNr", { fg = "#ffffff", bg = g.delete_nr })
 
       -- Line backgrounds (Ln) set only bg and inherit the buffer's own fg
       -- (treesitter/syntax). Light pastels assume a light theme — on the dark
       -- default colorscheme they put light fg on a light tint, near-illegible.
       -- Pick the tint from the active background, re-applied on the events below.
       local dark = vim.o.background == "dark"
-      local add_ln = dark and "#1e3a28" or "#b8e0c4"
-      local change_ln = dark and "#3a3320" or "#ead090"
-      local add_inline = dark and "#2f6f47" or "#8fd4a3"
+      local add_ln = dark and g.add_ln_dark or g.add_ln_light
+      local change_ln = dark and g.change_ln_dark or g.change_ln_light
+      local add_inline = dark and g.add_inline_dark or g.add_inline_light
 
       vim.api.nvim_set_hl(0, "GitSignsAddLn", { bg = add_ln })
       vim.api.nvim_set_hl(0, "GitSignsChangeLn", { bg = change_ln })
-      vim.api.nvim_set_hl(0, "GitSignsDeleteLn", { sp = "#c85050", underdashed = true })
+      vim.api.nvim_set_hl(0, "GitSignsDeleteLn", { sp = g.delete, underdashed = true })
 
       vim.api.nvim_set_hl(0, "GitSignsAddLnInline", { bg = add_inline })
       vim.api.nvim_set_hl(0, "GitSignsChangeLnInline", { bg = add_inline })
       vim.api.nvim_set_hl(0, "GitSignsDeleteLnInline", {})
 
-      vim.api.nvim_set_hl(0, "GitSignsDelPrev", { sp = "#c85050", underdashed = true })
+      vim.api.nvim_set_hl(0, "GitSignsDelPrev", { sp = g.delete, underdashed = true })
     end
     paint()
     -- ColorScheme resets highlight groups; OptionSet catches a bare
@@ -447,6 +465,17 @@ return {
           return
         end
         vim.defer_fn(function()
+          if not vim.api.nvim_buf_is_valid(args.buf) then
+            return
+          end
+          -- Already-attached buffers are owned by GitSignsUpdate, which already
+          -- painted them; re-running mark_hunks here would redundantly fetch
+          -- gs.get_hunks + repaint. This path is NEEDED only for buffers gitsigns
+          -- never attaches to (untracked / new-vs-base), flagged by the absence
+          -- of gitsigns_status — the same attached signal file_new_vs_base uses.
+          if vim.b[args.buf].gitsigns_status ~= nil then
+            return
+          end
           mark_hunks(args.buf)
         end, 200)
       end,

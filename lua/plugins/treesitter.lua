@@ -21,8 +21,13 @@ return {
       require("config.ts_pinned").apply(revisions)
       require("nvim-treesitter").install(vim.tbl_keys(revisions))
 
-      -- Global filetype → parser registration. Downstream consumers resolve
-      -- parser via this registry, not via our ad-hoc `ft_to_lang` table below.
+      -- Global filetype → parser registration: the single source of truth for
+      -- which parser a filetype resolves to. The FileType handler below starts
+      -- TS with NO explicit lang and lets core resolve through this registry, so
+      -- there is no second ad-hoc mapping table to drift out of sync. Core
+      -- already self-resolves an unregistered ft to a same-named parser and
+      -- knows help→vimdoc, so we only register the fts whose parser differs AND
+      -- that core doesn't already know.
       -- mdx has no dedicated parser, so reuse markdown.
       vim.treesitter.language.register("markdown", "mdx")
       -- jsonc has no dedicated parser; the json parser handles it.
@@ -31,20 +36,14 @@ return {
       -- parser so tags highlight and nvim-ts-autotag can walk the tree. Go
       -- `{{ ... }}` actions fall through as plain text — fine for editing tags.
       vim.treesitter.language.register("html", "gohtmltmpl")
-
-      -- filetype → parser language mapping (only where they differ)
-      local ft_to_lang = {
-        typescriptreact = "tsx",
-        javascriptreact = "javascript",
-        sh = "bash",
-        mdx = "markdown",
-        jsonc = "json",
-        gohtmltmpl = "html",
-        -- ft "help" is parsed by the vimdoc parser; without this, start() is
-        -- called with the nonexistent "help" lang and the fold/indent wiring is
-        -- silently skipped (core still TS-highlights help via its own ftplugin).
-        help = "vimdoc",
-      }
+      -- React fts and `sh` aren't core-registered (their parsers are tsx /
+      -- javascript / bash); without these, start() would resolve a nonexistent
+      -- same-named parser and the fold/indent wiring would be silently skipped.
+      vim.treesitter.language.register("tsx", "typescriptreact")
+      vim.treesitter.language.register("javascript", "javascriptreact")
+      vim.treesitter.language.register("bash", "sh")
+      -- The parser is named git_config; the filetype Neovim sets is gitconfig.
+      vim.treesitter.language.register("git_config", "gitconfig")
 
       local ft_pattern = {
         "markdown",
@@ -73,6 +72,7 @@ return {
         "html",
         "gohtmltmpl",
         "css",
+        "gitconfig",
       }
 
       vim.api.nvim_create_autocmd("FileType", {
@@ -89,9 +89,16 @@ return {
           if require("util.largefile").is_large(args.buf) then
             return
           end
-          local ft = vim.bo[args.buf].filetype
-          local lang = ft_to_lang[ft] or ft
-          local ok = pcall(vim.treesitter.start, args.buf, lang)
+          -- start() with no explicit lang lets core resolve the parser through
+          -- the registry above. Skip the redundant start for fts $VIMRUNTIME
+          -- ftplugins already highlight (lua/markdown/help): if a highlighter is
+          -- already active, treat TS as started and just layer our fold/indent
+          -- wiring on top instead of re-doing core's bookkeeping. Relies on the
+          -- semi-internal highlighter.active field and on this autocmd running
+          -- after core's filetypeplugin autocmd — true under default startup
+          -- ordering. Folds still get wired everywhere.
+          local ok = vim.treesitter.highlighter.active[args.buf] ~= nil
+            or pcall(vim.treesitter.start, args.buf)
           if ok then
             vim.wo.foldmethod = "expr"
             vim.wo.foldexpr = "v:lua.vim.treesitter.foldexpr()"
@@ -104,7 +111,10 @@ return {
       vim.opt.foldenable = true
       vim.opt.foldlevel = 99
       vim.opt.foldlevelstart = 99
-      vim.opt.foldcolumn = "1"
+      -- auto:1 instead of a fixed "1" so fold-less buffers (non-TS, large-file
+      -- skipped, plain text) don't reserve a permanent blank gutter; TS buffers
+      -- still get a 1-col gutter showing fold structure.
+      vim.opt.foldcolumn = "auto:1"
     end,
   },
 }

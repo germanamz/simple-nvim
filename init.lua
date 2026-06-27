@@ -50,20 +50,24 @@ end, { desc = "Open keybindings cheatsheet" })
 -- hidden); `:b#` or <C-^> jumps back to the previous buffer.
 vim.keymap.set("n", "<leader>E", "<cmd>Explore<cr>", { desc = "Open file tree (netrw)" })
 
+-- Slurp a whole file as a string (or nil if it can't be opened). Shared by the
+-- two plain-file readers below — plugin HEADs and lazy-lock.json — so the
+-- open/read/close dance lives in one place.
+local function read_file(p)
+  local f = io.open(p, "r")
+  if not f then
+    return nil
+  end
+  local s = f:read("*a")
+  f:close()
+  return s
+end
+
 -- Resolve the commit a plugin clone is sitting on, via plain file reads (no
 -- process spawns): detached HEAD holds the sha directly; a `ref:` HEAD is
 -- resolved through the loose ref file, falling back to packed-refs.
 local function installed_commit(dir)
-  local function read(p)
-    local f = io.open(p, "r")
-    if not f then
-      return nil
-    end
-    local s = f:read("*a")
-    f:close()
-    return s
-  end
-  local head = read(dir .. "/.git/HEAD")
+  local head = read_file(dir .. "/.git/HEAD")
   if not head then
     return nil
   end
@@ -72,11 +76,11 @@ local function installed_commit(dir)
   if not ref then
     return head
   end
-  local loose = read(dir .. "/.git/" .. ref)
+  local loose = read_file(dir .. "/.git/" .. ref)
   if loose then
     return vim.trim(loose)
   end
-  for line in (read(dir .. "/.git/packed-refs") or ""):gmatch("[^\n]+") do
+  for line in (read_file(dir .. "/.git/packed-refs") or ""):gmatch("[^\n]+") do
     local sha, name = line:match("^(%x+) (.+)$")
     if name == ref then
       return sha
@@ -90,15 +94,7 @@ end
 -- their pins (or never install at all). Compare installed commits against
 -- lazy-lock.json after startup and warn so drift is never silent.
 local function warn_on_lock_drift()
-  local raw = (function()
-    local f = io.open(vim.fn.stdpath("config") .. "/lazy-lock.json", "r")
-    if not f then
-      return nil
-    end
-    local s = f:read("*a")
-    f:close()
-    return s
-  end)()
+  local raw = read_file(vim.fn.stdpath("config") .. "/lazy-lock.json")
   if not raw then
     return
   end

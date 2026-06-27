@@ -60,7 +60,12 @@ function M.decorator()
     self.highlight_range = "none"
     self.icon_placement = "before"
 
-    self.cwd = vim.fn.getcwd()
+    -- Store cwd already in canonical :p form (absolute, trailing slash) — the
+    -- exact shape path_util.relative normalizes its base to. relative() still
+    -- re-applies :p per node (idempotent here), so this only spares its
+    -- trailing-slash fixup; the larger win would need path.lua to skip
+    -- re-normalizing, and that module is owned elsewhere.
+    self.cwd = vim.fn.fnamemodify(vim.fn.getcwd(), ":p")
     self.codes = require("config.telescope_smart")._refresh(self.cwd)
     self.dirs = M._dir_markers(self.codes)
   end

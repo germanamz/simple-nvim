@@ -33,7 +33,8 @@ Leader = `<Space>` · Local leader = `\`
 19. [Formatting](#19-formatting)
 20. [Treesitter context](#20-treesitter-context)
 21. [Command-line tricks](#21-command-line-tricks)
-22. [Known conflicts](#22-known-conflicts)
+22. [Sessions](#22-sessions)
+23. [Known conflicts](#23-known-conflicts)
 
 ---
 
@@ -345,6 +346,21 @@ uppercase = case-sensitive. `incsearch` + `hlsearch` are on.
 In insert mode: `<C-w>` deletes last word, `<C-u>` deletes to start of line,
 `<C-h>` is backspace, `<C-o>` runs one normal-mode command then returns.
 
+### Surround (mini.surround)
+
+`mini.surround` adds / changes / removes the brackets, quotes, or tags *around*
+a text object. All maps share the `gs` prefix so they don't shadow the built-in
+`s` (substitute) or any single-key motion.
+
+| Keys          | Action                                            |
+| ------------- | ------------------------------------------------- |
+| `gsa` (n / x) | add surround around a motion / selection          |
+| `gsd`         | delete the surrounding pair                       |
+| `gsr`         | replace the surrounding pair                      |
+| `gsf` / `gsF` | find next / previous surround                     |
+| `gsh`         | highlight the surrounding pair                    |
+| `gsn`         | update the `n_lines` search range                 |
+
 ---
 
 ## 10. Visual mode & text objects
@@ -447,8 +463,11 @@ All under `<Space>f` (group: "find").
 | `<Space>fs`    | Grep word under cursor (from project/git root)  |
 | `<Space>fb`    | Buffers                                         |
 | `<Space>fr`    | Recent files (`oldfiles`)                       |
+| `<Space>fR`    | Resume last picker                              |
 | `<Space>fh`    | Help tags                                       |
 | `<Space>fd`    | Diagnostics across project                      |
+| `<Space>fo`    | Document symbols (LSP)                          |
+| `<Space>fS`    | Workspace symbols (LSP)                         |
 | `<Space>?`     | Keymaps                                         |
 | `<Space>fc`    | Commands                                        |
 | `<Space>f/`    | Fuzzy find inside current buffer                |
@@ -486,9 +505,13 @@ Buffer-local — these only exist in buffers with an attached LSP client.
 | `]r` / `[r`  | next / previous LSP **reference** in this buffer        |
 | `]d` / `[d`  | next / previous **diagnostic** (Nvim 0.11 default)      |
 | `<C-w>d`     | show diagnostic float (Nvim 0.11 default)               |
+| `<Space>uh`  | Toggle inlay hints (off; only when server supports them)|
 
 Statusline shows `⇄N` when the cursor is on a symbol with `N` references in
 the current buffer.
+
+Inlay hints are off by default; `<Space>uh` toggles them per buffer and is only
+mapped when the attached server advertises `textDocument/inlayHint`.
 
 ### Servers configured
 
@@ -515,6 +538,11 @@ html, cssls, marksman, mdx_analyzer. Each attaches only on its `filetypes`.
 | `<C-w>d`      | show diagnostic float at cursor          |
 | `<Space>fd`   | Telescope: all diagnostics              |
 | `:diagnostic` | core API; see also `vim.diagnostic.*`    |
+
+Gutter signs are themed nerd-font glyphs keyed by severity (error / warn / info
+/ hint), with the highest severity winning a shared line. Inline virtual text
+stays off on purpose — the full message surfaces in a float when the cursor
+rests on a diagnostic (after `updatetime`), keeping the UI quiet.
 
 ---
 
@@ -551,6 +579,17 @@ the smart files picker surfaces files changed since it.
 
 Stored per repo on disk; auto-applies on buffer attach.
 
+### Git pickers (Telescope)
+
+Telescope-backed git pickers (also under `<Space>g`):
+
+| Keys         | Action                                              |
+| ------------ | --------------------------------------------------- |
+| `<Space>gc`  | Git commits (repo log)                              |
+| `<Space>gC`  | Git commits for the current file                    |
+| `<Space>gt`  | Git status (changed files)                          |
+| `<Space>gv`  | Diff changed files vs the review base               |
+
 ---
 
 ## 18. Markdown / MDX
@@ -558,6 +597,10 @@ Stored per repo on disk; auto-applies on buffer attach.
 Active in `markdown` and `mdx` buffers. Prose is never auto-hard-wrapped
 (`formatoptions` has `t` removed), and long lines scroll horizontally rather than
 soft-wrapping. The gutter shows section / paragraph numbers (see below).
+
+Spellcheck is on by default in these buffers (`spelllang=en`, `spelloptions=camel`
+so CamelCase identifiers split into checkable words). Move between misspellings
+with `]s` / `[s`, and `z=` lists suggestions for the word under the cursor.
 
 | Keys         | Action                                                  |
 | ------------ | ------------------------------------------------------- |
@@ -658,7 +701,19 @@ Other helpful Ex bits:
 
 ---
 
-## 22. Known conflicts
+## 22. Sessions
+
+`persistence.nvim` auto-saves a session per working directory (window layout,
+open buffers, cwd). Nothing is restored automatically — pick a restore on demand.
+
+| Keys         | Action                          |
+| ------------ | ------------------------------- |
+| `<Space>ql`  | restore the session for the cwd |
+| `<Space>qL`  | restore the last saved session  |
+
+---
+
+## 23. Known conflicts
 
 ### `gd` — depends on filetype
 

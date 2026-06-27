@@ -18,7 +18,16 @@ local function state_path()
   return vim.fn.stdpath("data") .. "/nvim-review-base.json"
 end
 
-local function read_state()
+-- Decoded state, memoized. The disk read below does io.open+read+json.decode,
+-- which is hit on every gitsigns attach and statusline refresh through M.get;
+-- caching the decoded table keeps those hot paths in memory. Populated lazily on
+-- the first read, written through on every write_state(), and invalidated by the
+-- autocmds below. Module-local, so the test harness's package.loaded reset
+-- reloads this file with a fresh (empty) cache per test.
+local cache
+
+-- The actual disk read; read_state() wraps it with memoization.
+local function decode_state()
   local f = io.open(state_path(), "r")
   if not f then
     return {}
@@ -35,6 +44,24 @@ local function read_state()
   return {}
 end
 
+local function read_state()
+  if not cache then
+    cache = decode_state()
+  end
+  return cache
+end
+
+-- Shallow copy of the live state for mutators to edit a throwaway table: if
+-- write_state's atomic rename fails (it throws), the cache stays consistent with
+-- disk instead of holding the never-persisted edit.
+local function copy_state()
+  local out = {}
+  for k, v in pairs(read_state()) do
+    out[k] = v
+  end
+  return out
+end
+
 local function write_state(state)
   local tmp = state_path() .. ".tmp"
   local f = io.open(tmp, "w")
@@ -44,6 +71,10 @@ local function write_state(state)
   f:write(vim.json.encode(state))
   f:close()
   os.rename(tmp, state_path())
+  -- Write-through: disk now equals `state`, so adopt it as the cache rather than
+  -- forcing the next read to re-decode. A failed rename above throws before
+  -- here, leaving the cache (and disk) untouched.
+  cache = state
 end
 
 local function fire(root, ref)
@@ -52,6 +83,27 @@ local function fire(root, ref)
     data = { root = root, ref = ref },
   })
 end
+
+-- Invalidate the cache when the shared JSON can change without passing through
+-- write_state: `User ReviewBaseChanged` for any in-instance broadcast (defensive
+-- — our own set/clear already wrote through), and `FocusGained` for another nvim
+-- instance editing the same file while this one was unfocused. An augroup with
+-- clear=true so a module reload in tests replaces these rather than stacking
+-- them; the next read_state() then re-decodes from disk.
+local cache_group = vim.api.nvim_create_augroup("ReviewBaseCache", { clear = true })
+vim.api.nvim_create_autocmd("User", {
+  group = cache_group,
+  pattern = "ReviewBaseChanged",
+  callback = function()
+    cache = nil
+  end,
+})
+vim.api.nvim_create_autocmd("FocusGained", {
+  group = cache_group,
+  callback = function()
+    cache = nil
+  end,
+})
 
 function M.get(root)
   if not root then
@@ -65,6 +117,14 @@ function M.set(root, ref)
     return
   end
   local state = read_state()
+  -- Persist + broadcast only on an actual change (mirrors git_head.lua, which
+  -- re-broadcasts HEAD only when the branch truly moved). apply_selection's
+  -- notify/on_done live outside M.set, so re-picking the active base still
+  -- re-confirms even though this returns early.
+  if state[root] == ref then
+    return
+  end
+  state = copy_state()
   state[root] = ref
   write_state(state)
   fire(root, ref)
@@ -75,13 +135,20 @@ function M.clear(root)
     return
   end
   local state = read_state()
+  -- Same actual-change guard as M.set: clearing an already-absent base is a
+  -- no-op, so skip the rewrite and don't broadcast a phantom change.
+  if state[root] == nil then
+    return
+  end
+  state = copy_state()
   state[root] = nil
   write_state(state)
   fire(root, nil)
 end
 
 function M.bootstrap()
-  local state = read_state()
+  -- Edit a copy so a failed write can't leave the cache out of sync with disk.
+  local state = copy_state()
   local changed = false
   for root, ref in pairs(state) do
     if vim.fn.isdirectory(root) == 0 or not git.resolve(root, ref) then
@@ -103,7 +170,10 @@ local function close_legend()
 end
 
 local function open_legend()
-  vim.api.nvim_set_hl(0, "ReviewBaseActive", { fg = "#5aa0d4", bold = true, default = true })
+  -- Purple, matching SmartFilesBase in config.git_status_codes: the "base"
+  -- concept reads as one hue across the legend, the pickers, and the tree.
+  -- (The old blue duplicated SmartFilesModified and muddied that mapping.)
+  vim.api.nvim_set_hl(0, "ReviewBaseActive", { fg = "#d896ff", bold = true, default = true })
   vim.api.nvim_set_hl(0, "ReviewBaseLegend", { fg = palette.muted, default = true })
   local text = " ● active base "
   local buf = vim.api.nvim_create_buf(false, true)

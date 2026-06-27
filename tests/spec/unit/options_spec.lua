@@ -83,6 +83,22 @@ describe("config.options", function()
     vim.api.nvim_win_close(win, true)
   end)
 
+  it("enables prose spellcheck (camel-aware) in markdown buffers", function()
+    require("config.options")
+    vim.cmd("new")
+    local win = vim.api.nvim_get_current_win()
+    local buf = vim.api.nvim_get_current_buf()
+    vim.bo[buf].filetype = "markdown"
+
+    assert.is_true(vim.wo[win].spell)
+    assert.are.equal("en", vim.bo[buf].spelllang)
+    -- 'camel' splits CamelCase/identifier-ish words so code-flavored names raise
+    -- fewer false positives than a whole-word check
+    assert.are.equal("camel", vim.bo[buf].spelloptions)
+
+    vim.api.nvim_win_close(win, true)
+  end)
+
   it("binds <leader>bd to delete the current buffer", function()
     vim.g.mapleader = " "
     require("config.options")

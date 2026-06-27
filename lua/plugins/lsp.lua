@@ -82,7 +82,22 @@ local lsp_group = vim.api.nvim_create_augroup("lsp_user", { clear = true })
 -- Sort diagnostics by severity so the highest-severity one wins the single sign
 -- slot (equal sign priorities otherwise let a Warning mask an Error on a shared
 -- line) and the cursor float lists errors first.
-vim.diagnostic.config({ severity_sort = true })
+--
+-- Theme the gutter signs with nerd-font glyphs (severity-keyed text) so the sign
+-- column reads at a glance instead of the default letters. virtual_text stays
+-- off on purpose: messages surface in the CursorHold float below, not inline, to
+-- keep the quiet UI uncluttered.
+vim.diagnostic.config({
+  severity_sort = true,
+  signs = {
+    text = {
+      [vim.diagnostic.severity.ERROR] = "",
+      [vim.diagnostic.severity.WARN] = "",
+      [vim.diagnostic.severity.INFO] = "",
+      [vim.diagnostic.severity.HINT] = "",
+    },
+  },
+})
 
 -- Show the diagnostic under the cursor in a floating window after the cursor
 -- sits still for `updatetime` (250ms, set in options.lua). Virtual text is off
@@ -139,6 +154,21 @@ vim.api.nvim_create_autocmd("LspAttach", {
       end
       vim.cmd("edit")
     end, "Restart LSP on buffer")
+
+    -- Inlay hints are off by default to keep the UI quiet; offer a per-buffer
+    -- toggle under the <leader>u toggle group, but only when the attached server
+    -- can actually produce them (capability-gated so the map isn't a no-op).
+    -- Guard `supports_method` itself: a partial client (e.g. a test stub of
+    -- get_client_by_id) may not carry the method, and the callback shouldn't
+    -- error out of the rest of the attach over an optional feature.
+    if client and client.supports_method and client:supports_method("textDocument/inlayHint") then
+      map("<leader>uh", function()
+        vim.lsp.inlay_hint.enable(
+          not vim.lsp.inlay_hint.is_enabled({ bufnr = args.buf }),
+          { bufnr = args.buf }
+        )
+      end, "Toggle inlay hints")
+    end
   end,
 })
 

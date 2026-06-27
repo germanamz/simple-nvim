@@ -1,6 +1,10 @@
 -- Single source of truth for per-filetype formatter configuration. conform.nvim
 -- (lua/plugins/conform.lua) reads `by_ft` to wire up on-demand formatting
 -- (`<leader>F`), format-on-save, and `gq` via formatexpr on real buffers.
+--
+-- The web/markup filetypes use a { "prettierd", "prettier" } fallback chain:
+-- the warm prettierd daemon formats on save without Node's per-run cold start,
+-- and plain prettier remains the fallback when the daemon isn't installed.
 
 local M = {}
 
@@ -46,7 +50,8 @@ local function python_formatters(bufnr)
 end
 
 -- Drop the memoized python decisions (for tests, or after editing pyproject
--- mid-session).
+-- mid-session). conform.lua wires this to a BufWritePost on pyproject.toml so
+-- toggling [tool.black] takes effect without restarting the session.
 function M._clear_python_cache()
   python_cache = {}
 end
@@ -66,18 +71,24 @@ M.by_ft = {
   objc = { "clang_format" },
   objcpp = { "clang_format" },
   toml = { "taplo" },
-  javascript = { "prettier" },
-  javascriptreact = { "prettier" },
-  typescript = { "prettier" },
-  typescriptreact = { "prettier" },
-  json = { "prettier" },
-  jsonc = { "prettier" },
-  css = { "prettier" },
-  scss = { "prettier" },
-  html = { "prettier" },
-  yaml = { "prettier" },
-  markdown = { "prettier" },
-  mdx = { "prettier" },
+  -- prettierd-first: conform runs the first available formatter in the chain.
+  -- prettierd is a resident daemon that keeps the prettier engine warm, so on
+  -- save it answers in single-digit ms instead of paying Node's cold start
+  -- every time (plain `prettier` re-spawns node + reloads the config per run,
+  -- which is what stalls format-on-save). Plain `prettier` stays as the
+  -- fallback for machines where the daemon isn't installed.
+  javascript = { "prettierd", "prettier" },
+  javascriptreact = { "prettierd", "prettier" },
+  typescript = { "prettierd", "prettier" },
+  typescriptreact = { "prettierd", "prettier" },
+  json = { "prettierd", "prettier" },
+  jsonc = { "prettierd", "prettier" },
+  css = { "prettierd", "prettier" },
+  scss = { "prettierd", "prettier" },
+  html = { "prettierd", "prettier" },
+  yaml = { "prettierd", "prettier" },
+  markdown = { "prettierd", "prettier" },
+  mdx = { "prettierd", "prettier" },
 }
 
 return M

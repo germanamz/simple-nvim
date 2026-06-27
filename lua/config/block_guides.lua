@@ -187,7 +187,7 @@ end
 
 -- Decoration provider: on_win runs once per window per redraw (compute the
 -- chain from that window's cursor); on_line paints ephemeral overlay guides.
-local function on_win(_, win, buf)
+local function on_win(_, win, buf, toprow, botrow)
   draw.active = false
   if not eligible(buf) then
     return false
@@ -196,9 +196,23 @@ local function on_win(_, win, buf)
   if #blocks == 0 then
     return false
   end
+  -- Pre-filter to blocks intersecting the visible viewport [toprow, botrow] so
+  -- on_line (run once per visible row) scans only viewport-relevant blocks --
+  -- the win is whole-document-sized, but only what's on screen costs anything.
+  -- An outer block starting above toprow but passing through it still intersects
+  -- (b.s <= botrow and b.e >= toprow), so nesting is preserved. The cursor is
+  -- always within the viewport, so every block in its chain survives the filter;
+  -- computing chain_at on the filtered list keeps its indices aligned with what
+  -- on_line/guides_at iterate.
+  local visible = {}
+  for _, b in ipairs(blocks) do
+    if b.s <= botrow and b.e >= toprow then
+      visible[#visible + 1] = b
+    end
+  end
   draw.active = true
-  draw.blocks = blocks
-  draw.chain = M.chain_at(blocks, vim.api.nvim_win_get_cursor(win)[1] - 1)
+  draw.blocks = visible
+  draw.chain = M.chain_at(visible, vim.api.nvim_win_get_cursor(win)[1] - 1)
   return true
 end
 

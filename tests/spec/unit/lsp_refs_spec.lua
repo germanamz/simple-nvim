@@ -13,7 +13,7 @@ end
 
 describe("config.lsp_refs", function()
   local env_root, M
-  local orig_get_clients, orig_buf_request, orig_make_params
+  local orig_get_clients, orig_make_params
 
   before_each(function()
     env_root = nvim_env.setup_isolated_env()
@@ -22,7 +22,6 @@ describe("config.lsp_refs", function()
     M.setup()
 
     orig_get_clients = vim.lsp.get_clients
-    orig_buf_request = vim.lsp.buf_request
     orig_make_params = vim.lsp.util.make_position_params
   end)
 
@@ -30,10 +29,6 @@ describe("config.lsp_refs", function()
     if orig_get_clients then
       vim.lsp.get_clients = orig_get_clients
       orig_get_clients = nil
-    end
-    if orig_buf_request then
-      vim.lsp.buf_request = orig_buf_request
-      orig_buf_request = nil
     end
     if orig_make_params then
       vim.lsp.util.make_position_params = orig_make_params
@@ -121,25 +116,24 @@ describe("config.lsp_refs", function()
   end)
 
   describe("_dedup_refs", function()
-    it("dedupes by start position and excludes other buffers", function()
+    it("dedupes DocumentHighlight items by start position", function()
+      -- documentHighlight returns { range, kind } items already scoped to this
+      -- document (no uri), so dedup collapses overlapping highlights sharing a
+      -- start position without any per-buffer filtering.
       local ranges, count = M._dedup_refs({
         {
-          uri = "file:///a",
+          kind = 1,
           range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
         },
         {
-          uri = "file:///a",
+          kind = 3,
           range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
         },
         {
-          uri = "file:///a",
+          kind = 2,
           range = { start = { line = 2, character = 3 }, ["end"] = { line = 2, character = 4 } },
         },
-        {
-          uri = "file:///other",
-          range = { start = { line = 5, character = 0 }, ["end"] = { line = 5, character = 1 } },
-        },
-      }, "file:///a")
+      })
       assert.are.equal(2, count)
       assert.are.equal(2, #ranges)
       assert.are.equal(0, ranges[1].start.line)
@@ -147,11 +141,19 @@ describe("config.lsp_refs", function()
     end)
   end)
 
-  describe("reference request callback", function()
+  describe("documentHighlight request callback", function()
     local function install_lsp_stubs(buf)
+      local captured = {}
+      -- client:request(method, params, handler, bufnr) — capture the handler so
+      -- the test can drive the response synchronously. `request` is invoked as a
+      -- method, so the first arg is the client (self).
       local fake_client = {
-        server_capabilities = { referencesProvider = true },
+        server_capabilities = { documentHighlightProvider = true },
         offset_encoding = "utf-16",
+        request = function(_, _, _, handler, _)
+          captured.handler = handler
+          return true
+        end,
       }
       vim.lsp.get_clients = function(_)
         return { fake_client }
@@ -162,16 +164,10 @@ describe("config.lsp_refs", function()
           position = { line = 0, character = 0 },
         }
       end
-
-      local captured = {}
-      vim.lsp.buf_request = function(_, _, _, handler)
-        captured.handler = handler
-        return true
-      end
       return captured
     end
 
-    it("places extmarks for 3 same-buffer references and reports count", function()
+    it("places extmarks for 3 document highlights and reports count", function()
       local buf = fresh_buffer_with_lines({ "x x x", "x x x", "x x x" })
       vim.api.nvim_win_set_cursor(0, { 1, 0 })
       local captured = install_lsp_stubs(buf)
@@ -179,20 +175,10 @@ describe("config.lsp_refs", function()
       vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
-      local uri = vim.uri_from_bufnr(buf)
       captured.handler(nil, {
-        {
-          uri = uri,
-          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
-        },
-        {
-          uri = uri,
-          range = { start = { line = 1, character = 2 }, ["end"] = { line = 1, character = 3 } },
-        },
-        {
-          uri = uri,
-          range = { start = { line = 2, character = 0 }, ["end"] = { line = 2, character = 1 } },
-        },
+        { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } } },
+        { range = { start = { line = 1, character = 2 }, ["end"] = { line = 1, character = 3 } } },
+        { range = { start = { line = 2, character = 0 }, ["end"] = { line = 2, character = 1 } } },
       })
 
       local marks = vim.api.nvim_buf_get_extmarks(buf, ns_id(), 0, -1, {})
@@ -208,19 +194,15 @@ describe("config.lsp_refs", function()
       vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
-      local uri = vim.uri_from_bufnr(buf)
       captured.handler(nil, {
-        {
-          uri = uri,
-          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
-        },
+        { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } } },
       })
 
       local marks = vim.api.nvim_buf_get_extmarks(buf, ns_id(), 0, -1, {})
       assert.are.equal(0, #marks)
     end)
 
-    it("dedupes references with the same line:character start", function()
+    it("dedupes highlights with the same line:character start", function()
       local buf = fresh_buffer_with_lines({ "x x x", "x x x", "x x x" })
       vim.api.nvim_win_set_cursor(0, { 1, 0 })
       local captured = install_lsp_stubs(buf)
@@ -228,20 +210,10 @@ describe("config.lsp_refs", function()
       vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
-      local uri = vim.uri_from_bufnr(buf)
       captured.handler(nil, {
-        {
-          uri = uri,
-          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
-        },
-        {
-          uri = uri,
-          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
-        },
-        {
-          uri = uri,
-          range = { start = { line = 1, character = 2 }, ["end"] = { line = 1, character = 3 } },
-        },
+        { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } } },
+        { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } } },
+        { range = { start = { line = 1, character = 2 }, ["end"] = { line = 1, character = 3 } } },
       })
 
       assert.are.equal(" ⇄2 ", M.status())
@@ -259,20 +231,10 @@ describe("config.lsp_refs", function()
 
       vim.api.nvim_win_set_cursor(0, { 2, 1 })
 
-      local uri = vim.uri_from_bufnr(buf)
       captured.handler(nil, {
-        {
-          uri = uri,
-          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
-        },
-        {
-          uri = uri,
-          range = { start = { line = 1, character = 2 }, ["end"] = { line = 1, character = 3 } },
-        },
-        {
-          uri = uri,
-          range = { start = { line = 2, character = 0 }, ["end"] = { line = 2, character = 1 } },
-        },
+        { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } } },
+        { range = { start = { line = 1, character = 2 }, ["end"] = { line = 1, character = 3 } } },
+        { range = { start = { line = 2, character = 0 }, ["end"] = { line = 2, character = 1 } } },
       })
 
       local marks = vim.api.nvim_buf_get_extmarks(buf, ns_id(), 0, -1, {})
@@ -288,16 +250,9 @@ describe("config.lsp_refs", function()
       vim.api.nvim_exec_autocmds("CursorHold", { group = "lsp_refs_status", buffer = buf })
       assert.is_function(captured.handler)
 
-      local uri = vim.uri_from_bufnr(buf)
       captured.handler(nil, {
-        {
-          uri = uri,
-          range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } },
-        },
-        {
-          uri = uri,
-          range = { start = { line = 1, character = 2 }, ["end"] = { line = 1, character = 3 } },
-        },
+        { range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 1 } } },
+        { range = { start = { line = 1, character = 2 }, ["end"] = { line = 1, character = 3 } } },
       })
 
       assert.are.equal(" ⇄2 ", M.status())
