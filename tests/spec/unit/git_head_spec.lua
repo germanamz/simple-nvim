@@ -123,4 +123,85 @@ describe("config.git_head", function()
       vim.fn.delete(dir, "rf")
     end)
   end)
+
+  describe("unwatch", function()
+    it("closes the handle and lets a re-watch install a fresh, live one", function()
+      local repo = new_repo()
+      head.watch(repo)
+      local h1 = head._handle(repo)
+      assert.is_truthy(h1)
+      head.unwatch(repo)
+      assert.is_nil(head._handle(repo))
+      assert.is_true(h1:is_closing())
+      -- A re-watch installs a DIFFERENT handle that is actually live: an external
+      -- checkout still fires HeadChanged through it (proves re-arm, not a stale
+      -- believed-alive slot).
+      head.watch(repo)
+      local h2 = head._handle(repo)
+      assert.is_truthy(h2)
+      assert.are_not.equal(h1, h2)
+      vim.fn.system({ "git", "-C", repo, "checkout", "-q", "-b", "feature" })
+      assert.is_true(wait_for_event())
+      assert.are.equal("feature", fired[1].branch)
+    end)
+
+    it("keeps the watcher while a loaded buffer still resolves under the root", function()
+      local repo = new_repo()
+      -- bufadd/bufload, not :edit — the headless harness shares the default ShaDa
+      -- path and :edit's shada write contends; an unwindowed loaded buffer is all
+      -- the buffer-scan needs.
+      local buf = vim.fn.bufadd(repo .. "/a.lua")
+      vim.fn.bufload(buf)
+      local root = require("util.git").buf_root(buf)
+      head.watch(root)
+      head.unwatch(root)
+      -- An authoritative buffer-scan, not a refcount: the open buffer keeps the
+      -- handle alive even though unwatch was called.
+      assert.is_truthy(head._handle(root))
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+  end)
+
+  describe("lifecycle", function()
+    it("evicts a root's watcher when its last buffer is wiped", function()
+      local repo = new_repo()
+      local buf = vim.fn.bufadd(repo .. "/a.lua")
+      vim.fn.bufload(buf)
+      local root = require("util.git").buf_root(buf)
+      head.watch(root)
+      assert.is_truthy(head._handle(root))
+      vim.api.nvim_buf_delete(buf, { force = true })
+      -- The wipe schedules an unwatch that runs after the buffer is gone, so the
+      -- buffer-scan finds nothing under root and the handle is released.
+      assert.is_true(vim.wait(1000, function()
+        return head._handle(root) == nil
+      end, 10))
+    end)
+
+    it("reaps a dead watcher on an fs_event error even while a buffer survives", function()
+      local repo = new_repo()
+      local buf = vim.fn.bufadd(repo .. "/a.lua")
+      vim.fn.bufload(buf)
+      local root = require("util.git").buf_root(buf)
+      head.watch(root)
+      local h1 = head._handle(root)
+      assert.is_truthy(h1)
+      -- A `git submodule deinit` deletes .git/modules/<name>; libuv delivers an
+      -- error on the watched gitdir and the handle is dead. It must be reaped
+      -- UNCONDITIONALLY — bypassing the buffer-scan — so watch() can re-arm,
+      -- even though a buffer still resolves under root. Routing the error path
+      -- through the scan-gated unwatch would strand a believed-alive dead handle.
+      head._on_fs_event(root, "EBADF", nil)
+      assert.is_true(vim.wait(1000, function()
+        return head._handle(root) == nil
+      end, 10))
+      assert.is_true(h1:is_closing())
+      assert.is_true(vim.api.nvim_buf_is_loaded(buf)) -- the buffer is untouched
+      head.watch(root)
+      local h2 = head._handle(root)
+      assert.is_truthy(h2)
+      assert.are_not.equal(h1, h2) -- a fresh handle, not the dead one
+      vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+  end)
 end)

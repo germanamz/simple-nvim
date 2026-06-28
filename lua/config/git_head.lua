@@ -44,6 +44,57 @@ local function check(root)
   })
 end
 
+-- Stop + close `root`'s fs_event handle and drop its entry, unconditionally.
+-- The close step shared by unwatch (after its buffer-scan) and the fs-error path
+-- (which must reap a dead handle even if a buffer still resolves under root, so
+-- watch() can re-arm it). Idempotent: a no-op once the entry is gone.
+local function teardown(root)
+  local w = watched[root]
+  if not w then
+    return
+  end
+  if not w.handle:is_closing() then
+    w.handle:stop()
+    w.handle:close()
+  end
+  watched[root] = nil
+end
+
+-- The fs_event callback for `root`. An error (e.g. `git submodule deinit` deletes
+-- .git/modules/<name>) leaves the handle dead, so reap it UNCONDITIONALLY — NOT
+-- via the scan-gated unwatch, which would keep a dead, believed-alive handle
+-- whenever a buffer still resolves under root, blocking watch() from re-arming.
+-- Otherwise debounce the burst (lockfile, rename, change) a single checkout
+-- emits via the per-root `pending` flag and re-resolve once via check().
+local function on_fs_event(root, err, filename)
+  if err then
+    vim.schedule(function()
+      teardown(root)
+    end)
+    return
+  end
+  local w = watched[root]
+  if not w then
+    return
+  end
+  if filename and filename ~= "HEAD" then
+    return
+  end
+  if w.pending then
+    return
+  end
+  w.pending = true
+  vim.schedule(function()
+    check(root)
+  end)
+end
+
+-- Test-only: drive the fs_event callback directly (real libuv errors are hard
+-- to provoke deterministically).
+function M._on_fs_event(root, err, filename)
+  on_fs_event(root, err, filename)
+end
+
 -- Idempotently start watching `root`'s gitdir for HEAD movement. Returns true
 -- when a watcher is (already) running, false when one could not be started
 -- (not a repo, fs_event unavailable).
@@ -74,17 +125,8 @@ function M.watch(root, seed)
     seed = git.head(root)
   end
   local w = { handle = handle, sha = seed.sha, branch = seed.branch, pending = false }
-  local ok = handle:start(gitdir, {}, function(_, filename)
-    if filename and filename ~= "HEAD" then
-      return
-    end
-    if w.pending then
-      return
-    end
-    w.pending = true
-    vim.schedule(function()
-      check(root)
-    end)
+  local ok = handle:start(gitdir, {}, function(e, filename)
+    on_fs_event(root, e, filename)
   end)
   if ok ~= 0 then
     handle:close()
@@ -93,6 +135,63 @@ function M.watch(root, seed)
   watched[root] = w
   return true
 end
+
+-- True when any loaded buffer still resolves to `root`. An authoritative scan,
+-- not a refcount: BufEnter/BufWipeout can arrive asymmetrically (a buffer wiped
+-- without a matching enter, :bufdo, etc.), and a counter would drift; the live
+-- buffer list cannot.
+local function any_buffer_under(root)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(buf) and git.buf_in_root(buf, root) then
+      return true
+    end
+  end
+  return false
+end
+
+-- Release `root`'s watcher, but only once no loaded buffer resolves under it —
+-- so the live fs_event set stays proportional to the submodules you actually
+-- have open. The lifecycle autocmd below defers this past the wipe so the
+-- departing buffer is already gone when the scan runs.
+function M.unwatch(root)
+  if not root or any_buffer_under(root) then
+    return
+  end
+  teardown(root)
+end
+
+-- Test-only: the live fs_event handle for `root`, or nil when unwatched.
+function M._handle(root)
+  local w = watched[root]
+  return w and w.handle or nil
+end
+
+-- Evict a root's handle when its last loaded buffer is wiped, so the live
+-- fs_event set stays proportional to the submodules with an open buffer
+-- (watched[] otherwise only grows over a session). Resolve the departing
+-- buffer's root while it is still valid, then defer the scan past the wipe so
+-- the buffer no longer counts itself. Cheap-guarded: skip entirely when nothing
+-- is watched, and only schedule for a root that actually has a watcher. Unnamed
+-- buffers (which can seed a cwd-root watcher) are skipped — that lone watcher is
+-- kept alive by any named sibling and reclaimed by _stop_all on exit.
+local lifecycle = vim.api.nvim_create_augroup("git_head_lifecycle", { clear = true })
+vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
+  group = lifecycle,
+  callback = function(args)
+    if not next(watched) then
+      return
+    end
+    if not vim.api.nvim_buf_is_valid(args.buf) or vim.api.nvim_buf_get_name(args.buf) == "" then
+      return
+    end
+    local root = git.buf_root(args.buf)
+    if root and watched[root] then
+      vim.schedule(function()
+        M.unwatch(root)
+      end)
+    end
+  end,
+})
 
 -- Close every watcher. Test isolation only.
 function M._stop_all()
