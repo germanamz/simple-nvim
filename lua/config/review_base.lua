@@ -26,6 +26,12 @@ end
 -- reloads this file with a fresh (empty) cache per test.
 local cache
 
+-- Roots whose stored ref has been validated against git this session. Lazy
+-- validation (in M.get) prunes a stale base on first read; this set then spares
+-- the per-read git spawn on every subsequent read of the same root. Reset
+-- whenever the cache is — another instance may have rewritten the store.
+local validated = {}
+
 -- The actual disk read; read_state() wraps it with memoization.
 local function decode_state()
   local f = io.open(state_path(), "r")
@@ -73,8 +79,17 @@ local function write_state(state)
   os.rename(tmp, state_path())
   -- Write-through: disk now equals `state`, so adopt it as the cache rather than
   -- forcing the next read to re-decode. A failed rename above throws before
-  -- here, leaving the cache (and disk) untouched.
+  -- here, leaving the cache (and disk) untouched. Reset `validated` alongside so
+  -- it never outlives the cache it describes (one owner for the pair).
   cache = state
+  validated = {}
+end
+
+-- Drop both the decoded cache and the validation set together; the next read
+-- re-decodes from disk and re-validates lazily.
+local function invalidate_cache()
+  cache = nil
+  validated = {}
 end
 
 local function fire(root, ref)
@@ -94,22 +109,36 @@ local cache_group = vim.api.nvim_create_augroup("ReviewBaseCache", { clear = tru
 vim.api.nvim_create_autocmd("User", {
   group = cache_group,
   pattern = "ReviewBaseChanged",
-  callback = function()
-    cache = nil
-  end,
+  callback = invalidate_cache,
 })
 vim.api.nvim_create_autocmd("FocusGained", {
   group = cache_group,
-  callback = function()
-    cache = nil
-  end,
+  callback = invalidate_cache,
 })
 
+-- The stored review base for `root`, validating it lazily on first read this
+-- session: if the repo is gone or the ref no longer resolves, the entry is
+-- pruned (silently and permanently on disk — the same outcome the old startup
+-- bootstrap produced, but paid one root at a time on demand instead of sweeping
+-- every persisted base at launch). `validated` makes this at most one git spawn
+-- per root per cache lifetime, keeping the gitsigns-attach / statusline hot path
+-- cheap.
 function M.get(root)
   if not root then
     return nil
   end
-  return read_state()[root]
+  local ref = read_state()[root]
+  if ref == nil or validated[root] then
+    return ref
+  end
+  validated[root] = true
+  if vim.fn.isdirectory(root) == 0 or not git.resolve(root, ref) then
+    local pruned = copy_state()
+    pruned[root] = nil
+    pcall(write_state, pruned)
+    return nil
+  end
+  return ref
 end
 
 function M.set(root, ref)
@@ -144,21 +173,6 @@ function M.clear(root)
   state[root] = nil
   write_state(state)
   fire(root, nil)
-end
-
-function M.bootstrap()
-  -- Edit a copy so a failed write can't leave the cache out of sync with disk.
-  local state = copy_state()
-  local changed = false
-  for root, ref in pairs(state) do
-    if vim.fn.isdirectory(root) == 0 or not git.resolve(root, ref) then
-      state[root] = nil
-      changed = true
-    end
-  end
-  if changed then
-    write_state(state)
-  end
 end
 
 local CLEAR_SENTINEL = "__CLEAR__"

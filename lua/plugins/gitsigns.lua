@@ -98,10 +98,8 @@ return {
     local inline_diff = require("util.inline_diff")
     local path = require("util.path")
     local palette = require("config.palette")
-    -- Defer the per-root validation (one blocking `git rev-parse --verify` per
-    -- stored review base) off the plugin-load critical path; it only prunes
-    -- stale entries the picker would offer, and nothing below needs it now.
-    vim.schedule(review_base.bootstrap)
+    -- review_base validates stored bases lazily on first read now (no startup
+    -- sweep). review_base is still required above — file_new_vs_base uses it.
 
     require("gitsigns").setup(opts)
 

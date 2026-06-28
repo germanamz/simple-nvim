@@ -165,24 +165,50 @@ describe("config.review_base", function()
     end)
   end)
 
-  describe("bootstrap", function()
-    it("drops stale entries and preserves valid ones", function()
+  describe("lazy validation (M.get)", function()
+    it("prunes a since-deleted root on first read but keeps a valid one", function()
       local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
-      local payload = {
-        ["/nonexistent/dir"] = "main",
-        [repo] = "main",
-      }
-      write_file(state_path(), vim.json.encode(payload))
+      write_file(state_path(), vim.json.encode({ ["/nonexistent/dir"] = "main", [repo] = "main" }))
 
-      M.bootstrap()
-
-      assert.are.equal("main", M.get(repo))
       assert.is_nil(M.get("/nonexistent/dir"))
+      assert.are.equal("main", M.get(repo))
 
-      local raw = read_file(state_path())
-      local decoded = vim.json.decode(raw)
-      assert.are.equal("main", decoded[repo])
+      -- The stale entry is dropped from disk (permanent — same as the old
+      -- startup bootstrap, just paid lazily on first read).
+      local decoded = vim.json.decode(read_file(state_path()))
       assert.is_nil(decoded["/nonexistent/dir"])
+      assert.are.equal("main", decoded[repo])
+    end)
+
+    it("validates a root at most once per session", function()
+      local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+      write_file(state_path(), vim.json.encode({ [repo] = "main" }))
+      local git = require("util.git")
+      local calls, orig = 0, git.resolve
+      git.resolve = function(...)
+        calls = calls + 1
+        return orig(...)
+      end
+      assert.are.equal("main", M.get(repo))
+      assert.are.equal("main", M.get(repo))
+      git.resolve = orig
+      assert.are.equal(1, calls) -- the second get skips the spawn
+    end)
+
+    it("re-validates after the cache is invalidated by another instance", function()
+      local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+      write_file(state_path(), vim.json.encode({ [repo] = "main" }))
+      local git = require("util.git")
+      local calls, orig = 0, git.resolve
+      git.resolve = function(...)
+        calls = calls + 1
+        return orig(...)
+      end
+      assert.are.equal("main", M.get(repo)) -- calls = 1, now validated
+      vim.api.nvim_exec_autocmds("FocusGained", {}) -- another instance edited the store
+      M.get(repo) -- must re-validate
+      git.resolve = orig
+      assert.are.equal(2, calls)
     end)
   end)
 
