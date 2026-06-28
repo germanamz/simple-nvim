@@ -203,6 +203,20 @@ describe("util.git", function()
     end)
   end)
 
+  -- parse_head turns one `git rev-parse HEAD --abbrev-ref HEAD` result into the
+  -- { sha, branch } shape. Pure, so the sync head() and the async HEAD watcher
+  -- (config.git_head._resolve_head) share exactly one parse.
+  describe("parse_head", function()
+    it("parses normal, detached, and unborn from (lines, ok)", function()
+      assert.are.same(
+        { sha = "abc123", branch = "main" },
+        git.parse_head({ "abc123", "main" }, true)
+      )
+      assert.are.same({ sha = "abc123", branch = nil }, git.parse_head({ "abc123", "HEAD" }, true))
+      assert.are.same({ sha = nil, branch = nil }, git.parse_head({ "HEAD" }, false))
+    end)
+  end)
+
   -- head() resolves HEAD's object id AND branch in one process so the watcher
   -- can gate on the sha (which a `git submodule update` moves while the branch
   -- is unchanged) rather than the branch name alone.

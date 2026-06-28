@@ -118,12 +118,13 @@ end
 -- The HEAD watcher gates on BOTH fields: a `git submodule update` moves the sha
 -- while the (nil) branch is unchanged, which a branch-name-only gate misses.
 --
--- The parse keys on the exit code, which M.run now exposes cleanly: on success
--- stdout is [sha, token]; an unborn HEAD exits nonzero with only the abbrev-ref
--- "HEAD" on stdout (the "fatal: ambiguous argument" diagnostic stays on stderr,
--- which M.run drops). A "HEAD" token means detached or unborn → nil branch.
-function M.head(root)
-  local lines, ok = M.run({ "rev-parse", "HEAD", "--abbrev-ref", "HEAD" }, { cwd = root })
+-- Turn one `rev-parse HEAD --abbrev-ref HEAD` result into { sha, branch }. The
+-- parse keys on the exit code (via `ok`): on success the lines are [sha, token];
+-- an unborn HEAD exits nonzero with only the abbrev-ref "HEAD" on stdout (the
+-- "fatal: ambiguous argument" diagnostic stays on stderr, which run() drops). A
+-- "HEAD" token means detached or unborn → nil branch. Pure, so the sync M.head
+-- and the async HEAD watcher (config.git_head._resolve_head) share one parse.
+function M.parse_head(lines, ok)
   local sha, token
   if ok then
     sha, token = lines[1], lines[2]
@@ -132,6 +133,14 @@ function M.head(root)
   end
   local branch = (token and token ~= "HEAD") and token or nil
   return { sha = sha, branch = branch }
+end
+
+-- The argv shared by the sync resolve (here, via run()) and the async one
+-- (config.git_head._resolve_head, which prepends `git -C <root>` itself).
+M.HEAD_ARGS = { "rev-parse", "HEAD", "--abbrev-ref", "HEAD" }
+
+function M.head(root)
+  return M.parse_head(M.run(M.HEAD_ARGS, { cwd = root }))
 end
 
 -- Absolute path of the git directory for `root`, or nil outside a repo.
