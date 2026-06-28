@@ -342,4 +342,168 @@ describe("config.telescope_smart", function()
       assert.are.equal(0, #groups.base_list)
     end)
   end)
+
+  describe("_parse_submodule_status", function()
+    it("parses checked-out submodule paths recursively and skips uninitialized", function()
+      local lines = {
+        " aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa childA (heads/main)",
+        "-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb childB",
+        " cccccccccccccccccccccccccccccccccccccccc childA/grand (heads/main)",
+        "+dddddddddddddddddddddddddddddddddddddddd childC",
+      }
+      local paths = M._parse_submodule_status(lines)
+      -- childB is uninitialized ('-') and has no worktree, so it is skipped;
+      -- '+' (a different commit checked out) is still a live worktree.
+      assert.are.same({ "childA", "childA/grand", "childC" }, paths)
+    end)
+  end)
+
+  describe("_has_submodules", function()
+    it("is true with a .gitmodules and false without", function()
+      local sp = git_fixture.superproject({ children = { "childA" } })
+      assert.is_true(M._has_submodules(sp.root))
+      local plain = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+      assert.is_false(M._has_submodules(plain))
+    end)
+  end)
+
+  describe("_run_pool", function()
+    it("never exceeds the concurrency limit and completes every item", function()
+      local active, max_active, completed = 0, 0, 0
+      local done_all = false
+      local items = {}
+      for i = 1, 20 do
+        items[i] = i
+      end
+      M._run_pool(items, 3, function(_, done)
+        active = active + 1
+        max_active = math.max(max_active, active)
+        vim.defer_fn(function()
+          active = active - 1
+          completed = completed + 1
+          done()
+        end, 5)
+      end, function()
+        done_all = true
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return done_all
+      end, 5))
+      assert.are.equal(20, completed)
+      assert.is_true(max_active <= 3)
+    end)
+
+    it("completes immediately for an empty item list", function()
+      local done = false
+      M._run_pool({}, 4, function() end, function()
+        done = true
+      end)
+      assert.is_true(done)
+    end)
+  end)
+
+  describe("_submodule_paths_async", function()
+    it("lists checked-out submodules recursively", function()
+      local sp = git_fixture.superproject({
+        children = { "childA", "childB" },
+        grandchild = { parent = "childA", name = "grand" },
+      })
+      local got
+      M._submodule_paths_async(sp.root, function(p)
+        got = p
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return got ~= nil
+      end, 10))
+      table.sort(got)
+      assert.are.same({ "childA", "childA/grand", "childB" }, got)
+    end)
+  end)
+
+  describe("_recursive_changes_async", function()
+    it("merges per-file codes from inside a submodule and drops the gitlink row", function()
+      local sp = git_fixture.superproject({ children = { "childA" } })
+      write_file(sp.children.childA, "childA.txt", "changed\n") -- modify a tracked file
+      write_file(sp.children.childA, "new.lua", "x\n") -- untracked
+      local codes
+      M._recursive_changes_async(sp.root, nil, function(c)
+        codes = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil
+      end, 10))
+      assert.is_truthy(codes["childA/new.lua"]) -- untracked, prefixed by the submodule path
+      assert.is_truthy(codes["childA/childA.txt"]) -- modified
+      assert.is_nil(codes["childA"]) -- the dirty submodule is NOT a bogus gitlink row
+    end)
+
+    it("recurses into a nested grandchild", function()
+      local sp = git_fixture.superproject({
+        children = { "childA" },
+        grandchild = { parent = "childA", name = "grand" },
+      })
+      write_file(sp.grandchild, "grand.txt", "changed\n")
+      local codes
+      M._recursive_changes_async(sp.root, nil, function(c)
+        codes = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil
+      end, 10))
+      assert.is_truthy(codes["childA/grand/grand.txt"])
+      assert.is_nil(codes["childA/grand"]) -- no nested gitlink row
+    end)
+
+    it("takes the cheap path with no .gitmodules", function()
+      local repo = git_fixture.repo({
+        commits = { { files = { ["a.lua"] = "x\n" } } },
+        modified = { ["a.lua"] = "y\n" },
+      })
+      assert.is_false(M._has_submodules(repo))
+      local codes
+      M._recursive_changes_async(repo, nil, function(c)
+        codes = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil
+      end, 10))
+      assert.is_truthy(codes["a.lua"])
+    end)
+
+    it("applies the base diff to the outer repo only; submodules give worktree codes", function()
+      local sp = git_fixture.superproject({ children = { "childA" } })
+      vim.fn.system({ "git", "-C", sp.root, "branch", "base" })
+      write_file(sp.root, "outer_new.lua", "x\n")
+      git_commit(sp.root, "outer commit")
+      write_file(sp.children.childA, "new.lua", "x\n")
+      local codes
+      M._recursive_changes_async(sp.root, "base", function(c)
+        codes = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil
+      end, 10))
+      assert.are.equal("bA", codes["outer_new.lua"]) -- outer: changed-since-base
+      assert.is_truthy(codes["childA/new.lua"]) -- submodule: worktree only
+    end)
+  end)
+
+  describe("_refresh_async (recursion wired in)", function()
+    it("exposes submodule files as cwd-relative codes", function()
+      local sp = git_fixture.superproject({ children = { "childA" } })
+      write_file(sp.children.childA, "new.lua", "x\n")
+      -- Use the canonical toplevel as cwd so the cwd-relative rewrite (which keys
+      -- off git.root's resolved path) strips cleanly — the /var vs /private/var
+      -- symlink is an unrelated macOS artifact.
+      local root = require("util.git").root(sp.root)
+      local codes
+      M._refresh_async(root, function(c)
+        codes = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil and codes["childA/new.lua"] ~= nil
+      end, 10))
+      assert.is_truthy(codes["childA/new.lua"])
+    end)
+  end)
 end)

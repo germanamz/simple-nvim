@@ -56,13 +56,17 @@ M._parse_status_path = parse_status_path
 M._format_prefix = git_status_codes.code_to_display
 
 -- Apply `git status --porcelain` lines to per-path XY codes and worktree counts.
--- Pure (no shellout) so the sync and async fetch paths share it.
-local function apply_worktree_lines(lines, codes, counts)
+-- Pure (no shellout) so the sync and async fetch paths share it. `prefix` (for
+-- the submodule recursion) is prepended to each path key so a submodule's files
+-- merge into the superproject-relative codes as "childA/<path>"; "" for the
+-- outer repo.
+local function apply_worktree_lines(lines, codes, counts, prefix)
+  prefix = prefix or ""
   for _, line in ipairs(lines) do
     if #line >= 4 then
       local x = line:sub(1, 1)
       local y = line:sub(2, 2)
-      codes[parse_status_path(line:sub(4))] = x .. y
+      codes[prefix .. parse_status_path(line:sub(4))] = x .. y
 
       local cat = git_status_codes.category(git_status_codes.dominant_letter(x, y))
       if cat then
@@ -166,6 +170,68 @@ local function split_lines(s)
   return vim.split(s or "", "\n", { trimempty = true })
 end
 
+-- ===================== submodule recursion =====================
+
+-- Parse `git submodule status --recursive` into the checked-out submodule
+-- worktree paths, relative to the superproject and nested as "childA/grand".
+-- Each line is "<char><sha> <path>[ (<describe>)]"; the leading char is ' '/'+'/
+-- 'U' for a present worktree and '-' for an uninitialized one (no worktree to
+-- status), which is skipped.
+local function parse_submodule_status(lines)
+  local paths = {}
+  for _, line in ipairs(lines) do
+    if line:sub(1, 1) ~= "-" then
+      local rest = line:sub(2)
+      local path = rest:match("^%x+%s+(.-)%s*%b()%s*$") or rest:match("^%x+%s+(.+)$")
+      if path and path ~= "" then
+        paths[#paths + 1] = path
+      end
+    end
+  end
+  return paths
+end
+M._parse_submodule_status = parse_submodule_status
+
+-- Cheap gate for the recursion: a repo has submodules only if a .gitmodules sits
+-- at its toplevel. One fs_stat and zero git spawns, so the common single-repo
+-- case never pays for submodule discovery.
+local function has_submodules(root)
+  return root ~= nil and vim.uv.fs_stat(root .. "/.gitmodules") ~= nil
+end
+M._has_submodules = has_submodules
+
+-- Run worker(item, done) over `items` with at most `limit` in flight, calling
+-- on_complete after the last done(). Bounds the concurrent git processes a
+-- superproject spawns, so hundreds of submodules can't fork-bomb the machine.
+-- Workers run asynchronously (vim.system) and MUST call done() exactly once.
+local SUBMODULE_CONCURRENCY = 8
+M._SUBMODULE_CONCURRENCY = SUBMODULE_CONCURRENCY
+
+local function run_pool(items, limit, worker, on_complete)
+  local n = #items
+  if n == 0 then
+    return on_complete()
+  end
+  local idx, active, finished = 0, 0, 0
+  local function pump()
+    while active < limit and idx < n do
+      idx = idx + 1
+      active = active + 1
+      worker(items[idx], function()
+        active = active - 1
+        finished = finished + 1
+        if finished == n then
+          on_complete()
+        else
+          pump()
+        end
+      end)
+    end
+  end
+  pump()
+end
+M._run_pool = run_pool
+
 -- Async sibling of _git_changes: fetch `git status` (and, when a base is set,
 -- `git diff`) via vim.system so the UI never blocks on git over a large
 -- superproject tree. vim.system callbacks run in a fast context where most of
@@ -181,7 +247,19 @@ local function git_changes_async(root, base, cb)
     cb(codes, counts)
   end
   vim.system(
-    { "git", "-C", root, "status", "--porcelain", "--untracked-files=all" },
+    -- --ignore-submodules=all: the recursion path resolves per-file status
+    -- INSIDE each submodule itself, so the outer status must not collapse a
+    -- dirty submodule to a single gitlink row (which would show as a bogus
+    -- "childA" file). No-op for a plain repo with no submodules.
+    {
+      "git",
+      "-C",
+      root,
+      "status",
+      "--porcelain",
+      "--untracked-files=all",
+      "--ignore-submodules=all",
+    },
     { text = true },
     function(wt)
       local wt_lines = wt.code == 0 and split_lines(wt.stdout) or {}
@@ -203,7 +281,15 @@ local function git_changes_async(root, base, cb)
           vim.system(
             -- Three-dot base...HEAD: diff against the merge-base of base and HEAD
             -- (see parse_committed_history) — "changed on my branch since base".
-            { "git", "-C", root, "diff", "--name-status", base .. "...HEAD" },
+            {
+              "git",
+              "-C",
+              root,
+              "diff",
+              "--name-status",
+              "--ignore-submodules=all",
+              base .. "...HEAD",
+            },
             { text = true },
             function(df)
               local df_lines = df.code == 0 and split_lines(df.stdout) or {}
@@ -219,6 +305,69 @@ local function git_changes_async(root, base, cb)
     end
   )
 end
+
+-- Matches util.git's TIMEOUT_MS: one bound for how long any single git call may
+-- run. A hung/slow submodule status is killed at the bound (its res.code != 0 →
+-- that submodule contributes nothing) so the pool always completes.
+local GIT_TIMEOUT_MS = 2000
+
+-- List the superproject's checked-out submodule worktree paths asynchronously.
+-- Resolved fresh each call (never via a cache) so labels stay correct after a
+-- submodule add/remove. cb runs on the main loop with the path list (empty on
+-- failure or timeout).
+local function submodule_paths_async(root, cb)
+  vim.system(
+    { "git", "-C", root, "submodule", "status", "--recursive" },
+    { text = true, timeout = GIT_TIMEOUT_MS },
+    function(res)
+      local paths = res.code == 0 and parse_submodule_status(split_lines(res.stdout)) or {}
+      vim.schedule(function()
+        cb(paths)
+      end)
+    end
+  )
+end
+M._submodule_paths_async = submodule_paths_async
+
+-- git_changes_async plus, for a superproject, each submodule's per-file worktree
+-- status merged under its "subpath/" prefix — so A/M/D/?* appear on files INSIDE
+-- submodules, which the outer --ignore-submodules=all status collapses away.
+-- Discovery (submodule status) and the outer status stay serial to avoid the
+-- root's index.lock; the per-submodule statuses then run through a bounded pool
+-- — they live in distinct repos with distinct locks, and --ignore-submodules=all
+-- keeps a parent from descending into (and racing on the index.lock of) its
+-- nested child. The base...HEAD diff is scoped to the OUTER repo only this stage:
+-- review_base is keyed by the outer toplevel, so a submodule's "changed since
+-- base" is ill-defined; submodules contribute worktree codes, not bX.
+local function recursive_changes_async(root, base, cb)
+  if not has_submodules(root) then
+    return git_changes_async(root, base, cb)
+  end
+  submodule_paths_async(root, function(paths)
+    git_changes_async(root, base, function(codes, counts)
+      run_pool(paths, SUBMODULE_CONCURRENCY, function(subpath, done)
+        vim.system({
+          "git",
+          "-C",
+          root .. "/" .. subpath,
+          "status",
+          "--porcelain",
+          "--untracked-files=all",
+          "--ignore-submodules=all",
+        }, { text = true, timeout = GIT_TIMEOUT_MS }, function(res)
+          local sub_lines = res.code == 0 and split_lines(res.stdout) or {}
+          vim.schedule(function()
+            apply_worktree_lines(sub_lines, codes, counts, subpath .. "/")
+            done()
+          end)
+        end)
+      end, function()
+        cb(codes, counts)
+      end)
+    end)
+  end)
+end
+M._recursive_changes_async = recursive_changes_async
 
 -- The command that lists every file from the cwd, shared with find_files via
 -- util.fs (which carries the rg/fd/find dialects and the heavy-dir excludes the
@@ -277,8 +426,9 @@ local function ms_now()
   return vim.uv.hrtime() / 1e6
 end
 
--- Async core: resolve root, fetch git changes off the main thread, rewrite the
--- per-path keys relative to cwd, store them in the cache, then hand them to cb.
+-- Async core: resolve root, fetch git changes (worktree status across the repo
+-- AND its submodules) off the main thread, rewrite the per-path keys relative to
+-- cwd, store them in the cache, then hand them to cb.
 local function refresh_codes_async(cwd, cb)
   cwd = cwd or vim.fn.getcwd()
   local root = git.root(cwd)
@@ -290,7 +440,7 @@ local function refresh_codes_async(cwd, cb)
     return
   end
   local base = review_base.get(root)
-  git_changes_async(root, base, function(raw_codes, counts)
+  recursive_changes_async(root, base, function(raw_codes, counts)
     local codes = {}
     for p, c in pairs(raw_codes) do
       codes[path_util.relative(root .. "/" .. p, cwd)] = c
