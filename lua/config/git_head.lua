@@ -8,7 +8,9 @@ local M = {}
 
 local git = require("util.git")
 
--- root -> { handle = uv fs_event, sha = string|nil, branch = string|nil, pending = boolean }
+-- root -> { handle = uv fs_event, sha, branch, pending = boolean, recheck = boolean }
+-- pending: a resolve is in flight (single-flight). recheck: a HEAD event landed
+-- mid-resolve, so re-run once on completion.
 local watched = {}
 
 -- Last-seen branch for a watched root, nil when unwatched or detached.
@@ -20,28 +22,75 @@ function M.get(root)
   return nil
 end
 
--- Re-resolve HEAD and broadcast only on an actual change — fs events arrive in
--- bursts (lockfile, rename, change) for a single checkout. The gate keys on the
--- resolved object id AND the branch: a `git submodule update` moves the sha
--- while leaving the (detached, nil) branch unchanged, which a branch-only gate
--- would never notice. The broadcast payload stays {root, branch} — consumers
--- only ever care which branch a root is on.
-local function check(root)
+-- Resolve HEAD for `root` off the main thread, calling cb with the { sha, branch }
+-- shape (or nil when the process can't be spawned). Returns true when it spawned.
+-- This is the second documented synchronous-layer exception (see util.git): the
+-- watcher must never block the UI thread on a checkout that moves HEAD across
+-- many submodule gitdirs at once.
+function M._resolve_head(root, cb)
+  return (
+    pcall(
+      vim.system,
+      vim.list_extend({ "git", "-C", root }, git.HEAD_ARGS),
+      { text = true },
+      function(out)
+        local head =
+          git.parse_head(vim.split(out.stdout or "", "\n", { trimempty = true }), out.code == 0)
+        vim.schedule(function()
+          cb(head)
+        end)
+      end
+    )
+  )
+end
+
+-- Re-resolve HEAD asynchronously and broadcast only on an actual change. fs
+-- events arrive in bursts for a single checkout, so a per-root single-flight
+-- `pending` guard collapses the burst to one in-flight resolve. The gate keys on
+-- the resolved object id AND branch: a `git submodule update` moves the sha
+-- while the (detached, nil) branch is unchanged, which a branch-only gate would
+-- miss. The broadcast payload stays {root, branch}.
+function M._check(root)
   local w = watched[root]
   if not w then
     return
   end
-  w.pending = false
-  local head = git.head(root)
-  if head.sha == w.sha and head.branch == w.branch then
+  if w.pending then
+    -- A HEAD event landed while a resolve is in flight (e.g. a second checkout):
+    -- the in-flight result may predate it, so remember to re-resolve once on
+    -- completion rather than spawn a concurrent process now.
+    w.recheck = true
     return
   end
-  w.sha = head.sha
-  w.branch = head.branch
-  vim.api.nvim_exec_autocmds("User", {
-    pattern = "HeadChanged",
-    data = { root = root, branch = head.branch },
-  })
+  w.pending = true
+  local started = M._resolve_head(root, function(head)
+    -- Drop a stale result: the watcher may have been torn down (unwatch / fs
+    -- error) or re-armed (a fresh handle replaced this one) while the resolve was
+    -- in flight. Identity, not mere presence, so a re-armed slot is left alone.
+    if watched[root] ~= w then
+      return
+    end
+    w.pending = false
+    if head and (head.sha ~= w.sha or head.branch ~= w.branch) then
+      w.sha = head.sha
+      w.branch = head.branch
+      vim.api.nvim_exec_autocmds("User", {
+        pattern = "HeadChanged",
+        data = { root = root, branch = head.branch },
+      })
+    end
+    -- Single-flight + recheck (not a queue): one re-run picks up whatever moved
+    -- during the resolve and converges, comparing against the just-applied value.
+    if w.recheck then
+      w.recheck = false
+      M._check(root)
+    end
+  end)
+  -- A failed spawn must not strand the watcher with pending=true forever (the old
+  -- sync check cleared pending up front); clear it so a later fs event retries.
+  if not started then
+    w.pending = false
+  end
 end
 
 -- Stop + close `root`'s fs_event handle and drop its entry, unconditionally.
@@ -73,19 +122,15 @@ local function on_fs_event(root, err, filename)
     end)
     return
   end
-  local w = watched[root]
-  if not w then
-    return
-  end
   if filename and filename ~= "HEAD" then
     return
   end
-  if w.pending then
+  if not watched[root] then
     return
   end
-  w.pending = true
+  -- The single-flight / coalescing lives in M._check; just hand off to it.
   vim.schedule(function()
-    check(root)
+    M._check(root)
   end)
 end
 
@@ -124,7 +169,8 @@ function M.watch(root, seed)
   if seed == nil then
     seed = git.head(root)
   end
-  local w = { handle = handle, sha = seed.sha, branch = seed.branch, pending = false }
+  local w =
+    { handle = handle, sha = seed.sha, branch = seed.branch, pending = false, recheck = false }
   local ok = handle:start(gitdir, {}, function(e, filename)
     on_fs_event(root, e, filename)
   end)

@@ -2,13 +2,14 @@ local nvim_env = require("helpers.nvim_env")
 local git_fixture = require("helpers.git_fixture")
 
 describe("config.git_head", function()
-  local env_root, head, group, fired
+  local env_root, head, git, group, fired
 
   before_each(function()
     env_root = nvim_env.setup_isolated_env()
     package.loaded["config.git_head"] = nil
     package.loaded["util.git"] = nil
     head = require("config.git_head")
+    git = require("util.git") -- the same cached instance config.git_head holds
     fired = {}
     group = vim.api.nvim_create_augroup("git_head_spec", { clear = true })
     vim.api.nvim_create_autocmd("User", {
@@ -121,6 +122,49 @@ describe("config.git_head", function()
       assert.is_true(head.watch(dir))
       assert.is_nil(head.get(dir))
       vim.fn.delete(dir, "rf")
+    end)
+  end)
+
+  describe("async check", function()
+    it("re-resolves HEAD on a change without a blocking git.head call", function()
+      local repo = new_repo()
+      head.watch(repo) -- seeds via git.head before the spy is installed
+      local calls = 0
+      local orig = git.head
+      git.head = function(...)
+        calls = calls + 1
+        return orig(...)
+      end
+      vim.fn.system({ "git", "-C", repo, "checkout", "-q", "-b", "feature" })
+      assert.is_true(wait_for_event())
+      git.head = orig
+      assert.are.equal("feature", fired[1].branch)
+      -- The watcher resolves HEAD off the main thread (via _resolve_head), so the
+      -- synchronous git.head is never hit on the event path.
+      assert.are.equal(0, calls)
+    end)
+
+    it("coalesces an in-flight fs-event into one recheck and ends on the final value", function()
+      local repo = new_repo()
+      assert.is_true(head.watch(repo, { sha = "s0", branch = "main" }))
+      -- Stub the async resolve so completion is driven by hand: each call parks
+      -- its callback instead of spawning git.
+      local cbs = {}
+      head._resolve_head = function(_, cb)
+        cbs[#cbs + 1] = cb
+        return true
+      end
+      head._check(repo) -- fs-event #1 starts the single in-flight resolve
+      head._check(repo) -- fs-event #2 arrives in-flight: coalesces, no 2nd resolve
+      assert.are.equal(1, #cbs)
+      -- complete the in-flight resolve with a moved HEAD
+      table.remove(cbs, 1)({ sha = "s1", branch = "feature" })
+      assert.are.equal("feature", fired[#fired].branch)
+      -- the coalesced event #2 fires exactly one recheck resolve
+      assert.are.equal(1, #cbs)
+      -- which sees no further change, so no extra HeadChanged is broadcast
+      table.remove(cbs, 1)({ sha = "s1", branch = "feature" })
+      assert.are.equal(1, #fired)
     end)
   end)
 
