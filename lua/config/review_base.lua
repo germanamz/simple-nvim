@@ -299,6 +299,21 @@ function M.clear_active(start_path)
   apply_selection(root, CLEAR_SENTINEL)
 end
 
+-- The DiffviewOpen range for the repo containing `start_path`: "<base>...HEAD"
+-- when that repo has a review base set, else nil (caller falls back to a plain
+-- working-tree diff). The three-dot form diffs against the merge-base of base
+-- and HEAD, matching the smart picker's "changed on my branch since base"
+-- semantics. Resolved from start_path so <leader>gv reviews the submodule the
+-- focused buffer lives in, not whatever the cwd resolves to.
+function M.diff_range(start_path)
+  local root = git.root(start_path)
+  local base = root and M.get(root)
+  if not base then
+    return nil
+  end
+  return base .. "...HEAD"
+end
+
 function M.pick(root, on_done)
   if not root then
     vim.notify(M.MSG_NOT_A_REPO, vim.log.levels.WARN)

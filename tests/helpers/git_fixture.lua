@@ -86,4 +86,93 @@ function M.with_remote(repo, name)
   return clone
 end
 
+-- Bare-bones git config (identity + no gpg) so commits succeed in a clean env.
+local function init_repo(dir, branch)
+  vim.fn.mkdir(dir, "p")
+  run(dir, "init", "-q", "--initial-branch=" .. (branch or "main"))
+  run(dir, "config", "user.email", "test@example.invalid")
+  run(dir, "config", "user.name", "Test User")
+  run(dir, "config", "commit.gpgsign", "false")
+end
+
+-- A standalone single-commit repo, used as a submodule source. Each carries a
+-- `<name>.txt` so a file path inside the eventual submodule is resolvable.
+local function standalone(name)
+  local dir = vim.fn.tempname() .. "-" .. name
+  init_repo(dir)
+  write_file(dir, name .. ".txt", "-- " .. name .. "\n")
+  commit(dir, "init " .. name)
+  return dir
+end
+
+-- Add `src` as a submodule named `name` under `parent`. Local-path submodules
+-- need protocol.file.allow=always since the CVE-2022-39253 fix disabled the
+-- file transport by default. The `-c` must precede the `submodule` subcommand.
+local function add_submodule(parent, src, name)
+  run(parent, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", src, name)
+end
+
+-- Build a superproject: a parent repo with N child submodules, optionally a
+-- nested grandchild submodule, a linked worktree of a child, and a standalone
+-- unborn-HEAD repo. Returns:
+--   {
+--     root = <parent toplevel>,
+--     children = { <name> = <parent>/<name>, ... },
+--     grandchild = <child>/<gname>,   -- when opts.grandchild
+--     worktree = <path>,              -- when opts.worktree (basename = opts.worktree.name)
+--     unborn = <path>,                -- when opts.unborn (git init, no commit)
+--   }
+-- opts:
+--   children   = { "childA", "childB" }
+--   grandchild = { parent = "childA", name = "grand" }
+--   worktree   = { child = "childA", name = "wt" }
+--   unborn     = true
+function M.superproject(opts)
+  opts = opts or {}
+  local parent = vim.fn.tempname() .. "-superproject"
+  init_repo(parent)
+  write_file(parent, "README.md", "# superproject\n")
+  commit(parent, "init parent")
+
+  local result = { root = parent, children = {} }
+
+  local children = opts.children or {}
+  for _, name in ipairs(children) do
+    add_submodule(parent, standalone(name), name)
+    result.children[name] = parent .. "/" .. name
+  end
+  if #children > 0 then
+    commit(parent, "add submodules")
+  end
+
+  if opts.grandchild then
+    local pchild = assert(result.children[opts.grandchild.parent], "grandchild parent not a child")
+    add_submodule(pchild, standalone(opts.grandchild.name), opts.grandchild.name)
+    commit(pchild, "add grandchild")
+    -- Record the child's bumped gitlink in the superproject too.
+    run(parent, "add", opts.grandchild.parent)
+    commit(parent, "bump " .. opts.grandchild.parent)
+    result.grandchild = pchild .. "/" .. opts.grandchild.name
+  end
+
+  if opts.worktree then
+    local wchild = assert(result.children[opts.worktree.child], "worktree child not a child")
+    -- Put the worktree at <tmp>/<name> so its gitdir lands at
+    -- .git/modules/<child>/worktrees/<name> (worktree entry = path basename).
+    local wtbase = vim.fn.tempname() .. "-wt"
+    vim.fn.mkdir(wtbase, "p")
+    local wt = wtbase .. "/" .. opts.worktree.name
+    run(wchild, "worktree", "add", "-q", wt)
+    result.worktree = wt
+  end
+
+  if opts.unborn then
+    local u = vim.fn.tempname() .. "-unborn"
+    init_repo(u)
+    result.unborn = u
+  end
+
+  return result
+end
+
 return M

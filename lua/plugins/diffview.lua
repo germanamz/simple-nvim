@@ -13,13 +13,13 @@ return {
     {
       "<leader>gv",
       function()
-        local rb = require("config.review_base")
-        local root = require("util.git").root()
-        local base = root and rb.get(root)
-        if base then
-          -- Three-dot base...HEAD diffs against the merge-base, matching the
-          -- smart picker's "changed on my branch since base" semantics.
-          vim.cmd("DiffviewOpen " .. base .. "...HEAD")
+        -- Resolve the range from the focused buffer's start dir so a submodule
+        -- buffer reviews its OWN repo against its OWN base (config.review_base
+        -- owns the three-dot base...HEAD formatting and the per-repo lookup).
+        local path = require("util.path")
+        local range = require("config.review_base").diff_range(path.buf_start_dir(0))
+        if range then
+          vim.cmd("DiffviewOpen " .. range)
         else
           vim.cmd("DiffviewOpen")
         end

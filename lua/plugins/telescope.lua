@@ -81,7 +81,9 @@ return {
         "<leader>gB",
         function()
           local rb = require("config.review_base")
-          rb.pick(require("util.git").root(), function(ref)
+          -- buf_root, not root(): set the base for the submodule the focused
+          -- buffer lives in, so it matches where gitsigns/diffview later read it.
+          rb.pick(require("util.git").buf_root(0), function(ref)
             if ref then
               require("config.telescope_smart").smart_files()
             end
@@ -92,7 +94,9 @@ return {
       {
         "<leader>gX",
         function()
-          require("config.review_base").clear_active()
+          -- Clear the base for the focused buffer's submodule (start dir), not
+          -- the cwd repo's — mirrors <leader>gB's buf_root scoping.
+          require("config.review_base").clear_active(require("util.path").buf_start_dir(0))
         end,
         desc = "Review base: clear",
       },

@@ -9,6 +9,11 @@
 -- parsing (porcelain status, name-status diffs) stays in its owning module.
 local M = {}
 
+-- util.path is a git-free leaf (vim.fn only), so requiring it here can't cycle.
+-- buf_root lives on this side of the boundary — it composes path + root, and
+-- root resolution is git's concern — keeping path.lua a pure path module.
+local path = require("util.path")
+
 -- Run a git command. `opts.cwd`, when non-empty, inserts `-C <cwd>` right after
 -- `git` so the command runs against that repo. Returns the output lines and a
 -- boolean `ok` (true when git exited 0).
@@ -61,6 +66,16 @@ end
 -- membership changes mid-session (git init, submodule add/remove).
 function M._clear_root_cache()
   root_cache = {}
+end
+
+-- Repo toplevel for buffer `buf`, resolved from its start dir (its file's
+-- directory, or the cwd when unnamed) — the per-buffer analog of M.root that the
+-- statusline and gitsigns both compute inline. In a superproject this returns
+-- the submodule the buffer actually lives in, so consumers (diffview, the
+-- review-base pickers) act on that submodule rather than whatever cwd resolves
+-- to. nil when the buffer is outside any work tree.
+function M.buf_root(buf)
+  return M.root(path.buf_start_dir(buf))
 end
 
 -- Current branch name for `root`, or nil on detached HEAD / outside a repo.

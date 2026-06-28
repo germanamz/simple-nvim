@@ -248,4 +248,39 @@ describe("config.review_base", function()
       assert.are.equal(pre_content, read_file(state_path()))
     end)
   end)
+
+  -- <leader>gv (diffview) must review the submodule the focused buffer lives in,
+  -- not whatever cwd resolves to. diff_range owns that resolution so the keymap
+  -- stays a thin caller and the scoping is unit-testable.
+  describe("diff_range (per-submodule diff scoping)", function()
+    local sp
+    before_each(function()
+      sp = git_fixture.superproject({ children = { "childA", "childB" } })
+    end)
+
+    it("returns nil when the resolved repo has no review base", function()
+      assert.is_nil(M.diff_range(sp.children.childA))
+    end)
+
+    it("formats <base>...HEAD for the submodule containing the path", function()
+      -- The store is keyed by the canonical (symlink-resolved) toplevel, which
+      -- is what diff_range resolves to via git.root — so seed under that key.
+      M.set(require("util.git").root(sp.children.childA), "main")
+      assert.are.equal("main...HEAD", M.diff_range(sp.children.childA))
+    end)
+
+    it("scopes the base to the path's own submodule, not a sibling's", function()
+      M.set(require("util.git").root(sp.children.childA), "main")
+      -- childB has no base of its own, so its range is nil even though a sibling
+      -- submodule has one set. A cwd-scoped resolver would leak childA's base.
+      assert.is_nil(M.diff_range(sp.children.childB))
+    end)
+
+    it("returns nil outside any repo", function()
+      local dir = vim.fn.tempname() .. "-no-repo"
+      vim.fn.mkdir(dir, "p")
+      assert.is_nil(M.diff_range(dir))
+      vim.fn.delete(dir, "rf")
+    end)
+  end)
 end)
