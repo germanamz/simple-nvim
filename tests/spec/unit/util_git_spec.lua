@@ -177,4 +177,52 @@ describe("util.git", function()
       assert.is_false(git.file_in_ref(nil, "HEAD", "a.lua"))
     end)
   end)
+
+  -- head() resolves HEAD's object id AND branch in one process so the watcher
+  -- can gate on the sha (which a `git submodule update` moves while the branch
+  -- is unchanged) rather than the branch name alone.
+  describe("head", function()
+    it("returns the object id and branch on a normal checkout", function()
+      local repo = new_repo()
+      local h = git.head(repo)
+      assert.is_truthy(h.sha and h.sha:match("^%x%x%x%x%x%x%x"))
+      assert.are.equal("main", h.branch)
+    end)
+
+    it("returns the object id with a nil branch on a detached HEAD", function()
+      local repo = new_repo()
+      vim.fn.system({ "git", "-C", repo, "checkout", "-q", "--detach" })
+      local h = git.head(repo)
+      assert.is_truthy(h.sha and h.sha:match("^%x%x%x%x%x%x%x"))
+      assert.is_nil(h.branch)
+    end)
+
+    it("returns a nil object id and nil branch on an unborn HEAD", function()
+      local dir = vim.fn.tempname() .. "-unborn"
+      vim.fn.mkdir(dir, "p")
+      vim.fn.system({ "git", "-C", dir, "init", "-q", "--initial-branch=main" })
+      local h = git.head(dir)
+      assert.is_nil(h.sha)
+      assert.is_nil(h.branch)
+      vim.fn.delete(dir, "rf")
+    end)
+
+    it("moves the sha but not the branch across a detached commit move", function()
+      local repo = git_fixture.repo({
+        commits = {
+          { files = { ["a.lua"] = "1\n" }, message = "c1" },
+          { files = { ["a.lua"] = "2\n" }, message = "c2" },
+        },
+      })
+      vim.fn.system({ "git", "-C", repo, "checkout", "-q", "--detach", "HEAD~1" })
+      local h1 = git.head(repo)
+      vim.fn.system({ "git", "-C", repo, "checkout", "-q", "--detach", "main" })
+      local h2 = git.head(repo)
+      assert.is_nil(h1.branch)
+      assert.is_nil(h2.branch)
+      assert.is_truthy(h1.sha)
+      assert.is_truthy(h2.sha)
+      assert.are_not.equal(h1.sha, h2.sha)
+    end)
+  end)
 end)

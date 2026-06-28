@@ -83,6 +83,33 @@ function M.branch(root)
   return M.first_line({ "branch", "--show-current" }, { cwd = root })
 end
 
+-- Resolve HEAD for `root` to its object id and branch name in ONE git process:
+--   normal   -> { sha = <id>, branch = "main" }
+--   detached -> { sha = <id>, branch = nil }   (--abbrev-ref prints "HEAD")
+--   unborn   -> { sha = nil,  branch = nil }    (rev-parse HEAD fails)
+-- The HEAD watcher gates on BOTH fields: a `git submodule update` moves the sha
+-- while the (nil) branch is unchanged, which a branch-name-only gate misses.
+--
+-- Uses vim.system, not M.run: systemlist merges stderr, so the unborn-HEAD
+-- "fatal: ambiguous argument 'HEAD'" would land in the output and corrupt the
+-- positional parse. vim.system keeps stdout clean, so the parse is keyed purely
+-- on the exit code (0 -> [sha, token]; nonzero/unborn -> [token]). :wait() makes
+-- it synchronous, same blocking shape as M.run on this off-hot-path call.
+function M.head(root)
+  local res = vim
+    .system({ "git", "-C", root, "rev-parse", "HEAD", "--abbrev-ref", "HEAD" }, { text = true })
+    :wait()
+  local lines = vim.split(res.stdout or "", "\n", { trimempty = true })
+  local sha, token
+  if res.code == 0 then
+    sha, token = lines[1], lines[2]
+  else
+    token = lines[1] -- unborn: only the abbrev-ref "HEAD" reaches stdout
+  end
+  local branch = (token and token ~= "HEAD") and token or nil
+  return { sha = sha, branch = branch }
+end
+
 -- Absolute path of the git directory for `root`, or nil outside a repo.
 -- Worktrees and submodules resolve to their own gitdir — the one whose HEAD
 -- file moves on checkout — not the shared parent .git.

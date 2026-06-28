@@ -94,5 +94,33 @@ describe("config.git_head", function()
       assert.is_nil(fired[1].branch)
       assert.is_nil(head.get(repo))
     end)
+
+    -- The P3 correctness fix: a `git submodule update` checks out a different
+    -- commit as a detached HEAD. The branch is nil before and after, so the old
+    -- branch-name gate stayed silent; the gate now keys on the resolved sha.
+    it("fires when a detached HEAD moves between commits (submodule update)", function()
+      local repo = git_fixture.repo({
+        commits = {
+          { files = { ["a.lua"] = "1\n" }, message = "c1" },
+          { files = { ["a.lua"] = "2\n" }, message = "c2" },
+        },
+      })
+      vim.fn.system({ "git", "-C", repo, "checkout", "-q", "--detach", "HEAD~1" })
+      head.watch(repo)
+      assert.is_nil(head.get(repo)) -- detached at c1: nil branch
+      vim.fn.system({ "git", "-C", repo, "checkout", "-q", "--detach", "main" })
+      assert.is_true(wait_for_event())
+      assert.are.equal(repo, fired[1].root)
+      assert.is_nil(fired[1].branch) -- still detached after the move to c2
+    end)
+
+    it("watches an unborn repo without error and reports a nil branch", function()
+      local dir = vim.fn.tempname() .. "-unborn"
+      vim.fn.mkdir(dir, "p")
+      vim.fn.system({ "git", "-C", dir, "init", "-q", "--initial-branch=main" })
+      assert.is_true(head.watch(dir))
+      assert.is_nil(head.get(dir))
+      vim.fn.delete(dir, "rf")
+    end)
   end)
 end)

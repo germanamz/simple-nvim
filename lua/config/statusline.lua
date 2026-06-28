@@ -8,20 +8,33 @@ local M = {}
 
 local path = require("util.path")
 
--- Resolve repo toplevel and branch in one git spawn, off the main thread.
--- `--show-toplevel` prints even when `--abbrev-ref HEAD` fails (e.g. a repo
+-- Resolve repo toplevel, HEAD sha, and branch in one git spawn, off the main
+-- thread. `--show-toplevel` prints even when the HEAD lookups fail (e.g. a repo
 -- with no commits yet), so the toplevel is parsed regardless of exit code and
--- the branch only on success. Detached HEAD prints "HEAD" → treated as none.
+-- the sha/branch only on success. Detached HEAD prints "HEAD" → treated as none.
+-- The sha is only used to seed config.git_head's watcher (which gates on it).
 local function refresh(buf)
   if not vim.api.nvim_buf_is_valid(buf) then
     return
   end
-  local cmd =
-    { "git", "-C", path.buf_start_dir(buf), "rev-parse", "--show-toplevel", "--abbrev-ref", "HEAD" }
+  local cmd = {
+    "git",
+    "-C",
+    path.buf_start_dir(buf),
+    "rev-parse",
+    "--show-toplevel",
+    "HEAD",
+    "--abbrev-ref",
+    "HEAD",
+  }
   local spawned = pcall(vim.system, cmd, { text = true }, function(out)
     local lines = vim.split(out.stdout or "", "\n", { trimempty = true })
+    -- exit 0 prints { toplevel, sha, branch-or-"HEAD" }; a no-commit repo exits
+    -- nonzero with just { toplevel } (no sha), and outside a repo prints nothing.
+    -- The sha is resolved here only to seed the HEAD watcher in one spawn.
     local root = lines[1]
-    local branch = (out.code == 0 and lines[2]) or ""
+    local sha = (out.code == 0) and lines[2] or nil
+    local branch = (out.code == 0 and lines[3]) or ""
     if branch == "HEAD" then
       branch = ""
     end
@@ -34,10 +47,13 @@ local function refresh(buf)
       vim.b[buf].nvim_git_branch = (root and branch) or ""
       -- Lazily start the repo's HEAD watcher; its HeadChanged broadcast drives
       -- refresh_all_buffers, so external checkouts repaint without waiting for
-      -- a buffer event. Hand it the branch we just resolved so its first watch
-      -- doesn't re-spawn git.branch (normalize detached HEAD "" → nil).
+      -- a buffer event. Hand it the {sha, branch} we just resolved so its first
+      -- watch doesn't re-spawn git.head (normalize detached/unborn "" → nil).
       if root then
-        require("config.git_head").watch(root, branch ~= "" and branch or nil)
+        require("config.git_head").watch(
+          root,
+          { sha = sha, branch = branch ~= "" and branch or nil }
+        )
       end
       vim.cmd("redrawstatus!")
     end)

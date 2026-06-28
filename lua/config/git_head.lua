@@ -8,7 +8,7 @@ local M = {}
 
 local git = require("util.git")
 
--- root -> { handle = uv fs_event, branch = string|nil, pending = boolean }
+-- root -> { handle = uv fs_event, sha = string|nil, branch = string|nil, pending = boolean }
 local watched = {}
 
 -- Last-seen branch for a watched root, nil when unwatched or detached.
@@ -20,22 +20,27 @@ function M.get(root)
   return nil
 end
 
--- Re-resolve the branch and broadcast only on an actual change — fs events
--- arrive in bursts (lockfile, rename, change) for a single checkout.
+-- Re-resolve HEAD and broadcast only on an actual change — fs events arrive in
+-- bursts (lockfile, rename, change) for a single checkout. The gate keys on the
+-- resolved object id AND the branch: a `git submodule update` moves the sha
+-- while leaving the (detached, nil) branch unchanged, which a branch-only gate
+-- would never notice. The broadcast payload stays {root, branch} — consumers
+-- only ever care which branch a root is on.
 local function check(root)
   local w = watched[root]
   if not w then
     return
   end
   w.pending = false
-  local branch = git.branch(root)
-  if branch == w.branch then
+  local head = git.head(root)
+  if head.sha == w.sha and head.branch == w.branch then
     return
   end
-  w.branch = branch
+  w.sha = head.sha
+  w.branch = head.branch
   vim.api.nvim_exec_autocmds("User", {
     pattern = "HeadChanged",
-    data = { root = root, branch = branch },
+    data = { root = root, branch = head.branch },
   })
 end
 
@@ -43,11 +48,12 @@ end
 -- when a watcher is (already) running, false when one could not be started
 -- (not a repo, fs_event unavailable).
 --
--- `branch` (optional) seeds the last-seen branch with a value the caller already
--- resolved, sparing a duplicate blocking git.branch() spawn on the first watch
--- of each root. Pass nil for detached HEAD / unknown (NOT "" — the module's
--- invariant is nil-on-detached); nil falls back to resolving here.
-function M.watch(root, branch)
+-- `seed` (optional) is a { sha, branch } snapshot the caller already resolved
+-- (the statusline resolves both in its async spawn), sparing a duplicate
+-- blocking git.head() on the first watch of each root. Omit it to resolve here.
+-- Both fields follow the module invariant: nil-on-detached (branch) and
+-- nil-on-unborn (sha); a "" branch must be normalized to nil before seeding.
+function M.watch(root, seed)
   if not root or root == "" then
     return false
   end
@@ -64,11 +70,10 @@ function M.watch(root, branch)
   end
   -- Watch the gitdir, not the HEAD file: git replaces HEAD atomically
   -- (write + rename), which strands a watcher pinned to the old inode.
-  local seed = branch
   if seed == nil then
-    seed = git.branch(root)
+    seed = git.head(root)
   end
-  local w = { handle = handle, branch = seed, pending = false }
+  local w = { handle = handle, sha = seed.sha, branch = seed.branch, pending = false }
   local ok = handle:start(gitdir, {}, function(_, filename)
     if filename and filename ~= "HEAD" then
       return
