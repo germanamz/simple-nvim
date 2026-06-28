@@ -434,6 +434,10 @@ return {
     -- re-resolving branch/base for *every* buffer, and reloading the file tree's
     -- git labels.
     vim.keymap.set("n", "<leader>gR", function()
+      -- The manual hatch for dir_cache: an external-shell `git submodule
+      -- add/deinit/init` fires neither DirChanged nor a .gitmodules write, so drop
+      -- the dir-keyed root cache here before re-resolving everything below.
+      require("config.dir_cache")._clear()
       require("gitsigns").refresh()
       -- Catch untracked / new-vs-base buffers gitsigns never attaches to (so
       -- they get no GitSignsUpdate); refresh() above already covers attached ones.

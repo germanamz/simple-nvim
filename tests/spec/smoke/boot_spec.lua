@@ -24,6 +24,7 @@ describe("smoke: boot", function()
       "config.lsp_refs",
       "config.review_base",
       "config.telescope_smart",
+      "config.dir_cache",
     }
     for _, name in ipairs(modules) do
       it("requires " .. name, function()
@@ -32,6 +33,13 @@ describe("smoke: boot", function()
         assert.is_true(ok, "failed to require " .. name .. ": " .. tostring(err))
       end)
     end
+  end)
+
+  it("wires the dir-cache invalidation autocmds at startup", function()
+    -- init.lua calls require("config.dir_cache").setup(); the DirChanged +
+    -- BufWritePost(.gitmodules) cache-invalidation autocmds must be registered.
+    local au = vim.api.nvim_get_autocmds({ group = "dir_cache_invalidation" })
+    assert.is_true(#au >= 2)
   end)
 
   it("no plugin reports failure", function()
