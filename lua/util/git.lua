@@ -78,6 +78,15 @@ function M.buf_root(buf)
   return M.root(path.buf_start_dir(buf))
 end
 
+-- True when buffer `buf` lives in the work tree whose toplevel is `root`. Used
+-- to scope event fan-out (HeadChanged / ReviewBaseChanged carry data.root) to
+-- the buffers a change can actually affect. EXACT toplevel equality, never a
+-- path prefix: a submodule's working copy sits on disk under the superproject,
+-- so a prefix test would wrongly match a child buffer against the parent's root.
+function M.buf_in_root(buf, root)
+  return M.buf_root(buf) == root
+end
+
 -- Current branch name for `root`, or nil on detached HEAD / outside a repo.
 function M.branch(root)
   return M.first_line({ "branch", "--show-current" }, { cwd = root })

@@ -7,6 +7,7 @@
 local M = {}
 
 local path = require("util.path")
+local git = require("util.git")
 
 -- Resolve repo toplevel, HEAD sha, and branch in one git spawn, off the main
 -- thread. `--show-toplevel` prints even when the HEAD lookups fail (e.g. a repo
@@ -64,11 +65,17 @@ local function refresh(buf)
   end
 end
 
--- Refresh every loaded buffer's cached branch/base and repaint the statusline.
--- Used by the initial VimEnter pass and on review-base changes.
-local function refresh_all_buffers()
+-- Refresh loaded buffers' cached branch/base and repaint the statusline. With a
+-- `root` (the data.root a HeadChanged/ReviewBaseChanged carries) only buffers in
+-- that repo are re-resolved: a checkout or base change in one submodule can't
+-- move another submodule's branch/base, so re-spawning git for every buffer
+-- across every submodule is wasted work. nil sweeps all loaded buffers (the
+-- VimEnter startup pass and the <leader>gR manual refresh, where any root may
+-- have changed). The buffer-list scan itself stays O(buffers) — cheap, and
+-- buf_in_root's root resolution is memoized.
+local function refresh_all_buffers(root)
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(buf) then
+    if vim.api.nvim_buf_is_loaded(buf) and (root == nil or git.buf_in_root(buf, root)) then
       refresh(buf)
     end
   end
@@ -183,13 +190,19 @@ function M.setup()
   -- after startup completes so the initial buffer has branch/base populated.
   vim.api.nvim_create_autocmd("VimEnter", {
     group = group,
-    callback = refresh_all_buffers,
+    callback = function()
+      refresh_all_buffers()
+    end,
   })
 
   vim.api.nvim_create_autocmd("User", {
     group = group,
     pattern = { "ReviewBaseChanged", "HeadChanged" },
-    callback = refresh_all_buffers,
+    callback = function(args)
+      -- Both events carry the repo root they apply to; scope the refresh to that
+      -- root's buffers (a different submodule's branch/base is untouched).
+      refresh_all_buffers(args.data and args.data.root or nil)
+    end,
   })
   -- Startup is covered by the VimEnter pass above (which also handles starting
   -- directly into netrw); no separate immediate refresh needed here.

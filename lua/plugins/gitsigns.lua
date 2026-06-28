@@ -361,9 +361,14 @@ return {
     -- Statusline counts (gitsigns_hunks_status) read gs.get_hunks directly and
     -- stay live regardless of visibility. The toggle only affects the in-buffer
     -- line backgrounds + word-diff; colored line numbers (numhl) are left on.
-    local function repaint_all()
+    -- With a `root`, repaint only that repo's buffers — used by ReviewBaseChanged,
+    -- which carries the one root whose base moved; a sibling submodule's
+    -- new-vs-base painting is untouched, so re-spawning git (file_new_vs_base)
+    -- for every buffer across every submodule is wasted. nil repaints all (the
+    -- FocusGained / <leader>gR / <leader>hh paths, where shared state changed).
+    local function repaint_all(root)
       for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(buf) then
+        if vim.api.nvim_buf_is_loaded(buf) and (root == nil or git.buf_in_root(buf, root)) then
           mark_hunks(buf)
         end
       end
@@ -493,9 +498,10 @@ return {
         local ref = args.data and args.data.ref or nil
         require("gitsigns").change_base(ref, true)
         -- Attached buffers repaint via their own GitSignsUpdate once hunks
-        -- recompute against the new base; unattached (new-vs-base) buffers
-        -- get no such event, so repaint everything here.
-        repaint_all()
+        -- recompute against the new base; unattached (new-vs-base) buffers get no
+        -- such event, so repaint them here — but only in the root whose base
+        -- actually changed (a sibling submodule's new-vs-base is unaffected).
+        repaint_all(args.data and args.data.root or nil)
       end,
     })
 

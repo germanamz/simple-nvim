@@ -156,6 +156,57 @@ describe("multi-submodule (util.git in a superproject)", function()
     end)
   end)
 
+  describe("git.buf_in_root (event fan-out scoping)", function()
+    local sp
+    before_each(function()
+      sp = git_fixture.superproject({ children = { "childA", "childB" } })
+    end)
+
+    local bufs = {}
+    local function buf_for(file)
+      local buf = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(buf, file)
+      bufs[#bufs + 1] = buf
+      return buf
+    end
+    after_each(function()
+      for _, buf in ipairs(bufs) do
+        if vim.api.nvim_buf_is_valid(buf) then
+          vim.api.nvim_buf_delete(buf, { force = true })
+        end
+      end
+      bufs = {}
+    end)
+
+    it("is true when the buffer's submodule equals the root", function()
+      local buf = buf_for(sp.children.childA .. "/childA.txt")
+      assert.is_true(git.buf_in_root(buf, git.root(sp.children.childA)))
+    end)
+
+    it("is false for a buffer in a different submodule", function()
+      local buf = buf_for(sp.children.childA .. "/childA.txt")
+      assert.is_false(git.buf_in_root(buf, git.root(sp.children.childB)))
+    end)
+
+    -- The exact-equality requirement: a submodule buffer lives on disk UNDER the
+    -- superproject, so a path-prefix test would wrongly scope a childA buffer to
+    -- a HeadChanged on the parent. buf_in_root must compare toplevels, not paths.
+    it("is false for a submodule buffer against the parent superproject root", function()
+      local buf = buf_for(sp.children.childA .. "/childA.txt")
+      assert.is_false(git.buf_in_root(buf, git.root(sp.root)))
+    end)
+
+    it("is false for a buffer outside any repo", function()
+      local dir = vim.fn.tempname() .. "-no-repo"
+      vim.fn.mkdir(dir, "p")
+      vim.fn.chdir(dir)
+      local buf = vim.api.nvim_create_buf(true, false)
+      bufs[#bufs + 1] = buf
+      assert.is_false(git.buf_in_root(buf, git.root(sp.root)))
+      vim.fn.delete(dir, "rf")
+    end)
+  end)
+
   describe("unborn-HEAD repository (no commits)", function()
     local sp
     before_each(function()
