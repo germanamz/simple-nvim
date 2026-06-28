@@ -92,4 +92,81 @@ describe("config.statusline", function()
       assert.are.equal("", _G.gitsigns_hunks_status())
     end)
   end)
+
+  -- Behavioral lock for the data.root event scoping (plan stage P4). The
+  -- scoping decision runs through git.buf_in_root, so spying on it captures
+  -- exactly which root the handler forwards — synchronously, with no async
+  -- refresh to race. This catches the wiring trap directly: a callback that
+  -- passed the autocmd args table (or nil) instead of data.root would call
+  -- buf_in_root with the wrong value, or the nil sweep would call it at all.
+  describe("event fan-out scoping", function()
+    local nvim_env = require("helpers.nvim_env")
+    local git_fixture = require("helpers.git_fixture")
+    local env_root, git, sp, roots_seen, orig_buf_in_root, opened
+
+    before_each(function()
+      env_root = nvim_env.setup_isolated_env()
+      package.loaded["util.git"] = nil
+      package.loaded["config.git_head"] = nil
+      package.loaded["config.statusline"] = nil
+      git = require("util.git")
+      require("config.statusline").setup()
+      sp = git_fixture.superproject({ children = { "childA", "childB" } })
+      -- Record every root the scoping predicate is asked about. statusline holds
+      -- the util.git table (not the function), so replacing the field is seen by
+      -- refresh_all_buffers' call site.
+      roots_seen = {}
+      orig_buf_in_root = git.buf_in_root
+      git.buf_in_root = function(buf, root)
+        roots_seen[#roots_seen + 1] = root
+        return orig_buf_in_root(buf, root)
+      end
+      opened = {}
+    end)
+
+    after_each(function()
+      git.buf_in_root = orig_buf_in_root
+      require("config.git_head")._stop_all()
+      for _, b in ipairs(opened) do
+        if vim.api.nvim_buf_is_valid(b) then
+          vim.api.nvim_buf_delete(b, { force = true })
+        end
+      end
+      nvim_env.teardown(env_root)
+    end)
+
+    local function open(file)
+      local b = vim.fn.bufadd(file)
+      vim.fn.bufload(b)
+      opened[#opened + 1] = b
+      return b
+    end
+
+    it("scopes the HeadChanged handler to data.root, not the autocmd args", function()
+      local rootA = git.root(sp.children.childA)
+      open(sp.children.childA .. "/childA.txt")
+      open(sp.children.childB .. "/childB.txt")
+      -- exec_autocmds runs the handler synchronously, so the predicate calls it
+      -- makes are all captured before this returns — no async watcher in play yet.
+      vim.api.nvim_exec_autocmds("User", {
+        pattern = "HeadChanged",
+        modeline = false,
+        data = { root = rootA, branch = "main" },
+      })
+      assert.is_true(#roots_seen > 0) -- the handler scoped rather than full-swept
+      for _, root in ipairs(roots_seen) do
+        assert.are.equal(rootA, root) -- forwarded data.root verbatim
+      end
+    end)
+
+    it("does not scope the nil sweep (refresh_all reaches every root)", function()
+      open(sp.children.childA .. "/childA.txt")
+      open(sp.children.childB .. "/childB.txt")
+      require("config.statusline").refresh_all()
+      -- root == nil short-circuits buf_in_root, so a correct full sweep never
+      -- consults it. The wiring trap (passing a truthy args table as root) would
+      -- instead call it for every buffer and scope the sweep to nothing.
+      assert.are.equal(0, #roots_seen)
+    end)
+  end)
 end)
