@@ -21,7 +21,13 @@
 
 local M = {}
 
-local ROOT_MARKERS = { ".git", ".marksman.toml", "tusk.toml", ".tusk" }
+-- A wiki vault is rooted by ANY of these, not just .git — so a note directory
+-- with no repo still resolves. This is deliberately NOT routed through
+-- util.git.root: that resolver is git-toplevel-only (rev-parse) and would return
+-- nil for a non-git vault. The two answer different questions (vault root vs git
+-- toplevel) and only coincide on the .git marker, so they stay separate rather
+-- than forcing a shared resolver around a marker-set parameter neither wants.
+local WIKI_MARKERS = { ".git", ".marksman.toml", "tusk.toml", ".tusk" }
 
 -- Return the inner text of the `[[...]]` wikilink covering 1-based column `col`
 -- on `line`, or nil if the column isn't inside one.
@@ -107,8 +113,9 @@ local function project_root(source)
     local name = vim.api.nvim_buf_get_name(0)
     source = name ~= "" and name or vim.fn.getcwd()
   end
-  return vim.fs.root(source, ROOT_MARKERS) or vim.fn.getcwd()
+  return vim.fs.root(source, WIKI_MARKERS) or vim.fn.getcwd()
 end
+M._project_root = project_root
 
 -- Open an absolute path in the current window. Returns false (and notifies) if
 -- the file doesn't exist. Standard `[text](dest)` file links route through this

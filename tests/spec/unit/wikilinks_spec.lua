@@ -189,4 +189,21 @@ describe("config.wikilinks", function()
       assert.are.equal("food/x.md", m[1].target)
     end)
   end)
+
+  describe("_project_root", function()
+    it("resolves a non-git vault by its marker, where git.root could not", function()
+      -- The deliberate non-merge with util.git: a wiki vault is rooted by any of
+      -- WIKI_MARKERS (.marksman.toml here), not just .git, so a plain note
+      -- directory with no repo still resolves. git.root (rev-parse) would return
+      -- nil for this, which is why the two resolvers stay separate.
+      local vault = vim.fn.tempname()
+      vim.fn.mkdir(vault .. "/notes", "p")
+      assert(io.open(vault .. "/.marksman.toml", "w")):close()
+      assert.are.equal(
+        vim.fn.resolve(vault),
+        vim.fn.resolve(wl._project_root(vault .. "/notes/x.md"))
+      )
+      vim.fn.delete(vault, "rf")
+    end)
+  end)
 end)
