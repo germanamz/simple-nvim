@@ -47,6 +47,19 @@ describe("util.git", function()
       assert.is_true(ok)
       assert.are.equal(vim.fn.resolve(repo), vim.fn.resolve(lines[1]))
     end)
+
+    it("returns no stdout lines for a stderr-only failure", function()
+      -- git's "fatal: not a git repository" diagnostic is written to stderr; the
+      -- run layer must keep it out of `lines` so callers that parse positionally
+      -- (head, statusline) aren't corrupted by error text. systemlist merged the
+      -- two streams; vim.system keeps them separate.
+      local dir = vim.fn.tempname() .. "-not-a-repo"
+      vim.fn.mkdir(dir, "p")
+      local lines, ok = git.run({ "rev-parse", "--show-toplevel" }, { cwd = dir })
+      assert.is_false(ok)
+      assert.are.same({}, lines)
+      vim.fn.delete(dir, "rf")
+    end)
   end)
 
   describe("first_line", function()
@@ -89,6 +102,18 @@ describe("util.git", function()
 
     it("returns nil for a nonexistent path", function()
       assert.is_nil(git.root("/nonexistent"))
+    end)
+
+    it("re-probes a directory that only later becomes a repo", function()
+      -- root() caches only successful lookups, so a failed (or timed-out, post
+      -- P5) resolve never poisons the cache — the dir is cheaply re-probed and
+      -- resolves once `git init` makes it a work tree.
+      local dir = vim.fn.tempname() .. "-becomes-repo"
+      vim.fn.mkdir(dir, "p")
+      assert.is_nil(git.root(dir))
+      vim.fn.system({ "git", "-C", dir, "init", "-q", "--initial-branch=main" })
+      assert.are.equal(vim.fn.resolve(dir), vim.fn.resolve(git.root(dir)))
+      vim.fn.delete(dir, "rf")
     end)
   end)
 

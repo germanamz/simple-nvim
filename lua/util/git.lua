@@ -1,9 +1,18 @@
--- Thin git-shellout layer. Single home for the synchronous `systemlist` +
--- `shell_error` guard + `-C <cwd>` plumbing that was hand-rolled (with subtly
--- inconsistent error handling) across telescope_smart, review_base and gitsigns.
--- (statusline is the deliberate exception: it needs an async vim.system spawn
--- that resolves toplevel + branch in one call off the main thread, which this
--- synchronous layer can't express, so it keeps its own shellout.)
+-- Thin git-shellout layer. Single home for the synchronous, time-bounded
+-- `vim.system():wait()` + exit-code guard + `-C <cwd>` plumbing that was
+-- hand-rolled (with subtly inconsistent error handling) across telescope_smart,
+-- review_base and gitsigns. (statusline keeps its own async spawn: it resolves
+-- toplevel + sha + branch off the main thread, which this synchronous layer
+-- can't express. config.git_head._resolve_head is the other async exception.)
+--
+-- vim.system (not systemlist) for two reasons: it separates stdout from stderr,
+-- so a git diagnostic ("fatal: not a git repository") never pollutes the parsed
+-- lines; and :wait(TIMEOUT_MS) bounds the call, so a hung or network submodule
+-- gitdir degrades to ok=false instead of freezing Neovim. A timed-out call is
+-- treated as a plain failure — and M.root only caches successes, so it is not
+-- poisoned and stays cheap to re-probe. The synchronous bulk status/diff path
+-- (M._git_changes) is test-only; production resolves the porcelain/diff through
+-- config.telescope_smart's own async vim.system, unaffected by this bound.
 --
 -- Deliberately thin: it shells out and reports success/first-line. Higher-level
 -- parsing (porcelain status, name-status diffs) stays in its owning module.
@@ -14,9 +23,14 @@ local M = {}
 -- root resolution is git's concern — keeping path.lua a pure path module.
 local path = require("util.path")
 
+-- The one home for "how long a synchronous git call may block". Every M.run
+-- caller is a cheap resolve (rev-parse / branch / verify), so a single flat
+-- bound is enough; raise it here, not at call sites.
+local TIMEOUT_MS = 2000
+
 -- Run a git command. `opts.cwd`, when non-empty, inserts `-C <cwd>` right after
--- `git` so the command runs against that repo. Returns the output lines and a
--- boolean `ok` (true when git exited 0).
+-- `git` so the command runs against that repo. Returns the output lines (stdout
+-- only) and a boolean `ok` (true when git exited 0). A timeout counts as not-ok.
 function M.run(args, opts)
   local cmd = { "git" }
   if opts and opts.cwd and opts.cwd ~= "" then
@@ -24,8 +38,13 @@ function M.run(args, opts)
     cmd[#cmd + 1] = opts.cwd
   end
   vim.list_extend(cmd, args)
-  local lines = vim.fn.systemlist(cmd)
-  return lines, vim.v.shell_error == 0
+  local res = vim.system(cmd, { text = true }):wait(TIMEOUT_MS)
+  if not res then
+    -- :wait(timeout) returns nil when it had to SIGKILL the process; treat the
+    -- timed-out call as a failure with no output.
+    return {}, false
+  end
+  return vim.split(res.stdout or "", "\n", { trimempty = true }), res.code == 0
 end
 
 -- Run a command and return its first output line, or nil when the command
@@ -99,21 +118,17 @@ end
 -- The HEAD watcher gates on BOTH fields: a `git submodule update` moves the sha
 -- while the (nil) branch is unchanged, which a branch-name-only gate misses.
 --
--- Uses vim.system, not M.run: systemlist merges stderr, so the unborn-HEAD
--- "fatal: ambiguous argument 'HEAD'" would land in the output and corrupt the
--- positional parse. vim.system keeps stdout clean, so the parse is keyed purely
--- on the exit code (0 -> [sha, token]; nonzero/unborn -> [token]). :wait() makes
--- it synchronous, same blocking shape as M.run on this off-hot-path call.
+-- The parse keys on the exit code, which M.run now exposes cleanly: on success
+-- stdout is [sha, token]; an unborn HEAD exits nonzero with only the abbrev-ref
+-- "HEAD" on stdout (the "fatal: ambiguous argument" diagnostic stays on stderr,
+-- which M.run drops). A "HEAD" token means detached or unborn → nil branch.
 function M.head(root)
-  local res = vim
-    .system({ "git", "-C", root, "rev-parse", "HEAD", "--abbrev-ref", "HEAD" }, { text = true })
-    :wait()
-  local lines = vim.split(res.stdout or "", "\n", { trimempty = true })
+  local lines, ok = M.run({ "rev-parse", "HEAD", "--abbrev-ref", "HEAD" }, { cwd = root })
   local sha, token
-  if res.code == 0 then
+  if ok then
     sha, token = lines[1], lines[2]
   else
-    token = lines[1] -- unborn: only the abbrev-ref "HEAD" reaches stdout
+    token = lines[1]
   end
   local branch = (token and token ~= "HEAD") and token or nil
   return { sha = sha, branch = branch }
