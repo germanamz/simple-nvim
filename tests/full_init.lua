@@ -3,6 +3,9 @@
 -- resolves plugin specs from the cache for `:Lazy` introspection.
 vim.env.NVIM_BOOTSTRAP = "0"
 
+-- Keep tests hermetic: never read or write the user's ShaDa (see minimal_init).
+vim.o.shadafile = "NONE"
+
 -- Plenary's PlenaryBustedDirectory always passes `--noplugin` to child nvim
 -- when `minimal_init` is set. That flips `loadplugins` off, which makes
 -- `lazy.setup` short-circuit before registering any specs. Re-enable here
