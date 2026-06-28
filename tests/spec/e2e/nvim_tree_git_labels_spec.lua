@@ -64,6 +64,21 @@ describe("e2e: nvim-tree git labels", function()
     wait_for_line("%?%*%s+new%.lua")
   end)
 
+  it("labels a file inside a submodule via the recursive status", function()
+    local sp = git_fixture.superproject({ children = { "childA" } })
+    local f = assert(io.open(sp.children.childA .. "/new.lua", "w"))
+    f:write("return 1\n")
+    f:close()
+    vim.fn.chdir(sp.root)
+
+    local api = open_tree(sp.root)
+    -- The submodule directory is shown; its contents carry per-file labels from
+    -- the cross-submodule recursive status (not the collapsed gitlink row).
+    wait_for_line("childA")
+    api.tree.expand_all()
+    wait_for_line("%?%*%s+new%.lua")
+  end)
+
   it("labels committed-vs-base changes and updates on ReviewBaseChanged", function()
     local repo = git_fixture.repo({
       commits = {
