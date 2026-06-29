@@ -104,40 +104,33 @@ return {
     require("gitsigns").setup(opts)
 
     local function paint()
-      -- Saturated tints live in config.palette (git.*) so the literal hex has a
-      -- single home; the dark/light selection + the deliberate colorscheme
-      -- override (no default=true) stay here.
+      -- GitHub-light diff tints live in config.palette (git.*) so the literal hex
+      -- has a single home; the deliberate colorscheme override (no default=true)
+      -- stays here so the bespoke diff visualization wins over the theme's
+      -- plainer GitSigns groups.
       local g = palette.git
-      -- Nr (colored line numbers) carry their own fg, so one saturated palette
-      -- reads on both backgrounds.
-      vim.api.nvim_set_hl(0, "GitSignsAddNr", { fg = "#ffffff", bg = g.add_nr })
-      vim.api.nvim_set_hl(0, "GitSignsChangeNr", { fg = "#ffffff", bg = g.change_nr })
-      vim.api.nvim_set_hl(0, "GitSignsDeleteNr", { fg = "#ffffff", bg = g.delete_nr })
+      -- Nr (colored line numbers) are dark-fg-on-light-tint chips so they read on
+      -- the white background.
+      vim.api.nvim_set_hl(0, "GitSignsAddNr", { fg = g.add_nr_fg, bg = g.add_nr_bg })
+      vim.api.nvim_set_hl(0, "GitSignsChangeNr", { fg = g.change_nr_fg, bg = g.change_nr_bg })
+      vim.api.nvim_set_hl(0, "GitSignsDeleteNr", { fg = g.delete_nr_fg, bg = g.delete_nr_bg })
 
       -- Line backgrounds (Ln) set only bg and inherit the buffer's own fg
-      -- (treesitter/syntax). Light pastels assume a light theme — on the dark
-      -- default colorscheme they put light fg on a light tint, near-illegible.
-      -- Pick the tint from the active background, re-applied on the events below.
-      local dark = vim.o.background == "dark"
-      local add_ln = dark and g.add_ln_dark or g.add_ln_light
-      local change_ln = dark and g.change_ln_dark or g.change_ln_light
-      local add_inline = dark and g.add_inline_dark or g.add_inline_light
-
-      vim.api.nvim_set_hl(0, "GitSignsAddLn", { bg = add_ln })
-      vim.api.nvim_set_hl(0, "GitSignsChangeLn", { bg = change_ln })
+      -- (treesitter/syntax). GitHub's subtle light diff fills.
+      vim.api.nvim_set_hl(0, "GitSignsAddLn", { bg = g.add_ln })
+      vim.api.nvim_set_hl(0, "GitSignsChangeLn", { bg = g.change_ln })
       vim.api.nvim_set_hl(0, "GitSignsDeleteLn", { sp = g.delete, underdashed = true })
 
-      vim.api.nvim_set_hl(0, "GitSignsAddLnInline", { bg = add_inline })
-      vim.api.nvim_set_hl(0, "GitSignsChangeLnInline", { bg = add_inline })
+      vim.api.nvim_set_hl(0, "GitSignsAddLnInline", { bg = g.add_inline })
+      vim.api.nvim_set_hl(0, "GitSignsChangeLnInline", { bg = g.add_inline })
       vim.api.nvim_set_hl(0, "GitSignsDeleteLnInline", {})
 
       vim.api.nvim_set_hl(0, "GitSignsDelPrev", { sp = g.delete, underdashed = true })
     end
     paint()
-    -- ColorScheme resets highlight groups; OptionSet catches a bare
-    -- `:set background=dark` that fires no ColorScheme.
+    -- The GitHub theme defines its own GitSigns* groups on load; re-assert these
+    -- overrides whenever a colorscheme is applied so they keep winning.
     vim.api.nvim_create_autocmd("ColorScheme", { callback = paint })
-    vim.api.nvim_create_autocmd("OptionSet", { pattern = "background", callback = paint })
 
     local ns = vim.api.nvim_create_namespace("gs_custom")
 

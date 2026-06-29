@@ -54,8 +54,10 @@ local setup_win_autocmds, ensure_lifecycle, ensure_state, show, hide
 
 local DEBOUNCE_MS = 300
 
+-- Light-only config, so glow always renders with its light ANSI style. (glow's
+-- -s style is glow's own theme, independent of the Neovim colorscheme.)
 local function glow_style()
-  return vim.o.background == "light" and "light" or "dark"
+  return "light"
 end
 
 -- Number of leading YAML-frontmatter lines (0 if none), counting both `---`
@@ -294,24 +296,9 @@ setup_win_autocmds = function(state)
       schedule_refresh(state)
     end,
   })
-  -- glow's -s style is read from vim.o.background at each render, so a theme
-  -- switch while the preview is open would leave the pane mismatched until the
-  -- next edit/resize. Re-render on a colorscheme change (and on a bare
-  -- `:set background=...`, which fires no ColorScheme). Lives in win_group, so a
-  -- hidden preview isn't refreshed.
-  vim.api.nvim_create_autocmd("ColorScheme", {
-    group = grp,
-    callback = function()
-      schedule_refresh(state)
-    end,
-  })
-  vim.api.nvim_create_autocmd("OptionSet", {
-    group = grp,
-    pattern = "background",
-    callback = function()
-      schedule_refresh(state)
-    end,
-  })
+  -- glow's -s style is fixed to "light" now (light-only config), so there's no
+  -- background/colorscheme switch to re-match the preview against — the old
+  -- ColorScheme / OptionSet re-render autocmds were dead and have been removed.
   vim.api.nvim_create_autocmd("CursorMoved", {
     group = grp,
     buffer = state.src,

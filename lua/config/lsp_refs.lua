@@ -21,14 +21,14 @@ local inflight = {}
 -- showed "⇄1" with no highlight and the ]r/[r jumps as no-ops).
 local MIN_HIGHLIGHTED_REFS = 2
 
--- Neovim's default colorscheme links LspReferenceText to Visual, so the painted
--- symbol occurrences look identical to a text selection — easy to mistake for a
--- stuck selection that won't clear on a mode change. Give the group its own look
--- (underline) so "other uses of this symbol" reads distinctly from a real
--- selection. `default = true` still lets a real colorscheme override it; we
--- re-apply on ColorScheme since loading one resets highlight groups.
+-- The GitHub theme paints LspReferenceText as a subtle background, which reads
+-- much like a Visual selection — easy to mistake painted symbol occurrences for
+-- a stuck selection that won't clear on a mode change. Override with an underline
+-- (NOT default=true, so it composes over the theme instead of losing to it) so
+-- "other uses of this symbol" reads distinctly from a real selection. Re-applied
+-- on ColorScheme since applying a colorscheme resets highlight groups.
 local function ensure_highlight()
-  vim.api.nvim_set_hl(0, "LspReferenceText", { underline = true, default = true })
+  vim.api.nvim_set_hl(0, "LspReferenceText", { underline = true })
 end
 
 local function clear_marks(bufnr)

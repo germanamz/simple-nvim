@@ -187,7 +187,7 @@ local function open_legend()
   -- Purple, matching SmartFilesBase in config.git_status_codes: the "base"
   -- concept reads as one hue across the legend, the pickers, and the tree.
   -- (The old blue duplicated SmartFilesModified and muddied that mapping.)
-  vim.api.nvim_set_hl(0, "ReviewBaseActive", { fg = "#d896ff", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "ReviewBaseActive", { fg = "#8250df", bold = true, default = true })
   vim.api.nvim_set_hl(0, "ReviewBaseLegend", { fg = palette.muted, default = true })
   local text = " ● active base "
   local buf = vim.api.nvim_create_buf(false, true)

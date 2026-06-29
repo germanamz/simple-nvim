@@ -11,15 +11,17 @@ local palette = require("config.palette")
 -- can override). Lives here rather than telescope_smart so non-telescope
 -- consumers (nvim-tree) can define them without loading the picker module.
 function M.define_highlights()
-  vim.api.nvim_set_hl(0, "SmartFilesAdded", { fg = "#6cc070", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesUntracked", { fg = "#c08850", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesModified", { fg = "#5a8ed4", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesDeleted", { fg = "#9a9a9a", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesRenamed", { fg = "#4cb0a0", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesBase", { fg = "#d896ff", bold = true, default = true })
+  -- GitHub-light fg tokens, legible on the high-contrast white background.
+  -- GitHub never defines these SmartFiles* names, so default=true still applies.
+  vim.api.nvim_set_hl(0, "SmartFilesAdded", { fg = "#1a7f37", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesUntracked", { fg = "#bc4c00", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesModified", { fg = "#0969da", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesDeleted", { fg = "#57606a", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesRenamed", { fg = "#1b7c83", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesBase", { fg = "#8250df", bold = true, default = true })
   -- Merge-conflict (unmerged) codes — UU/UA/UD — carry a dominant U; red so a
   -- conflict stands out from ordinary staged/worktree changes.
-  vim.api.nvim_set_hl(0, "SmartFilesConflict", { fg = "#d05a5a", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesConflict", { fg = "#cf222e", bold = true, default = true })
   vim.api.nvim_set_hl(0, "SmartFilesUnstaged", { fg = palette.muted, default = true })
 end
 

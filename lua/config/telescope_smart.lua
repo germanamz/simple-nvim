@@ -490,7 +490,7 @@ end
 local function set_legend_highlights()
   git_status_codes.define_highlights()
   vim.api.nvim_set_hl(0, "SmartFilesLegend", { fg = palette.muted, default = true })
-  vim.api.nvim_set_hl(0, "SmartFilesLegendCount", { fg = "#cccccc", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SmartFilesLegendCount", { fg = "#768390", bold = true, default = true })
 end
 
 local legend = Overlay.new()

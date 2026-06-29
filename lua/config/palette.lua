@@ -6,32 +6,36 @@
 local M = {}
 
 -- Muted/secondary text. Used by the git "unstaged" marker (git_status_codes) and
--- the legend labels in the smart picker and the review-base overlay.
-M.muted = "#888888"
+-- the legend labels in the smart picker and the review-base overlay. GitHub's
+-- fg.muted token — legible (~4.5:1) on the high-contrast white background.
+M.muted = "#6e7781"
 
--- Saturated git diff tints for gitsigns' custom highlight groups
+-- GitHub-light diff tints for gitsigns' custom highlight groups
 -- (plugins/gitsigns.lua paint()). Unlike the role-specific colors above, these
--- intentionally OVERRIDE the colorscheme (no default=true) — the *_dark/*_light
--- pair is chosen from the active background at paint time, so a theme must not
--- win. Centralized here only to keep the literal hex in one place; the
--- selection/override logic stays in paint().
+-- intentionally OVERRIDE the colorscheme (no default=true) so the bespoke diff
+-- visualization (numbered markers, line backgrounds, inline word-diff) wins over
+-- the theme's plainer GitSigns groups. Centralized here to keep the literal hex
+-- in one place; the override logic stays in paint(). Light-only, so a single
+-- value per role (no background branching).
 M.git = {
-  -- Nr = colored line numbers (carry their own white fg, so one saturated value
-  -- per role reads on both backgrounds).
-  add_nr = "#4ea862",
-  change_nr = "#7a5d1a",
-  delete_nr = "#c85050",
-  -- Ln = line backgrounds (bg only, inherit buffer fg); pick *_dark on a dark
-  -- background, *_light on a light one.
-  add_ln_dark = "#1e3a28",
-  add_ln_light = "#b8e0c4",
-  change_ln_dark = "#3a3320",
-  change_ln_light = "#ead090",
-  -- Inline word-diff background for changed spans.
-  add_inline_dark = "#2f6f47",
-  add_inline_light = "#8fd4a3",
-  -- Deletion marker (sp underdash on GitSignsDeleteLn / GitSignsDelPrev).
-  delete = "#c85050",
+  -- Nr = colored line-number "chips": a dark fg on a light tint reads on the
+  -- white background (the old white-on-saturated chip would wash out).
+  add_nr_fg = "#0f5323",
+  add_nr_bg = "#abf2bc",
+  change_nr_fg = "#6f4e00",
+  change_nr_bg = "#f5d98a",
+  delete_nr_fg = "#a0111f",
+  delete_nr_bg = "#ffc9c2",
+  -- Ln = full-line backgrounds (bg only, inherit buffer fg): GitHub's subtle
+  -- add/change diff fills.
+  add_ln = "#d2fbd9",
+  change_ln = "#fdf2c0",
+  -- Inline word-diff background for changed spans: GitHub's add-emphasis green,
+  -- stronger than add_ln so the differing span stands out within the line.
+  add_inline = "#abf2bc",
+  -- Deletion marker (sp underdash on GitSignsDeleteLn / GitSignsDelPrev):
+  -- GitHub's danger red.
+  delete = "#cf222e",
 }
 
 return M

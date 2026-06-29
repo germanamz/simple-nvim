@@ -87,6 +87,10 @@ vim.api.nvim_create_autocmd("ColorScheme", { callback = hide_netrw_tree_bar })
 
 -- Misc quality-of-life
 opt.termguicolors = true
+-- Light-only config (github_light_high_contrast). Set explicitly so Neovim's
+-- background-sensitive UI defaults are correct from the first frame — before
+-- lazy loads the theme — rather than relying on the theme to flip it.
+opt.background = "light"
 opt.mouse = "a"
 opt.clipboard = "unnamedplus"
 
