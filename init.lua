@@ -37,6 +37,7 @@ vim.filetype.add({ extension = { mdx = "mdx", tmpl = "gohtmltmpl" } })
 
 require("config.options")
 require("config.lsp_refs").setup()
+require("config.syntax_constants").setup()
 require("config.statusline").setup()
 require("config.block_guides").setup()
 require("config.markdown_preview").setup()
