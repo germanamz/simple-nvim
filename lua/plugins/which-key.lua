@@ -6,7 +6,6 @@ return {
       preset = "modern",
       delay = 300,
       spec = {
-        { "<leader>a", group = "claude" },
         { "<leader>b", group = "buffer" },
         { "<leader>f", group = "find" },
         { "<leader>g", group = "git" },
