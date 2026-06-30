@@ -91,6 +91,7 @@ sudo apt install -y neovim git build-essential ripgrep fd-find nodejs npm golang
 - **Git:** `gitsigns.nvim` (signs, blame, hunk navigation, review-base diffing)
 - **Markdown:** read-only, full-color `glow` preview in a side pane (`<leader>mp` — reflows prose, keeps wide tables aligned, renders wiki-style `[[links]]`; needs the [`glow`](https://github.com/charmbracelet/glow) binary). Editing stays in raw markdown.
 - **Discoverability:** `which-key.nvim` (`<leader>K` shows every mapping)
+- **Claude Code:** `claudecode.nvim` runs the editor side of the IDE protocol as an in-process WebSocket server, so Claude Code connects from a separate terminal via `/ide` — no `:terminal` split (see [Claude Code](#claude-code))
 
 ## Key bindings
 
@@ -103,6 +104,17 @@ Leader is `<Space>`; local leader is `\`. Press `<Space>?` (Telescope keymaps) o
 | `<Space>gB` | Pick a review base branch (drives gitsigns + Telescope sort) |
 | `]c` / `[c` | Next / previous git hunk |
 | `gd` | LSP go-to-definition (or `_typescript.goToSourceDefinition` in TS buffers) |
+| `<Space>as` | Claude Code connection status |
+
+## Claude Code
+
+`claudecode.nvim` is set up with `terminal = { provider = "none" }`, so Neovim only runs the WebSocket server side of the [IDE protocol](https://github.com/coder/claudecode.nvim) — there is no embedded terminal. Run the `claude` CLI in whatever terminal you prefer and link the two:
+
+1. Open Neovim in the project. The server auto-starts and writes a lock file to `~/.claude/ide/<port>.lock`.
+2. In a separate terminal, `cd` to the same project, run `claude`, then `/ide` and pick the Neovim instance.
+3. `<Space>as` reports the connection status from the Neovim side.
+
+Once linked, the active buffer and visual selection are sent as context, `@`-mentions resolve against open files, and Claude's edits arrive as native diffs you accept (`:w`) or reject (`:q`). The link is per-session — rerun `/ide` after restarting `claude`.
 
 ## Layout
 
