@@ -32,10 +32,17 @@ return {
       vim.treesitter.language.register("markdown", "mdx")
       -- jsonc has no dedicated parser; the json parser handles it.
       vim.treesitter.language.register("json", "jsonc")
-      -- Go html templates (.tmpl, ft=gohtmltmpl from init.lua) reuse the html
-      -- parser so tags highlight and nvim-ts-autotag can walk the tree. Go
-      -- `{{ ... }}` actions fall through as plain text — fine for editing tags.
-      vim.treesitter.language.register("html", "gohtmltmpl")
+      -- Go html templates (.tmpl, ft=gohtmltmpl from init.lua) parse with the
+      -- gotmpl parser so the `{{ ... }}` actions highlight; the literal markup
+      -- around them is injected back as one combined html tree (see
+      -- after/queries/gotmpl/injections.scm) so tags/attributes still highlight
+      -- and nvim-ts-autotag — which descends into injected trees — keeps working.
+      vim.treesitter.language.register("gotmpl", "gohtmltmpl")
+      -- terraform-vars (.tfvars) is terraform syntax with no parser of its own;
+      -- the terraform parser handles it. .tf → ft terraform, .hcl → ft hcl and
+      -- .graphql → ft graphql each self-resolve to a same-named parser, so only
+      -- terraform-vars needs an explicit alias.
+      vim.treesitter.language.register("terraform", "terraform-vars")
       -- React fts and `sh` aren't core-registered (their parsers are tsx /
       -- javascript / bash); without these, start() would resolve a nonexistent
       -- same-named parser and the fold/indent wiring would be silently skipped.
@@ -73,6 +80,10 @@ return {
         "gohtmltmpl",
         "css",
         "gitconfig",
+        "terraform",
+        "terraform-vars",
+        "hcl",
+        "graphql",
       }
 
       vim.api.nvim_create_autocmd("FileType", {

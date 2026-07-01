@@ -6,6 +6,14 @@
 -- A hand edit here only takes effect via `make update`/`make warm` (which
 -- reinstalls): just restarting nvim does NOT re-pin an already-installed
 -- parser. See lua/config/ts_pinned.lua for why.
+--
+-- Keep the body below bare `name = "rev"` lines: update-pins.sh regenerates it
+-- and drops any in-body comments, so rationale that needs to survive lives up
+-- here. `terraform` and `hcl` currently pin the same SHA — terraform is the
+-- dialects/terraform grammar in the tree-sitter-hcl family. nvim-treesitter
+-- sources them from two kept-in-sync repos (tree-sitter-grammars/ and
+-- MichaHoffmann/), and `make update` re-derives each pin independently, so a
+-- future divergence just yields two SHAs rather than breaking anything.
 return {
   markdown = "f969cd3ae3f9fbd4e43205431d0ae286014c05b5",
   markdown_inline = "f969cd3ae3f9fbd4e43205431d0ae286014c05b5",
@@ -18,6 +26,7 @@ return {
   gomod = "2e886870578eeba1927a2dc4bd2e2b3f598c5f9a",
   gosum = "27816eb6b7315746ae9fcf711e4e1396dc1cf237",
   gowork = "949a8a470559543857a62102c84700d291fc984c",
+  gotmpl = "aa71f63de226c5592dfbfc1f29949522d7c95fac",
   rust = "77a3747266f4d621d0757825e6b11edcbf991ca5",
   c = "ae19b676b13bdcc13b7665397e6d9b14975473dd",
   cpp = "8b5b49eb196bec7040441bee33b2c9a4838d6967",
@@ -35,4 +44,7 @@ return {
   regex = "b2ac15e27fce703d2f37a79ccd94a5c0cbe9720b",
   diff = "2520c3f934b3179bb540d23e0ef45f75304b5fed",
   git_config = "0fbc9f99d5a28865f9de8427fb0672d66f9d83a5",
+  graphql = "5e66e961eee421786bdda8495ed1db045e06b5fe",
+  hcl = "64ad62785d442eb4d45df3a1764962dafd5bc98b",
+  terraform = "64ad62785d442eb4d45df3a1764962dafd5bc98b",
 }

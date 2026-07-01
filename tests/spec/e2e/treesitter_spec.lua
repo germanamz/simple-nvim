@@ -29,6 +29,22 @@ describe("e2e: treesitter", function()
       content = "const x: number = 1;\n",
       capture_col = 6,
     },
+    {
+      -- .tf → ft terraform (pinned by extension in init.lua, bypassing core's
+      -- detect.tf content heuristic), parsed by the terraform parser. col 0 =
+      -- the `resource` keyword.
+      label = "terraform",
+      path = "main.tf",
+      content = 'resource "aws_instance" "web" {\n  ami = "ami-123"\n}\n',
+      capture_col = 0,
+    },
+    {
+      -- .graphql → ft graphql, same-named parser. col 0 = the `type` keyword.
+      label = "graphql",
+      path = "schema.graphql",
+      content = "type Query {\n  hello: String\n}\n",
+      capture_col = 0,
+    },
   }
 
   for _, case in ipairs(cases) do
@@ -63,4 +79,40 @@ describe("e2e: treesitter", function()
       )
     end)
   end
+
+  -- Go html templates parse with the gotmpl parser (so `{{ ... }}` actions
+  -- highlight) and inject the surrounding markup back as html (so tags
+  -- highlight). Assert BOTH language trees produce captures — this is the pair
+  -- that a naive single-parser setup would miss.
+  it("highlights gotmpl actions and injected html in a gohtmltmpl buffer", function()
+    local repo = git_fixture.repo({
+      commits = { { files = { ["page.tmpl"] = "<div>{{ .Name }}</div>\n" } }, message = "init" },
+    })
+    local canonical = vim.uv.fs_realpath(repo) or repo
+    vim.fn.chdir(canonical)
+    vim.cmd("edit " .. canonical .. "/page.tmpl")
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    assert.are.equal("gohtmltmpl", vim.bo[bufnr].filetype)
+
+    wait.wait_for(function()
+      return vim.treesitter.highlighter.active[bufnr] ~= nil
+    end, 5000, "treesitter highlighter never attached")
+    -- Force a full parse so the injected html tree is materialized before we
+    -- probe captures (injections parse lazily).
+    vim.treesitter.get_parser(bufnr):parse(true)
+
+    local function langs_at(col)
+      local seen = {}
+      for _, c in ipairs(vim.treesitter.get_captures_at_pos(bufnr, 0, col)) do
+        seen[c.lang] = true
+      end
+      return seen
+    end
+
+    -- col 1 = the `div` tag name, highlighted by the injected html tree.
+    assert.is_true(langs_at(1).html == true, "expected an injected html capture on the <div> tag")
+    -- col 9 = `.Name` inside the action, highlighted by the primary gotmpl tree.
+    assert.is_true(langs_at(9).gotmpl == true, "expected a gotmpl capture inside the {{ }} action")
+  end)
 end)

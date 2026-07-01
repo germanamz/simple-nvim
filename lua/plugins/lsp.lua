@@ -29,8 +29,26 @@ local servers = {
   jsonls = { filetypes = { "json", "jsonc" } },
   yamlls = { filetypes = { "yaml" } },
   taplo = { filetypes = { "toml" } },
+  -- terraform-ls (HashiCorp). Bundled filetypes already gate to terraform +
+  -- terraform-vars (.tf / .tfvars); listed explicitly to match the per-server
+  -- convention. Its bundled on_attach enables codelens ("N references" virtual
+  -- lines) — inconsistent with this config's quiet UI (diagnostic virtual_text
+  -- off, inlay hints opt-in), so override it with a no-op (the deep-merge lets
+  -- our on_attach win) to keep terraform buffers as quiet as every other ft.
+  terraformls = {
+    filetypes = { "terraform", "terraform-vars" },
+    on_attach = function() end,
+  },
   html = { filetypes = { "html" } },
   cssls = { filetypes = { "css", "scss", "less" } },
+  -- graphql-language-service-cli (`graphql-lsp`). Gated to the graphql filetype
+  -- only: nvim-lspconfig's default list also attaches it to every tsx/jsx
+  -- buffer (for embedded gql`...` tags), which would spin up a second server on
+  -- all React files. workspace_required = true makes the server start only when
+  -- its root_dir resolves — i.e. a graphql config exists (.graphqlrc* /
+  -- graphql.config.*); without one it needs a schema to be useful, so we skip
+  -- spawning a no-op node process on every stray .graphql buffer.
+  graphql = { filetypes = { "graphql" }, workspace_required = true },
   marksman = { filetypes = { "markdown" } },
   -- mdx_analyzer wraps tsserver, needs typescript lib. Falls back to
   -- mason's bundled typescript when the workspace has no node_modules.

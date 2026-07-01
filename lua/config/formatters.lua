@@ -63,6 +63,12 @@ M.by_ft = {
   lua = { "stylua" },
   go = { "gofmt" },
   rust = { "rustfmt" },
+  -- terraform fmt is a toolchain formatter (like gofmt / rustfmt above), not a
+  -- mason tool; it needs the `terraform` CLI on PATH. Absent it, conform skips
+  -- the formatter and lsp_format = "fallback" hands off to terraform-ls (which
+  -- also shells out to `terraform fmt`), so behaviour degrades gracefully.
+  terraform = { "terraform_fmt" },
+  ["terraform-vars"] = { "terraform_fmt" },
   sh = { "shfmt" },
   bash = { "shfmt" },
   zsh = { "shfmt" },
@@ -89,6 +95,8 @@ M.by_ft = {
   yaml = { "prettierd", "prettier" },
   markdown = { "prettierd", "prettier" },
   mdx = { "prettierd", "prettier" },
+  -- prettier has a built-in graphql parser (.graphql / .gql schemas & queries).
+  graphql = { "prettierd", "prettier" },
 }
 
 return M

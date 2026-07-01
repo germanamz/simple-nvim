@@ -30,10 +30,16 @@ vim.g.maplocalleader = "\\"
 vim.g.loaded_python3_provider = 0
 
 -- `.tmpl` defaults to filetype `template` (no parser/LSP). Go projects use it
--- for html/template, so treat it as gohtmltmpl: html treesitter + autotag (see
--- lua/plugins/treesitter.lua, lua/plugins/nvim-ts-autotag.lua) without pulling
--- in the html LSP/prettier, which would choke on `{{ ... }}` actions.
-vim.filetype.add({ extension = { mdx = "mdx", tmpl = "gohtmltmpl" } })
+-- for html/template, so treat it as gohtmltmpl: gotmpl treesitter + injected
+-- html + autotag (see lua/plugins/treesitter.lua, lua/plugins/nvim-ts-autotag.lua)
+-- without pulling in the html LSP/prettier, which would choke on `{{ ... }}`.
+--
+-- `.tf` runs through core's detect.tf, which returns `terraform` only once it
+-- sees a non-comment line (disambiguating from TinyFugue) — so an empty or
+-- comment-only .tf lands on ft `tf` with no parser/LSP/formatter for the whole
+-- session (ft isn't re-detected as you type). Pin `.tf` to terraform by
+-- extension so support attaches immediately; this box has no TinyFugue files.
+vim.filetype.add({ extension = { mdx = "mdx", tmpl = "gohtmltmpl", tf = "terraform" } })
 
 require("config.options")
 require("config.lsp_refs").setup()
