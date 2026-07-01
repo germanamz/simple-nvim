@@ -42,6 +42,7 @@ require("config.block_guides").setup()
 require("config.markdown_preview").setup()
 require("config.wikilinks").setup()
 require("config.dir_cache").setup()
+require("config.ignore_filter").setup()
 
 vim.keymap.set("n", "<leader>k?", function()
   vim.cmd.edit(vim.fn.stdpath("config") .. "/docs/keybindings.md")

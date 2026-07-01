@@ -2,8 +2,10 @@
 -- porcelain labels (A, M*, ?*, bM, ...) in the same colors, sourced from the
 -- same per-cwd codes cache in telescope_smart — so the review base (config
 -- .review_base) is honored identically. Replaces nvim-tree's builtin "Git"
--- decorator in the renderer.decorators list; git.enable stays on so the
--- git_ignored filter and the .git watcher keep working.
+-- decorator in the renderer.decorators list. Independent of nvim-tree's builtin
+-- git (which is OFF — see lua/plugins/nvim-tree.lua): labels come from
+-- telescope_smart, not Filters:git, and repaints from the config() autocmds, not
+-- the .git watcher. Ignore-hiding lives in config.ignore_filter.
 local M = {}
 
 local git_status_codes = require("config.git_status_codes")

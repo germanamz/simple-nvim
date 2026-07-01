@@ -29,9 +29,10 @@ return {
     hijack_netrw = true,
     -- Expand the tree to highlight whatever buffer is focused — but NOT for
     -- non-file buffers (terminals, prompts, help). Revealing crosses into
-    -- whichever submodule the file lives in, and with git_ignored on that fires
-    -- a *synchronous* `git status --ignored` for that submodule's toplevel, so a
-    -- plain buffer switch into an unscanned submodule shouldn't pay for it.
+    -- whichever submodule the file lives in; with builtin git off (see the git
+    -- block below) this is now a pure fs scandir — no per-submodule git spawn —
+    -- and ignore-hiding is filled asynchronously by config.ignore_filter. The
+    -- exclude still spares the reveal for plain buffer switches into terminals.
     update_focused_file = {
       enable = true,
       exclude = function(args)
@@ -47,15 +48,38 @@ return {
     actions = { open_file = { quit_on_open = true } },
     filters = {
       dotfiles = false, -- show dotfiles (toggle with H)
-      git_ignored = true, -- hide gitignored, e.g. node_modules (toggle with I)
+      -- Builtin git is off (below), so its git_ignored filter is inert. Hide
+      -- ignored files through config.ignore_filter instead: an O(1), fork-free
+      -- predicate (static heavy-dir set + lazy async `git check-ignore` oracle).
+      -- Toggle with I (remapped to the custom filter in on_attach below).
+      git_ignored = false,
+      custom = function(p)
+        return require("config.ignore_filter").is_ignored(p)
+      end,
     },
-    -- Raise the git timeout well above the 400ms default: a slow submodule scan
-    -- can blow past it, and 5 such timeouts trip nvim-tree's kill-switch that
-    -- *permanently* disables git integration for the session — which would
-    -- silently break the git_ignored filter above and stop hiding
-    -- node_modules/target. Keep git.enable on (the smart decorator and the .git
-    -- watcher both depend on it; see config.nvim_tree_git).
-    git = { enable = true, timeout = 2000 },
+    -- Builtin git is OFF. In a superproject it spawns one *synchronous*
+    -- `git status --ignored` per submodule and trips a module-level, never-reset
+    -- 5-timeout kill switch that *permanently* disables git integration — which
+    -- silently broke the git_ignored filter "after a while" as submodule count
+    -- grew. Nothing here needs builtin git: the decorator sources labels from
+    -- config.telescope_smart (not Filters:git), repaints come from the autocmds
+    -- in config() below (not the .git watcher), and ignore-hiding now comes from
+    -- config.ignore_filter. With git off the kill switch can never fire.
+    git = { enable = false },
+    -- Keep all default mappings, but rebind I to toggle the custom filter (the
+    -- builtin I toggles git_ignored, now inert) so ignored-visibility still
+    -- toggles from its usual key.
+    on_attach = function(bufnr)
+      local api = require("nvim-tree.api")
+      api.config.mappings.default_on_attach(bufnr)
+      vim.keymap.set("n", "I", api.filter.custom.toggle, {
+        buffer = bufnr,
+        noremap = true,
+        silent = true,
+        nowait = true,
+        desc = "nvim-tree: Toggle Filter: Ignored (custom)",
+      })
+    end,
     -- The "Diagnostics" decorator listed in renderer.decorators below is inert
     -- unless diagnostics integration is enabled here.
     diagnostics = { enable = true },
@@ -94,6 +118,17 @@ return {
         vim.api.nvim_set_option_value("winbar", "%#Comment#  g? — all mappings%*", { win = win })
       end
     end)
+    -- Trailing-slash- and symlink-insensitive directory compare. The decorator
+    -- renders with self.cwd = fnamemodify(getcwd, ":p"), so the SmartCodesRefreshed
+    -- event below carries a data.cwd with a TRAILING SLASH that getcwd() lacks: a
+    -- raw `==` never matched, so that handler's reload was silently skipped. It
+    -- went unnoticed only because nvim-tree's builtin git supplied its own redraws;
+    -- with builtin git off (see opts.git) this handler is the sole repaint path, so
+    -- normalize both ends.
+    local function same_dir(a, b)
+      return vim.fn.resolve(vim.fn.fnamemodify(a, ":p"))
+        == vim.fn.resolve(vim.fn.fnamemodify(b, ":p"))
+    end
     -- Re-render the tree when the review base or HEAD changes (external
     -- checkout) so labels appear or vanish immediately. Force-refresh the
     -- codes cache first — its 500ms TTL could otherwise serve codes computed
@@ -133,7 +168,7 @@ return {
       pattern = "SmartCodesRefreshed",
       callback = function(args)
         local cwd = args.data and args.data.cwd
-        if cwd and cwd == vim.fn.getcwd() and api.tree.is_visible() then
+        if cwd and same_dir(cwd, vim.fn.getcwd()) and api.tree.is_visible() then
           api.tree.reload()
         end
       end,
