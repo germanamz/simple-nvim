@@ -20,11 +20,33 @@ return {
   dependencies = { "rafamadriz/friendly-snippets" },
   opts = {
     -- "enter" preset: Enter accepts, C-space opens the menu, C-n/C-p (and the
-    -- arrow keys) move the selection, C-e hides. Tab is added on top so it also
-    -- accepts when the menu is open and falls back to a normal Tab otherwise.
+    -- arrow keys) move the selection, C-e hides. Tab is AI-first: if minuet has
+    -- an inline suggestion painted it accepts that (and stops); otherwise it
+    -- accepts the blink menu selection, else falls back to a literal Tab. The
+    -- function runs in blink's insert-mode keymap runner, where a truthy return
+    -- means "handled, stop here" and nil/false falls through to the next entry
+    -- ("accept" then "fallback") — see saghen/blink.cmp keymap/apply.lua.
     keymap = {
       preset = "enter",
-      ["<Tab>"] = { "accept", "fallback" },
+      ["<Tab>"] = {
+        -- pcall the require + call so this map is safe before minuet lazy-loads
+        -- (it is event=InsertEnter): with no minuet there is no suggestion, so we
+        -- return nil and fall through. is_visible()/accept() are minuet's
+        -- confirmed virtual-text API (minuet-ai.nvim virtualtext.lua action.*).
+        function()
+          local ok, vt = pcall(require, "minuet.virtualtext")
+          if not ok then
+            return
+          end
+          local visible_ok, visible = pcall(vt.action.is_visible)
+          if visible_ok and visible then
+            pcall(vt.action.accept)
+            return true
+          end
+        end,
+        "accept",
+        "fallback",
+      },
     },
     appearance = { nerd_font_variant = "mono" },
     sources = {
@@ -59,10 +81,13 @@ return {
       -- Closing pairs are instead added only when typed explicitly, via
       -- mini.pairs (see lua/plugins/mini-pairs.lua).
       accept = { auto_brackets = { enabled = false } },
-      -- Inline ghost text previews the top candidate at the cursor before you
-      -- commit, and rounded borders keep the float legible on themes with weak
-      -- float backgrounds (the menu/doc/signature popups otherwise bleed in).
-      ghost_text = { enabled = true },
+      -- Inline ghost text is OFF here because the AI layer owns the inline
+      -- preview while AI completions are enabled (the default) — minuet virtual
+      -- text, see lua/plugins/minuet.lua + lua/config/ai.lua. Toggling AI off via
+      -- <leader>ua flips this leaf back to true at runtime (config.ai.apply
+      -- mutates blink.cmp.config completion.ghost_text.enabled, which blink's
+      -- renderer reads live) so blink's own LSP ghost text returns.
+      ghost_text = { enabled = false },
       menu = { border = "rounded" },
     },
     signature = { enabled = true, window = { border = "rounded" } },

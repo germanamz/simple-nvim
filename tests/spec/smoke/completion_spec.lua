@@ -49,7 +49,12 @@ describe("smoke: completion (blink.cmp)", function()
 
     it("accepts with Enter (preset) and Tab", function()
       assert.are.equal("enter", cfg.keymap.preset)
-      assert.are.same({ "accept", "fallback" }, cfg.keymap["<Tab>"])
+      -- Tab is AI-first: a leading function entry accepts the minuet inline
+      -- suggestion when one is painted (see lua/plugins/minuet.lua), then falls
+      -- through to the blink menu "accept" and finally a literal Tab.
+      local tab = cfg.keymap["<Tab>"]
+      assert.are.equal("function", type(tab[1]))
+      assert.are.same({ "accept", "fallback" }, { tab[2], tab[3] })
     end)
   end)
 
