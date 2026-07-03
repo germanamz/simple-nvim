@@ -98,6 +98,16 @@ return {
         "Diagnostics",
         "Copied",
         require("config.nvim_tree_git").decorator(),
+        -- Three sibling decorators that colour classes of nodes. Order matters:
+        -- create_combined_group force-merges in list order, so the LAST one wins
+        -- an overlap. git-ignored is placed last so an ignored dot-folder (.next,
+        -- .venv, ...) reads grey ("ignored") rather than blue ("dot-folder").
+        --   • dot-folders  -> blue  (.git, .github, ...; folders only)
+        --   • symlinks     -> teal  (file and directory links)
+        --   • git-ignored  -> grey  (shown via I; from config.ignore_filter)
+        require("config.nvim_tree_dotfolder").decorator(),
+        require("config.nvim_tree_symlink").decorator(),
+        require("config.nvim_tree_ignore").decorator(),
         "Cut",
       },
     }
