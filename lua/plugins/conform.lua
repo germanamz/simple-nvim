@@ -11,8 +11,6 @@
 --   • <leader>F formats the current buffer (or visual selection) on demand.
 --   • Format-on-save: BufWritePre runs conform synchronously (1000ms cap —
 --     black needs ~150ms warm, more cold — then the write proceeds anyway).
---     lsp_format = "fallback" means filetypes
---     without a conform entry are formatted by their LSP server instead.
 --     Skipped on large files (util.largefile): prettier on a big generated
 --     json/yaml/markdown artifact would hit the 1s cap and stall every save —
 --     the same files skip treesitter and gitsigns painting. <leader>F still
@@ -24,6 +22,9 @@ return {
   config = function()
     local formatters = require("config.formatters")
     require("conform").setup({
+      -- default_format_opts merges into EVERY conform.format() call (and gq via
+      -- formatexpr), so lsp_format policy lives here once — restating it at the
+      -- call sites would silently override a change made here.
       formatters_by_ft = formatters.by_ft,
       default_format_opts = { lsp_format = "fallback" },
       notify_on_error = true,
@@ -31,7 +32,7 @@ return {
         if require("util.largefile").is_large(buf) then
           return nil
         end
-        return { timeout_ms = 1000, lsp_format = "fallback" }
+        return { timeout_ms = 1000 }
       end,
     })
 
@@ -65,7 +66,7 @@ return {
     -- the default 1s cap would silently no-op on exactly the files we skip on
     -- save and expect <leader>F to handle.
     vim.keymap.set({ "n", "x" }, "<leader>F", function()
-      require("conform").format({ async = false, timeout_ms = 10000, lsp_format = "fallback" })
+      require("conform").format({ async = false, timeout_ms = 10000 })
     end, { desc = "Format buffer / selection" })
   end,
 }

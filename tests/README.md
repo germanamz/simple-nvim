@@ -8,7 +8,7 @@ Test harness for this Neovim configuration. Specs run via [plenary.nvim](https:/
 make warm
 ```
 
-Populates `~/.local/share/nvim/lazy/` with all plugins at the revisions pinned in `lazy-lock.json`, plus Mason tools (`mason-tool-versions.lock`) and treesitter parsers (`tests/parser-revisions.lua`). Re-run after pulling in pin changes.
+Populates `~/.local/share/nvim/lazy/` with all plugins at the revisions pinned in `lazy-lock.json`, plus Mason tools (`mason-tool-versions.lock`) and treesitter parsers (`parser-revisions.lua`). Re-run after pulling in pin changes.
 
 ## Running tests
 
@@ -35,7 +35,7 @@ Use `tests/minimal_init.lua` instead for files under `tests/spec/unit/`.
 make update
 ```
 
-Bumps `lazy-lock.json`, `mason-tool-versions.lock`, and `tests/parser-revisions.lua` to current versions. Review the diff and commit.
+Bumps `lazy-lock.json`, `mason-tool-versions.lock`, and `parser-revisions.lua` to current versions. Review the diff and commit.
 
 ## Layout
 
@@ -44,7 +44,6 @@ tests/
 ├── README.md             — this file
 ├── minimal_init.lua      — plenary-only harness (unit tests)
 ├── full_init.lua         — real init.lua + lazy-resolved plugin specs (smoke, e2e, e2e-lsp)
-├── parser-revisions.lua  — pinned treesitter parser commits
 ├── helpers/
 │   ├── nvim_env.lua      — isolated XDG dirs; symlinks the host's lazy cache
 │   ├── wait.lua          — vim.wait wrappers (wait_for, wait_for_buffer, wait_for_event)

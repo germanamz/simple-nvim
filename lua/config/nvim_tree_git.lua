@@ -34,6 +34,31 @@ function M._dir_markers(codes)
   return dirs
 end
 
+-- Force-refresh the tree's git labels: fetch fresh codes for the cwd off the
+-- main thread, then reload so the decorator repaints with them. The one home
+-- for the guard/refresh/reload contract shared by the ReviewBaseChanged/
+-- HeadChanged and FocusGained handlers (lua/plugins/nvim-tree.lua) and the
+-- <leader>gR manual hatch (lua/plugins/gitsigns.lua). No-op when nvim-tree
+-- isn't loaded or the tree isn't on screen — skip the git spawn entirely.
+function M.refresh_labels()
+  if not package.loaded["nvim-tree"] then
+    return
+  end
+  local api = require("nvim-tree.api")
+  if not api.tree.is_visible() then
+    return
+  end
+  -- telescope_smart resolved at call time, not module load: the e2e specs spy
+  -- on _refresh_async by swapping the module field. Going through the async
+  -- core directly (not the deduped non-blocking read) guarantees a refresh
+  -- with the *current* inputs even if a prior refresh is still in flight.
+  require("config.telescope_smart")._refresh_async(vim.fn.getcwd(), function()
+    if api.tree.is_visible() then
+      api.tree.reload()
+    end
+  end)
+end
+
 local Decorator
 
 -- Build (once) and return the decorator class. Deferred behind a function
@@ -62,12 +87,14 @@ function M.decorator()
     self.highlight_range = "none"
     self.icon_placement = "before"
 
-    -- Store cwd already in canonical :p form (absolute, trailing slash) — the
-    -- exact shape path_util.relative normalizes its base to. relative() still
-    -- re-applies :p per node (idempotent here), so this only spares its
-    -- trailing-slash fixup; the larger win would need path.lua to skip
-    -- re-normalizing, and that module is owned elsewhere.
-    self.cwd = vim.fn.fnamemodify(vim.fn.getcwd(), ":p")
+    -- self.cwd doubles as telescope_smart's codes-cache key, so it MUST match
+    -- the plain getcwd() form every other caller uses (the pickers, the
+    -- FocusGained/ReviewBaseChanged handlers). A normalized :p form (trailing
+    -- slash) ping-ponged the cache key between '/x' and '/x/': every repaint
+    -- missed the just-refreshed entry, blanked the labels for a render, and
+    -- kicked a second full recursive scan. path_util.relative :p-normalizes
+    -- its base itself, so rendering is unchanged.
+    self.cwd = vim.fn.getcwd()
     self.codes = require("config.telescope_smart")._refresh(self.cwd)
     self.dirs = M._dir_markers(self.codes)
   end

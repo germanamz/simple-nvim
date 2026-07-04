@@ -36,6 +36,8 @@
 -- below; where a fact was UNCONFIRMED the spec fallback is used and commented.
 local M = {}
 
+local state_util = require("util.state")
+
 -- Ollama's local HTTP surface (all localhost; never leaves the machine).
 local OLLAMA_HOST = "http://localhost:11434"
 local OLLAMA_TAGS_URL = OLLAMA_HOST .. "/api/tags"
@@ -132,12 +134,21 @@ local CATALOG = {
   },
 }
 
--- base-name -> fim flag, built once at require-time from CATALOG (pure Lua, no
--- side effects). Lets installed/library rows inherit a curated FIM hint by family
--- name before any /api/show call. `nil` means "unknown" (not in the catalog).
+-- exact-name -> fim flag, built once at require-time from CATALOG (pure Lua, no
+-- side effects). Keyed by the exact installable name — "family:tag" for tagged
+-- FIM families, the bare family name for tag-less chat entries — so only names
+-- the catalog actually vouches for inherit a flag. Keying by family would let
+-- an installed instruct tag (codellama:7b-instruct) inherit the base tags'
+-- fim=true and slip past the <CR> /api/show gate. `nil` = unknown.
 local CURATED_FIM = {}
 for _, e in ipairs(CATALOG) do
-  CURATED_FIM[e.name] = e.fim
+  if e.tags then
+    for _, t in ipairs(e.tags) do
+      CURATED_FIM[e.name .. ":" .. t] = e.fim
+    end
+  else
+    CURATED_FIM[e.name] = e.fim
+  end
 end
 
 -- Memoized POST /api/show results, name -> { fim, family, parameter_size,
@@ -164,11 +175,6 @@ local last_echo = 0
 -- progress figure must SUM across all digests, not read one layer. Reset to {} at
 -- each pull start (start_pull) so a later pull never inherits stale totals.
 local pull_totals = {}
-
--- The base family name of a tag string ("qwen2.5-coder:7b-base" -> "qwen2.5-coder").
-local function base_of(name)
-  return name:match("^([^:]+)") or name
-end
 
 -- FIM autocomplete needs a *base* code model, so *coder* / *-base* names count as
 -- FIM-eligible. (Moved from config.ai; now the sole "FIM-eligible?" heuristic for
@@ -223,12 +229,7 @@ end
 -- / empty / malformed / absent state dir). Never errors — this is the only thing
 -- the modal touches on open, and it must degrade to curated-only silently.
 local function read_library_cache()
-  local f = io.open(M.library_cache_path(), "r")
-  if not f then
-    return nil
-  end
-  local raw = f:read("*a")
-  f:close()
+  local raw = state_util.read_file(M.library_cache_path())
   if not raw or raw == "" then
     return nil
   end
@@ -245,21 +246,14 @@ local function read_library_cache()
   return nil
 end
 
--- Atomic-ish write (tmp + rename) of the library cache, matching config.ai's
--- persistence idiom so a crashed write never leaves a half-written JSON file.
+-- Atomic write of the library cache via util.state (shared with config.ai's
+-- model file and review_base's store) so a crashed write never leaves a
+-- half-written JSON file.
 local function write_library_cache(names)
-  local path = M.library_cache_path()
-  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
-  -- Per-writer unique tmp (pid + hrtime) so two overlapping scrapes can't write
-  -- the same tmp and tear it out from under each other's rename.
-  local tmp = string.format("%s.%d.%d.tmp", path, vim.fn.getpid(), vim.uv.hrtime())
-  local f = io.open(tmp, "w")
-  if not f then
-    return
-  end
-  f:write(vim.json.encode({ fetched_at = os.time(), names = names }))
-  f:close()
-  os.rename(tmp, path)
+  state_util.write_atomic(
+    M.library_cache_path(),
+    vim.json.encode({ fetched_at = os.time(), names = names })
+  )
 end
 
 -- Installed set via GET /api/tags (plenary.curl), falling back to `ollama list`
@@ -273,7 +267,18 @@ local function fetch_installed()
   if ok then
     local res
     local got = pcall(function()
-      res = curl.get(OLLAMA_TAGS_URL, { timeout = 1500 })
+      -- on_error: without it plenary raises error() inside a luv callback on a
+      -- refused/failed connection — where the surrounding pcall can't catch it
+      -- — printing a stack trace and spinning the full timeout. With it, the
+      -- sync call returns an empty response table (no .status; on_error's
+      -- return is discarded on the sync path), which the status check below
+      -- already treats as unreachable.
+      res = curl.get(OLLAMA_TAGS_URL, {
+        timeout = 1500,
+        on_error = function(err)
+          return err
+        end,
+      })
     end)
     if got and res and res.status == 200 and res.body then
       local dok, decoded = pcall(vim.json.decode, res.body)
@@ -296,7 +301,10 @@ local function fetch_installed()
   end
 
   local sok, out = pcall(function()
-    return vim.system({ "ollama", "list" }, { text = true }):wait()
+    -- Bounded like the curl path above: a wedged ollama CLI must not freeze
+    -- the UI on modal open. A timeout returns code 124, which the code == 0
+    -- check below already treats as unreachable.
+    return vim.system({ "ollama", "list" }, { text = true }):wait(2000)
   end)
   if sok and out and out.code == 0 and out.stdout then
     for line in out.stdout:gmatch("[^\n]+") do
@@ -332,6 +340,11 @@ local function show_model(name)
       headers = { content_type = "application/json" },
       body = vim.json.encode({ model = name }),
       timeout = 3000,
+      -- See fetch_installed: keeps a server-down failure a quiet nil instead
+      -- of an uncatchable luv-callback error().
+      on_error = function(err)
+        return err
+      end,
     })
   end)
   if not got or not res or res.status ~= 200 or not res.body then
@@ -377,9 +390,16 @@ local function delete_model(name)
       headers = { content_type = "application/json" },
       body = vim.json.encode({ model = name }),
       timeout = 5000,
+      -- See fetch_installed: keeps a server-down failure on the "unreachable"
+      -- branch instead of an uncatchable luv-callback error().
+      on_error = function(err)
+        return err
+      end,
     })
   end)
-  if not got or not res then
+  -- A process-level failure yields an empty response table with no .status —
+  -- report it as unreachable rather than "HTTP nil".
+  if not got or not res or not res.status then
     return false, "Ollama unreachable"
   end
   if res.status == 200 then
@@ -526,7 +546,10 @@ local function scrape_library(on_done, on_err)
   if ok then
     local got = pcall(function()
       curl.get(LIBRARY_URL, {
-        timeout = 10000,
+        -- opts.timeout only applies to plenary's sync path (job:sync); in
+        -- callback mode it silently does nothing, so the 10s bound rides raw
+        -- curl args instead.
+        raw = { "--max-time", "10" },
         callback = function(res)
           vim.schedule(function()
             if res and res.status == 200 and res.body then
@@ -534,6 +557,15 @@ local function scrape_library(on_done, on_err)
             else
               on_err(res and ("HTTP " .. tostring(res.status)) or "no response")
             end
+          end)
+        end,
+        -- Without on_error, a process-level curl failure (network down, DNS)
+        -- makes plenary raise error() inside a luv callback — the pcall above
+        -- returned long ago, so nothing catches it, on_err never runs, and
+        -- active_scrape wedges true forever, permanently blocking <C-u>.
+        on_error = function(err)
+          vim.schedule(function()
+            on_err((err and err.message) or "curl failed")
           end)
         end,
       })
@@ -659,7 +691,7 @@ local function build_rows(active, installed, cache_names, fim_only)
     if info.quantization_level and info.quantization_level ~= "" then
       parts[#parts + 1] = info.quantization_level
     end
-    add(name, CURATED_FIM[base_of(name)], table.concat(parts, " · "), true, info)
+    add(name, CURATED_FIM[name], table.concat(parts, " · "), true, info)
   end
 
   -- 2. Curated catalog: expand FIM families into base-tag rows; chat families as
@@ -715,6 +747,14 @@ local function build_rows(active, installed, cache_names, fim_only)
 
   return rows
 end
+
+-- Test seams (tests/spec/unit/ai_models_spec.lua): build_rows is the module's
+-- most logic-dense pure function (three-source merge/dedupe, the resolved-
+-- fim=false-beats-curated-hint rule, the rank order), and show_cache is the
+-- module state it reads. show_cache is only ever mutated in place, so the
+-- exported reference stays valid.
+M._build_rows = build_rows
+M._show_cache = show_cache
 
 -- One-line display: <marker> <name> <FIM badge> <size> <desc>. Marker precedence
 -- ★ active > ● installed > ○ available (design). Plain string (no highlight

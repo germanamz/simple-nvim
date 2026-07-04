@@ -13,7 +13,7 @@ local GUIDE_CHAR = "│"
 local HL = { active = "BlockGuideActive", chain = "BlockGuideChain", dim = "BlockGuide" }
 local EXCLUDED_FT = { [""] = true, markdown = true, mdx = true, help = true, text = true }
 local enabled = true
-local draw = { active = false, blocks = nil, chain = nil } -- set per redraw in on_win
+local draw = { active = false, blocks = nil, chain = nil, tabstop = nil } -- set per redraw in on_win
 
 -- Display width of a line's leading whitespace, honoring tab stops.
 function M._indent_width(line, tabstop)
@@ -145,23 +145,32 @@ function M.collect_foldable_blocks(buf)
   return blocks
 end
 
--- collect_foldable_blocks cached per buffer changedtick.
+-- collect_foldable_blocks cached per buffer changedtick + filetype: a
+-- `:set filetype=` swaps the treesitter parser WITHOUT bumping the tick, so a
+-- tick-only key kept rendering the old language's fold blocks until the next
+-- edit. (Keyed here, not via a FileType autocmd, so callers that never run
+-- setup() — the unit specs — get the same invalidation.)
 function M.blocks_for(buf)
   local tick = vim.api.nvim_buf_get_changedtick(buf)
+  local ft = vim.bo[buf].filetype
   local c = cache[buf]
-  if c and c.tick == tick then
+  if c and c.tick == tick and c.ft == ft then
     return c.blocks
   end
   local blocks = M.collect_foldable_blocks(buf)
-  cache[buf] = { tick = tick, blocks = blocks }
+  cache[buf] = { tick = tick, ft = ft, blocks = blocks }
   return blocks
 end
 
 -- Guides to paint on `row`, reading the line for its indent. Blank/whitespace-
 -- only lines use math.huge so every covering guide draws through the gap.
-function M.guides_for_row(blocks, chain, buf, row)
+-- `tabstop` is passed in by on_line (hoisted to on_win — invariant for the
+-- whole redraw, and the vim.bo read is a metatable hop per visible row on a
+-- hot path); the fallback read keeps direct callers (unit/e2e specs) working.
+function M.guides_for_row(blocks, chain, buf, row, tabstop)
   local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ""
-  local indent = line:match("^%s*$") and math.huge or M._indent_width(line, vim.bo[buf].tabstop)
+  local indent = line:match("^%s*$") and math.huge
+    or M._indent_width(line, tabstop or vim.bo[buf].tabstop)
   return M.guides_at(blocks, chain, row, indent)
 end
 
@@ -212,6 +221,7 @@ local function on_win(_, win, buf, toprow, botrow)
   end
   draw.active = true
   draw.blocks = visible
+  draw.tabstop = vim.bo[buf].tabstop
   draw.chain = M.chain_at(visible, vim.api.nvim_win_get_cursor(win)[1] - 1)
   return true
 end
@@ -220,7 +230,7 @@ local function on_line(_, _win, buf, row)
   if not draw.active then
     return
   end
-  for _, g in ipairs(M.guides_for_row(draw.blocks, draw.chain, buf, row)) do
+  for _, g in ipairs(M.guides_for_row(draw.blocks, draw.chain, buf, row, draw.tabstop)) do
     vim.api.nvim_buf_set_extmark(buf, ns, row, 0, {
       ephemeral = true,
       virt_text = { { GUIDE_CHAR, HL[g.tier] } },
@@ -237,9 +247,9 @@ function M.toggle()
 end
 
 function M.setup()
-  -- Idempotent like the sibling modules (markdown_preview, wikilinks): a second
-  -- call (:Lazy reload, a re-requiring test) would otherwise stack a second copy
-  -- of every handler, including the per-redraw CursorMoved chain-signature one.
+  -- Idempotent: a second call (:Lazy reload, a re-requiring test) would
+  -- otherwise stack a second copy of every handler, including the per-redraw
+  -- CursorMoved chain-signature one.
   if M._did_setup then
     return
   end

@@ -3,7 +3,7 @@
 #
 # 1. `Lazy! sync`  — pull plugins, rewrite lazy-lock.json
 # 2. Refresh mason-tool-versions.lock from installed mason packages
-# 3. Refresh tests/parser-revisions.lua from installed treesitter parsers
+# 3. Refresh parser-revisions.lua from installed treesitter parsers
 # 4. Show `git status --short` — user reviews and commits manually.
 
 set -eu
@@ -12,7 +12,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PARSER_INFO_DIR="${HOME}/.local/share/nvim/site/parser-info"
 MASON_PKG_DIR="${HOME}/.local/share/nvim/mason/packages"
 LOCKFILE="${REPO_ROOT}/mason-tool-versions.lock"
-PARSER_REVS_LUA="${REPO_ROOT}/tests/parser-revisions.lua"
+PARSER_REVS_LUA="${REPO_ROOT}/parser-revisions.lua"
 
 err() { printf '%s\n' "$*" >&2; }
 
@@ -59,7 +59,7 @@ with open(lockfile, "w") as f:
     f.write("\n")
 PY
 
-# Step 3: refresh tests/parser-revisions.lua --------------------------------
+# Step 3: refresh parser-revisions.lua --------------------------------
 
 python3 - "$PARSER_REVS_LUA" "$PARSER_INFO_DIR" <<'PY'
 import os, re, sys

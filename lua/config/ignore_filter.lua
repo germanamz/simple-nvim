@@ -40,6 +40,7 @@
 local M = {}
 
 local git = require("util.git")
+local pool = require("util.pool")
 
 -- Curated never-tracked heavy dirs (see header). A basename hit is a match at
 -- any depth, which mirrors a non-anchored gitignore pattern exactly.
@@ -121,63 +122,129 @@ end
 -- (true -> pruned, its contents never scandir'd, never re-enqueued; false ->
 -- rendered, short-circuits on next pass), so no new miss -> no new drain -> no
 -- reload loop.
+--
+-- Both async stages guard on the cache's table identity: M._clear() mints
+-- fresh tables, so `_ignored ~= cache` detects a mid-flight invalidation (a
+-- .gitignore write, a submodule-topology change) and drops the batch's stale
+-- verdicts instead of repopulating the just-cleared cache with answers
+-- computed against the old rules. The dropped paths simply re-enqueue on the
+-- next render — the same fail-open flash the first pass already exhibits.
 local function drain()
   if #pending == 0 then
     return
   end
   local batch = pending
   pending = {}
+  local cache = _ignored
 
-  local by_top, unrooted = M._partition(batch, git.root)
-  for _, abs in ipairs(unrooted) do
-    _ignored[abs] = false
-    seen[abs] = nil
+  -- Stage 1: resolve the batch's enclosing toplevels off the main thread.
+  -- git.root's synchronous wait() is fine per buffer event, but one drain can
+  -- carry paths under dozens of distinct uncached directories (expand_all over
+  -- a many-submodule tree), and a burst of sequential blocking rev-parse
+  -- spawns on the main loop would contradict this module's own never-block
+  -- discipline. So cache misses resolve through the same bounded async pool,
+  -- priming util.git's memo so every other caller stays warm.
+  local dirs, dir_seen = {}, {}
+  for _, abs in ipairs(batch) do
+    local dir = vim.fs.dirname(abs)
+    if not dir_seen[dir] and git._cached_root(dir) == nil then
+      dir_seen[dir] = true
+      dirs[#dirs + 1] = dir
+    end
   end
 
-  local tops = vim.tbl_keys(by_top)
-  if #tops == 0 then
-    return
-  end
-
-  local ts = require("config.telescope_smart") -- reuse the bounded pool
-  local found_new = false
-  ts._run_pool(tops, ts._SUBMODULE_CONCURRENCY, function(top, done)
-    local paths = by_top[top]
+  -- dir -> toplevel, or false when the dir sits outside any work tree. Kept
+  -- separate from util.git's memo, which caches only successes (a non-repo dir
+  -- must stay cheap to re-probe later without a synchronous fallback here).
+  local roots = {}
+  pool.run(dirs, pool.GIT_CONCURRENCY, function(dir, done)
     vim.system(
-      -- --no-optional-locks: check-ignore reads the index (tracked files are
-      -- never ignored), and git would opportunistically grab .git/index.lock to
-      -- refresh the index stat cache. config.telescope_smart's decorator runs
-      -- `git status`/`git diff` in this same repo concurrently; two git
-      -- processes colliding on that lock make one exit nonzero and drop its
-      -- output (the labels), so suppress the optional lock here. (telescope_smart
-      -- serializes its own status+diff for the same reason.)
-      { "git", "--no-optional-locks", "-C", top, "check-ignore", "-z", "--stdin" },
-      { stdin = table.concat(paths, "\0") .. "\0", timeout = CHECK_TIMEOUT_MS },
+      { "git", "-C", dir, "rev-parse", "--show-toplevel" },
+      { text = true, timeout = CHECK_TIMEOUT_MS },
       function(res)
         vim.schedule(function()
-          -- rc 0 = some ignored, rc 1 = none ignored (both authoritative);
-          -- rc 128 = error -> empty hit -> those paths fail open (shown), still
-          -- recorded so the batch terminates.
-          local hit = (res.code == 0 or res.code == 1) and M._parse_check_ignore(res.stdout) or {}
-          for _, p in ipairs(paths) do
-            local ig = hit[p] == true
-            if ig and _ignored[p] ~= true then
-              found_new = true
+          local top = res.code == 0 and vim.split(res.stdout or "", "\n", { trimempty = true })[1]
+          if top and top ~= "" then
+            roots[dir] = top
+            -- Prime util.git's memo only while this batch's cache is still
+            -- live: dir_cache.clear() drops the root cache and this cache in
+            -- the same synchronous tick, so identity proves no clear landed
+            -- mid-resolve — an unguarded prime could re-insert a
+            -- pre-topology-change toplevel that M.root would then serve
+            -- stale for the rest of the session.
+            if _ignored == cache then
+              git._prime_root(dir, top)
             end
-            _ignored[p] = ig
-            seen[p] = nil
+          else
+            roots[dir] = false
           end
           done()
         end)
       end
     )
   end, function()
-    if found_new then
-      local ok, api = pcall(require, "nvim-tree.api")
-      if ok and api.tree.is_visible() then
-        api.tree.reload()
-      end
+    if _ignored ~= cache then
+      return
     end
+
+    local by_top, unrooted = M._partition(batch, function(dir)
+      return git._cached_root(dir) or roots[dir] or nil
+    end)
+    for _, abs in ipairs(unrooted) do
+      _ignored[abs] = false
+      seen[abs] = nil
+    end
+
+    local tops = vim.tbl_keys(by_top)
+    if #tops == 0 then
+      return
+    end
+
+    -- Stage 2: one bounded check-ignore per toplevel.
+    local found_new = false
+    pool.run(tops, pool.GIT_CONCURRENCY, function(top, done)
+      local paths = by_top[top]
+      vim.system(
+        -- --no-optional-locks: check-ignore reads the index (tracked files are
+        -- never ignored), and git would opportunistically grab .git/index.lock to
+        -- refresh the index stat cache. config.telescope_smart's decorator runs
+        -- `git status`/`git diff` in this same repo concurrently; two git
+        -- processes colliding on that lock make one exit nonzero and drop its
+        -- output (the labels), so suppress the optional lock here. (telescope_smart
+        -- serializes its own status+diff for the same reason.)
+        { "git", "--no-optional-locks", "-C", top, "check-ignore", "-z", "--stdin" },
+        { stdin = table.concat(paths, "\0") .. "\0", timeout = CHECK_TIMEOUT_MS },
+        function(res)
+          vim.schedule(function()
+            -- A cleared cache mid-batch: drop the stale verdicts but still call
+            -- done() so the pool drains and its on_complete runs.
+            if _ignored ~= cache then
+              return done()
+            end
+            -- rc 0 = some ignored, rc 1 = none ignored (both authoritative);
+            -- rc 128 = error -> empty hit -> those paths fail open (shown), still
+            -- recorded so the batch terminates.
+            local hit = (res.code == 0 or res.code == 1) and M._parse_check_ignore(res.stdout) or {}
+            for _, p in ipairs(paths) do
+              local ig = hit[p] == true
+              if ig and _ignored[p] ~= true then
+                found_new = true
+              end
+              _ignored[p] = ig
+              seen[p] = nil
+            end
+            done()
+          end)
+        end
+      )
+    end, function()
+      if found_new then
+        local ok, api = pcall(require, "nvim-tree.api")
+        if ok and api.tree.is_visible() then
+          api.tree.reload()
+        end
+      end
+    end)
   end)
 end
 

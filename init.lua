@@ -45,8 +45,6 @@ require("config.options")
 require("config.lsp_refs").setup()
 require("config.statusline").setup()
 require("config.block_guides").setup()
-require("config.markdown_preview").setup()
-require("config.wikilinks").setup()
 require("config.dir_cache").setup()
 require("config.ignore_filter").setup()
 
@@ -58,76 +56,6 @@ end, { desc = "Open keybindings cheatsheet" })
 -- hidden); `:b#` or <C-^> jumps back to the previous buffer.
 vim.keymap.set("n", "<leader>E", "<cmd>Explore<cr>", { desc = "Open file tree (netrw)" })
 
--- Slurp a whole file as a string (or nil if it can't be opened). Shared by the
--- two plain-file readers below — plugin HEADs and lazy-lock.json — so the
--- open/read/close dance lives in one place.
-local function read_file(p)
-  local f = io.open(p, "r")
-  if not f then
-    return nil
-  end
-  local s = f:read("*a")
-  f:close()
-  return s
-end
-
--- Resolve the commit a plugin clone is sitting on, via plain file reads (no
--- process spawns): detached HEAD holds the sha directly; a `ref:` HEAD is
--- resolved through the loose ref file, falling back to packed-refs.
-local function installed_commit(dir)
-  local head = read_file(dir .. "/.git/HEAD")
-  if not head then
-    return nil
-  end
-  head = vim.trim(head)
-  local ref = head:match("^ref:%s*(.+)$")
-  if not ref then
-    return head
-  end
-  local loose = read_file(dir .. "/.git/" .. ref)
-  if loose then
-    return vim.trim(loose)
-  end
-  for line in (read_file(dir .. "/.git/packed-refs") or ""):gmatch("[^\n]+") do
-    local sha, name = line:match("^(%x+) (.+)$")
-    if name == ref then
-      return sha
-    end
-  end
-  return nil
-end
-
--- Fresh installs restore to the lockfile below, but an existing machine that
--- pulls lockfile updates never re-applied them: plugins silently drift from
--- their pins (or never install at all). Compare installed commits against
--- lazy-lock.json after startup and warn so drift is never silent.
-local function warn_on_lock_drift()
-  local raw = read_file(vim.fn.stdpath("config") .. "/lazy-lock.json")
-  if not raw then
-    return
-  end
-  local ok, lock = pcall(vim.json.decode, raw)
-  if not ok or type(lock) ~= "table" then
-    return
-  end
-  local drifted = {}
-  for name, pin in pairs(lock) do
-    local dir = vim.fn.stdpath("data") .. "/lazy/" .. name
-    if installed_commit(dir) ~= pin.commit then
-      drifted[#drifted + 1] = name
-    end
-  end
-  if #drifted > 0 then
-    table.sort(drifted)
-    vim.notify(
-      "Plugins out of sync with lazy-lock.json: "
-        .. table.concat(drifted, ", ")
-        .. " — run :Lazy restore",
-      vim.log.levels.WARN
-    )
-  end
-end
-
 if vim.env.NVIM_BOOTSTRAP ~= "0" then
   require("lazy").setup("plugins")
 
@@ -137,5 +65,10 @@ if vim.env.NVIM_BOOTSTRAP ~= "0" then
     require("lazy").restore({ wait = true })
   end
 
-  vim.defer_fn(warn_on_lock_drift, 1000)
+  -- Warn when installed plugin commits drift from lazy-lock.json (see
+  -- config.lock_drift). The closure keeps the require deferred so startup
+  -- does no extra module load.
+  vim.defer_fn(function()
+    require("config.lock_drift").check()
+  end, 1000)
 end

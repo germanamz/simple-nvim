@@ -241,12 +241,8 @@ vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
 
 -- Close every watcher. Test isolation only.
 function M._stop_all()
-  for root, w in pairs(watched) do
-    if not w.handle:is_closing() then
-      w.handle:stop()
-      w.handle:close()
-    end
-    watched[root] = nil
+  for root in pairs(watched) do
+    teardown(root)
   end
 end
 

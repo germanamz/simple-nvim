@@ -3,13 +3,13 @@
 -- config.nvim_tree_dotfolder). Covers both file and directory symlinks: nvim-
 -- tree gives FileLinkNode and DirectoryLinkNode the same node.type == "link"
 -- (see the plugin's node/*-link.lua), so a single field test catches both.
+-- Built through the shared colour-decorator factory
+-- (config.nvim_tree_hl_decorator).
 --
 -- Uses its OWN group NvimTreeSymlinkMark rather than the builtin NvimTreeSymlink
 -- so the whole-row (highlight_range = "all") teal is fully under our control and
 -- never fights the theme's own symlink-name colour — the decorator paints on top
--- of it. Reads FIELDS only (node.type): custom decorators are handed sanitized
--- api-node clones without the Node metatable, so node methods would be nil (this
--- is exactly what crashed the dot-folder decorator's earlier node:is_dotfile()).
+-- of it.
 local M = {}
 
 local hl = require("util.hl")
@@ -21,40 +21,16 @@ local function define_highlights()
 end
 
 -- Pure: is `node` a symlink? Both FileLinkNode and DirectoryLinkNode report
--- node.type == "link" (see the plugin's node/*-link.lua), so this one field test
--- catches file and directory links alike. Field-only, no node methods (the api-
--- node clone lacks the Node metatable).
+-- node.type == "link", so this one field test catches file and directory links
+-- alike. Field-only, no node methods — see the factory's clone caveat.
 function M._is_symlink(node)
   return node.type == "link"
 end
 
-local Decorator
-
--- Deferred behind a function because nvim-tree.api is only requirable once the
--- plugin has loaded — same reason config.nvim_tree_git.decorator() is lazy.
-function M.decorator()
-  if Decorator then
-    return Decorator
-  end
-
-  Decorator = require("nvim-tree.api").Decorator:extend()
-
-  define_highlights()
-  vim.api.nvim_create_autocmd("ColorScheme", { callback = define_highlights })
-
-  function Decorator:new()
-    self.enabled = true
-    self.highlight_range = "all" -- colour both the icon and the name
-    self.icon_placement = "none"
-  end
-
-  function Decorator:highlight_group(node)
-    if M._is_symlink(node) then
-      return "NvimTreeSymlinkMark"
-    end
-  end
-
-  return Decorator
-end
+M.decorator = require("config.nvim_tree_hl_decorator")({
+  group = "NvimTreeSymlinkMark",
+  define_highlights = define_highlights,
+  predicate = M._is_symlink,
+})
 
 return M

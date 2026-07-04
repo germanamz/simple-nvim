@@ -142,13 +142,23 @@ function M.setup()
       end
     end,
   })
-  -- A cwd change can move which repo an unnamed buffer resolves to; FocusGained
-  -- is the cross-instance net (another nvim changed the shared review-base store,
-  -- or a watcher that never started). Both refresh unconditionally.
-  vim.api.nvim_create_autocmd({ "DirChanged", "FocusGained" }, {
+  -- A cwd change can move which repo an unnamed buffer resolves to — but only
+  -- the current buffer's resolution, so refresh just that one.
+  vim.api.nvim_create_autocmd("DirChanged", {
     group = group,
     callback = function(args)
       refresh(args.buf)
+    end,
+  })
+  -- FocusGained is the cross-instance net (another nvim changed the shared
+  -- review-base store, or a watcher that never started) — and that can move
+  -- ANY loaded buffer's branch/base, not just the focused one, while the
+  -- BufEnter gate above never re-resolves an already-resolved buffer. Sweep
+  -- them all (async spawns, and focus events are rare — once per alt-tab).
+  vim.api.nvim_create_autocmd("FocusGained", {
+    group = group,
+    callback = function()
+      refresh_all_buffers()
     end,
   })
   -- Netrw sets a window-local statusline (after FileType fires) that overrides

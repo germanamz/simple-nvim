@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PARSER_INFO_DIR="${HOME}/.local/share/nvim/site/parser-info"
 MASON_PKG_DIR="${HOME}/.local/share/nvim/mason/packages"
 LOCKFILE="${REPO_ROOT}/mason-tool-versions.lock"
-PARSER_REVS_LUA="${REPO_ROOT}/tests/parser-revisions.lua"
+PARSER_REVS_LUA="${REPO_ROOT}/parser-revisions.lua"
 
 CHECK_ONLY=0
 case "${1:-}" in
@@ -63,7 +63,7 @@ check_lockfile_honored() {
 }
 
 check_parser_revisions() {
-  # tests/parser-revisions.lua format:  name = "<rev>",  (one per line)
+  # parser-revisions.lua format:  name = "<rev>",  (one per line)
   # Compare each entry to ~/.local/share/nvim/site/parser-info/<name>.revision.
   awk '/^[[:space:]]*[a-zA-Z_]+[[:space:]]*=[[:space:]]*"[^"]+",/' "$PARSER_REVS_LUA" \
     | while IFS= read -r line; do

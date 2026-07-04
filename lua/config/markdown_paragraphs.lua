@@ -21,9 +21,9 @@ local function is_blank(line)
   return line:match("^%s*$") ~= nil
 end
 
-local function is_code_fence(line)
-  return line:match("^%s*```") ~= nil or line:match("^%s*~~~") ~= nil
-end
+-- Fence grammar shared via util.markdown (also the preview's link transform
+-- and the wikilink scanner), so the predicate can't drift between them.
+local is_code_fence = require("util.markdown").is_fence
 
 -- Returns 1..6 if the line is an ATX heading at that level, else nil.
 local function heading_level(line)
@@ -358,7 +358,6 @@ local function stop_timer(bufnr)
     timers[bufnr] = nil
   end
 end
-M._stop_timer = stop_timer
 
 -- Coalesce rapid TextChanged/TextChangedI into one compute ~80ms after the last
 -- edit. compute walks the whole buffer and render_markers measures each marker's

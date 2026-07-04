@@ -20,4 +20,11 @@ function M.frontmatter_end(lines)
   return 0
 end
 
+-- True when the line opens or closes a fenced code block (``` or ~~~,
+-- optionally indented). Shared by the paragraph gutter, the glow preview's
+-- link transform, and the wikilink scanner so the fence grammar can't drift.
+function M.is_fence(line)
+  return line:match("^%s*```") ~= nil or line:match("^%s*~~~") ~= nil
+end
+
 return M

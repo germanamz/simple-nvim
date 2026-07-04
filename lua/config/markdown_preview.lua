@@ -33,7 +33,7 @@
 local M = {}
 
 -- src bufnr -> {
---   src, preview_win, preview_buf, src_win,
+--   src, preview_win, preview_buf,
 --   tmpfile, timer, job, gen, life_group, win_group, fm_lines, last_src_line
 -- }
 --
@@ -56,9 +56,7 @@ local DEBOUNCE_MS = 300
 
 -- Light-only config, so glow always renders with its light ANSI style. (glow's
 -- -s style is glow's own theme, independent of the Neovim colorscheme.)
-local function glow_style()
-  return "light"
-end
+local GLOW_STYLE = "light"
 
 -- Number of leading YAML-frontmatter lines (0 if none), counting both `---`
 -- fences. glow strips frontmatter from its output, so the preview's first line
@@ -67,6 +65,10 @@ end
 -- util.markdown so the frontmatter format is defined once.
 local frontmatter_lines = require("util.markdown").frontmatter_end
 M._frontmatter_lines = frontmatter_lines
+
+-- Fence detection shared the same way (util.markdown.is_fence), so the fence
+-- grammar can't drift between the preview, the gutter, and the link scanner.
+local is_fence = require("util.markdown").is_fence
 
 -- glow renders both wiki-style and standard links in ways that need rewriting
 -- before it sees them:
@@ -118,7 +120,7 @@ end
 local function transform_links(lines)
   local out, in_fence = {}, false
   for _, line in ipairs(lines) do
-    if line:match("^%s*```") or line:match("^%s*~~~") then
+    if is_fence(line) then
       in_fence = not in_fence
       out[#out + 1] = line
     elseif in_fence then
@@ -222,7 +224,7 @@ refresh = function(src)
   local old_buf = state.preview_buf
   state.gen = state.gen + 1
   local gen = state.gen
-  local cmd = { "glow", "-s", glow_style(), "-w", tostring(width), state.tmpfile }
+  local cmd = { "glow", "-s", GLOW_STYLE, "-w", tostring(width), state.tmpfile }
 
   -- Run glow in a terminal buffer hosted by the preview window (so Neovim's
   -- terminal emulator answers glow's queries and sizes it), without stealing
@@ -380,7 +382,6 @@ ensure_state = function(src)
     src = src,
     preview_win = nil,
     preview_buf = nil,
-    src_win = nil,
     tmpfile = vim.fn.tempname() .. ".md",
     gen = 0,
     fm_lines = 0,
@@ -425,7 +426,6 @@ show = function(src, target_win)
 
   state.preview_win = win
   state.preview_buf = placeholder
-  state.src_win = target_win
   setup_win_autocmds(state)
   refresh(src)
 end
@@ -476,27 +476,17 @@ function M.close(src)
   if not state then
     return
   end
-  -- Delete the augroups first so closing the window doesn't re-enter via
-  -- WinClosed and tearing the file down doesn't re-enter via the lifecycle group.
+  -- Delete the lifecycle group first so tearing the file down doesn't re-enter
+  -- via the lifecycle autocmds; hide() owns the rest of the pane teardown
+  -- (win_group before window for the WinClosed re-entry ordering, timer stop,
+  -- job stop, window + buffer close) so the sequence lives in one place.
   if state.life_group then
     pcall(vim.api.nvim_del_augroup_by_id, state.life_group)
   end
-  if state.win_group then
-    pcall(vim.api.nvim_del_augroup_by_id, state.win_group)
-  end
+  hide(src)
   if state.timer then
-    state.timer:stop()
     state.timer:close()
     state.timer = nil
-  end
-  if state.job then
-    pcall(vim.fn.jobstop, state.job)
-  end
-  if state.preview_win and vim.api.nvim_win_is_valid(state.preview_win) then
-    pcall(vim.api.nvim_win_close, state.preview_win, true)
-  end
-  if state.preview_buf and vim.api.nvim_buf_is_valid(state.preview_buf) then
-    pcall(vim.api.nvim_buf_delete, state.preview_buf, { force = true })
   end
   if state.tmpfile then
     pcall(vim.fn.delete, state.tmpfile)
@@ -522,16 +512,6 @@ function M.set_keymap(buf)
     buffer = buf,
     desc = "Toggle markdown preview",
   })
-end
-
--- Kept callable (init.lua calls it) and idempotent, but a no-op now: keymap
--- registration moved to config.options' markdown FileType autocmd, so this no
--- longer registers a duplicate FileType handler or backfills open buffers.
-function M.setup()
-  if M._did_setup then
-    return
-  end
-  M._did_setup = true
 end
 
 return M

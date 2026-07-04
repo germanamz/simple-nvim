@@ -21,6 +21,8 @@
 
 local M = {}
 
+local md = require("util.markdown")
+
 -- A wiki vault is rooted by ANY of these, not just .git — so a note directory
 -- with no repo still resolves. This is deliberately NOT routed through
 -- util.git.root: that resolver is git-toplevel-only (rev-parse) and would return
@@ -75,17 +77,33 @@ local function classify_dest(dest)
 end
 M._classify_dest = classify_dest
 
--- The standard markdown link `[text](dest)` covering 1-based column `col` on
--- `line`, returned as { text, dest }, or nil. Images (`![alt](src)`) are skipped.
-local function standard_link_at(line, col)
-  local init = 1
+-- The next non-image standard `[text](dest)` link at/after `init` on `line`,
+-- as (s, e, text, dest), or nil. Images (`![alt](src)`) are skipped. The one
+-- home for the standard-link grammar — the cursor lookup below and the
+-- preview's document scan (links_in_lines) both iterate through it.
+local function next_standard(line, init)
   while true do
     local s, e, text, dest = line:find("%[([^%]]*)%]%(([^%)]*)%)", init)
     if not s then
       return nil
     end
-    local is_image = s > 1 and line:sub(s - 1, s - 1) == "!"
-    if not is_image and col >= s and col <= e then
+    if not (s > 1 and line:sub(s - 1, s - 1) == "!") then
+      return s, e, text, dest
+    end
+    init = e + 1
+  end
+end
+
+-- The standard markdown link `[text](dest)` covering 1-based column `col` on
+-- `line`, returned as { text, dest }, or nil.
+local function standard_link_at(line, col)
+  local init = 1
+  while true do
+    local s, e, text, dest = next_standard(line, init)
+    if not s then
+      return nil
+    end
+    if col >= s and col <= e then
       return { text = text, dest = dest }
     end
     init = e + 1
@@ -183,7 +201,6 @@ local function try_follow()
   open_target(target, project_root())
   return true
 end
-M._try_follow = try_follow
 
 -- Try to follow the standard `[text](dest)` link under the cursor in the raw
 -- source buffer (where the real dest is present). Returns true when the cursor
@@ -228,21 +245,6 @@ local function display_text(inner)
   return vim.trim(pipe and inner:sub(pipe + 1) or inner)
 end
 
--- The next non-image standard `[text](dest)` link at/after `init` on `line`,
--- as (s, e, text, dest), or nil. Images (`![alt](src)`) are skipped.
-local function next_standard(line, init)
-  while true do
-    local s, e, text, dest = line:find("%[([^%]]*)%]%(([^%)]*)%)", init)
-    if not s then
-      return nil
-    end
-    if not (s > 1 and line:sub(s - 1, s - 1) == "!") then
-      return s, e, text, dest
-    end
-    init = e + 1
-  end
-end
-
 -- Ordered { display, kind, target } for every followable link in `lines` (wiki
 -- and standard, in document order), skipping fenced code (which glow renders
 -- raw, so there's no rendered link to match), images, and in-doc `#anchor`
@@ -251,13 +253,20 @@ end
 local function links_in_lines(lines)
   local out, in_fence = {}, false
   for _, line in ipairs(lines) do
-    if line:match("^%s*```") or line:match("^%s*~~~") then
+    if md.is_fence(line) then
       in_fence = not in_fence
     elseif not in_fence then
+      -- Blank inline code spans (the spans convert_links protects, so glow
+      -- renders them raw) before scanning: a `[[raw]]` in backticks must not
+      -- be offered as a followable link. Space-padding keeps the length (and
+      -- thus the scan bound) identical; positions aren't collected here.
+      local scrubbed = line:gsub("(`+)(.-)%1", function(ticks, body)
+        return string.rep(" ", #ticks * 2 + #body)
+      end)
       local init = 1
-      while init <= #line do
-        local ws, we, inner = line:find("%[%[(.-)%]%]", init)
-        local ss, se, text, dest = next_standard(line, init)
+      while init <= #scrubbed do
+        local ws, we, inner = scrubbed:find("%[%[(.-)%]%]", init)
+        local ss, se, text, dest = next_standard(scrubbed, init)
         if ws and (not ss or ws <= ss) then
           local display, target = display_text(inner), normalize_target(inner)
           if display ~= "" and target then
@@ -373,16 +382,6 @@ function M.set_keymap(buf)
     buffer = buf,
     desc = "Goto wikilink / definition",
   })
-end
-
--- Kept callable (init.lua calls it) and idempotent, but a no-op now: keymap
--- registration moved to config.options' markdown FileType autocmd, so this no
--- longer registers a duplicate FileType handler or backfills open buffers.
-function M.setup()
-  if M._did_setup then
-    return
-  end
-  M._did_setup = true
 end
 
 return M

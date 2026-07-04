@@ -20,6 +20,7 @@ Personal Neovim configuration for Neovim **0.11+**. Uses `lazy.nvim` for plugin 
 | Tool | Why |
 | --- | --- |
 | **fd** | Faster file discovery for Telescope. |
+| **stylua** | Lua formatter used by conform (format-on-save for this config itself) and the `make lint` / `make fmt` targets. Shell-PATH-managed (Homebrew/cargo), not mason-pinned. |
 | **Go toolchain** | Needed at runtime by `gopls` if you edit Go files. |
 | **Rust toolchain** (`rustup` / `cargo`) | Needed at runtime by `rust_analyzer` if you edit Rust files. |
 | **Python ≥ 3.8** | Needed by `pyright` if you edit Python files. |
@@ -27,7 +28,7 @@ Personal Neovim configuration for Neovim **0.11+**. Uses `lazy.nvim` for plugin 
 ### Install on macOS (Homebrew)
 
 ```sh
-brew install neovim git make ripgrep fd node go rustup-init
+brew install neovim git make ripgrep fd node go rustup-init stylua
 brew install --cask font-jetbrains-mono-nerd-font
 ```
 
@@ -37,6 +38,7 @@ brew install --cask font-jetbrains-mono-nerd-font
 sudo apt update
 sudo apt install -y neovim git build-essential ripgrep fd-find nodejs npm golang
 # rustup: see https://rustup.rs
+# stylua (not in apt): cargo install stylua, or grab a release binary
 ```
 
 > Confirm `nvim --version` reports `≥ 0.11`. Distro packages are often older — install from [the official release](https://github.com/neovim/neovim/releases) or via a version manager if needed.

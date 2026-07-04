@@ -36,6 +36,8 @@
 -- state file is absent.
 local M = {}
 
+local state_util = require("util.state")
+
 local DEFAULT_MODEL = "qwen2.5-coder:7b-base"
 local GATE_AUGROUP = "ai_completions_gate"
 
@@ -81,34 +83,17 @@ end
 -- never error (it runs from minuet.setup at config-time): a missing file just
 -- yields the default.
 function M.load_persisted_model()
-  local f = io.open(M.model_path(), "r")
-  if not f then
-    return DEFAULT_MODEL
-  end
-  local raw = f:read("*a")
-  f:close()
-  local model = vim.trim(raw or "")
+  local model = vim.trim(state_util.read_file(M.model_path()) or "")
   if model == "" then
     return DEFAULT_MODEL
   end
   return model
 end
 
--- Atomic-ish write (tmp + rename), matching config.review_base's persistence
--- idiom so a crashed write never leaves a half-written model file.
+-- Atomic write via util.state (shared with ai_models' library cache and
+-- review_base's store) so a crashed write never leaves a half-written file.
 local function write_persisted_model(model)
-  local path = M.model_path()
-  -- stdpath("state") may not exist yet on a fresh install (or under the test
-  -- harness's XDG swap); create it so the write doesn't silently no-op.
-  vim.fn.mkdir(vim.fn.fnamemodify(path, ":h"), "p")
-  local tmp = path .. ".tmp"
-  local f = io.open(tmp, "w")
-  if not f then
-    return
-  end
-  f:write(model)
-  f:close()
-  os.rename(tmp, path)
+  state_util.write_atomic(M.model_path(), model)
 end
 
 -- The gate: keep every buffer's minuet auto-trigger flag in lockstep with the

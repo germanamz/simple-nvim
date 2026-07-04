@@ -56,10 +56,25 @@ function M._clear_python_cache()
   python_cache = {}
 end
 
+-- prettierd-first: conform runs the first available formatter in the chain.
+-- prettierd is a resident daemon that keeps the prettier engine warm, so on
+-- save it answers in single-digit ms instead of paying Node's cold start
+-- every time (plain `prettier` re-spawns node + reloads the config per run,
+-- which is what stalls format-on-save). Plain `prettier` stays as the
+-- fallback for machines where the daemon isn't installed. One table shared by
+-- every web/markup filetype below — reordering the chain is a one-line change
+-- (consumers treat the entries as read-only; give a filetype its own literal
+-- if it ever needs per-entry opts).
+local prettier = { "prettierd", "prettier" }
+
 -- Vim filetype -> ordered list of conform formatter names (or a function
 -- of bufnr returning one — conform supports both).
 M.by_ft = {
   python = python_formatters,
+  -- stylua is Homebrew-managed, not mason-pinned: `make lint`/`make fmt` need
+  -- it on the shell PATH, where mason's bin dir isn't (and a mason install
+  -- would shadow the Homebrew binary inside nvim). Absent it, lsp_format =
+  -- "fallback" hands Lua formatting to lua_ls.
   lua = { "stylua" },
   go = { "gofmt" },
   rust = { "rustfmt" },
@@ -71,32 +86,30 @@ M.by_ft = {
   ["terraform-vars"] = { "terraform_fmt" },
   sh = { "shfmt" },
   bash = { "shfmt" },
+  -- shfmt has no zsh dialect and parses zsh as bash: fine for bash-compatible
+  -- scripts, but zsh-only syntax (e.g. `for i (1 2 3)`) fails to parse and
+  -- notify_on_error surfaces it on save. bashls likewise excludes zsh (see
+  -- lsp.lua); kept because most local zsh scripts are bash-compatible.
   zsh = { "shfmt" },
   c = { "clang_format" },
   cpp = { "clang_format" },
   objc = { "clang_format" },
   objcpp = { "clang_format" },
   toml = { "taplo" },
-  -- prettierd-first: conform runs the first available formatter in the chain.
-  -- prettierd is a resident daemon that keeps the prettier engine warm, so on
-  -- save it answers in single-digit ms instead of paying Node's cold start
-  -- every time (plain `prettier` re-spawns node + reloads the config per run,
-  -- which is what stalls format-on-save). Plain `prettier` stays as the
-  -- fallback for machines where the daemon isn't installed.
-  javascript = { "prettierd", "prettier" },
-  javascriptreact = { "prettierd", "prettier" },
-  typescript = { "prettierd", "prettier" },
-  typescriptreact = { "prettierd", "prettier" },
-  json = { "prettierd", "prettier" },
-  jsonc = { "prettierd", "prettier" },
-  css = { "prettierd", "prettier" },
-  scss = { "prettierd", "prettier" },
-  html = { "prettierd", "prettier" },
-  yaml = { "prettierd", "prettier" },
-  markdown = { "prettierd", "prettier" },
-  mdx = { "prettierd", "prettier" },
+  javascript = prettier,
+  javascriptreact = prettier,
+  typescript = prettier,
+  typescriptreact = prettier,
+  json = prettier,
+  jsonc = prettier,
+  css = prettier,
+  scss = prettier,
+  html = prettier,
+  yaml = prettier,
+  markdown = prettier,
+  mdx = prettier,
   -- prettier has a built-in graphql parser (.graphql / .gql schemas & queries).
-  graphql = { "prettierd", "prettier" },
+  graphql = prettier,
 }
 
 return M

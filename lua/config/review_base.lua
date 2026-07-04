@@ -8,6 +8,7 @@ local M = {}
 local git = require("util.git")
 local Overlay = require("util.overlay")
 local palette = require("config.palette")
+local state_util = require("util.state")
 
 -- Resolved per call, not at require time: stdpath("data") follows
 -- $XDG_DATA_HOME at call time, and the test harness swaps that per test for
@@ -32,15 +33,12 @@ local cache
 -- whenever the cache is — another instance may have rewritten the store.
 local validated = {}
 
--- The actual disk read; read_state() wraps it with memoization.
+-- The actual disk read; read_state() wraps it with memoization. The guarded
+-- file read lives in util.state; the JSON decode + degrade-to-{} semantics
+-- stay here.
 local function decode_state()
-  local f = io.open(state_path(), "r")
-  if not f then
-    return {}
-  end
-  local raw = f:read("*a")
-  f:close()
-  if raw == "" then
+  local raw = state_util.read_file(state_path())
+  if not raw or raw == "" then
     return {}
   end
   local ok, data = pcall(vim.json.decode, raw)
@@ -58,8 +56,8 @@ local function read_state()
 end
 
 -- Shallow copy of the live state for mutators to edit a throwaway table: if
--- write_state's atomic rename fails (it throws), the cache stays consistent with
--- disk instead of holding the never-persisted edit.
+-- write_state's atomic write fails (reported by write_atomic's return), the
+-- cache stays consistent with disk instead of holding the never-persisted edit.
 local function copy_state()
   local out = {}
   for k, v in pairs(read_state()) do
@@ -69,18 +67,14 @@ local function copy_state()
 end
 
 local function write_state(state)
-  local tmp = state_path() .. ".tmp"
-  local f = io.open(tmp, "w")
-  if not f then
+  if not state_util.write_atomic(state_path(), vim.json.encode(state)) then
+    -- Nothing persisted (unwritable tmp / failed rename): keep the cache on
+    -- what disk actually holds instead of adopting a never-persisted state.
     return
   end
-  f:write(vim.json.encode(state))
-  f:close()
-  os.rename(tmp, state_path())
   -- Write-through: disk now equals `state`, so adopt it as the cache rather than
-  -- forcing the next read to re-decode. A failed rename above throws before
-  -- here, leaving the cache (and disk) untouched. Reset `validated` alongside so
-  -- it never outlives the cache it describes (one owner for the pair).
+  -- forcing the next read to re-decode. Reset `validated` alongside so it never
+  -- outlives the cache it describes (one owner for the pair).
   cache = state
   validated = {}
 end
@@ -117,12 +111,14 @@ vim.api.nvim_create_autocmd("FocusGained", {
 })
 
 -- The stored review base for `root`, validating it lazily on first read this
--- session: if the repo is gone or the ref no longer resolves, the entry is
--- pruned (silently and permanently on disk — the same outcome the old startup
--- bootstrap produced, but paid one root at a time on demand instead of sweeping
--- every persisted base at launch). `validated` makes this at most one git spawn
--- per root per cache lifetime, keeping the gitsigns-attach / statusline hot path
--- cheap.
+-- session: if the repo is gone or the ref DEFINITIVELY no longer resolves, the
+-- entry is pruned (silently and permanently on disk — the same outcome the old
+-- startup bootstrap produced, but paid one root at a time on demand instead of
+-- sweeping every persisted base at launch). A resolve that merely TIMED OUT
+-- (the hung/network gitdir util.git's bound anticipates) must not destroy
+-- persisted user state: the ref is returned unvalidated so a later read
+-- retries. `validated` makes this at most one git spawn per root per cache
+-- lifetime, keeping the gitsigns-attach / statusline hot path cheap.
 function M.get(root)
   if not root then
     return nil
@@ -131,14 +127,21 @@ function M.get(root)
   if ref == nil or validated[root] then
     return ref
   end
-  validated[root] = true
-  if vim.fn.isdirectory(root) == 0 or not git.resolve(root, ref) then
-    local pruned = copy_state()
-    pruned[root] = nil
-    pcall(write_state, pruned)
-    return nil
+  if vim.fn.isdirectory(root) == 1 then
+    local ok, timed_out = git.resolve(root, ref)
+    if ok then
+      validated[root] = true
+      return ref
+    end
+    if timed_out then
+      return ref
+    end
   end
-  return ref
+  validated[root] = true
+  local pruned = copy_state()
+  pruned[root] = nil
+  pcall(write_state, pruned)
+  return nil
 end
 
 function M.set(root, ref)

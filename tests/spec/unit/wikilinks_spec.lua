@@ -164,6 +164,19 @@ describe("config.wikilinks", function()
     it("skips links inside fenced code", function()
       assert.are.same({}, wl._links_in_lines({ "```", "[[raw]] [a](b.md)", "```" }))
     end)
+
+    it("skips links inside inline code spans", function()
+      -- convert_links protects inline spans, so the preview renders them raw:
+      -- there is no rendered link text to follow.
+      assert.are.same({}, wl._links_in_lines({ "see `[[raw]]` and ``[a](b.md)`` here" }))
+    end)
+
+    it("still extracts links beside an inline code span", function()
+      assert.are.same(
+        { { display = "kept", kind = "wiki", target = "kept.md" } },
+        wl._links_in_lines({ "`[[raw]]` then [[kept]]" })
+      )
+    end)
   end)
 
   describe("_match_at", function()

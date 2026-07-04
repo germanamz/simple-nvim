@@ -16,7 +16,7 @@ help:
 	@echo "  test-lsp   Run slow LSP end-to-end tests"
 
 # Make this machine match the committed pins: plugins (lazy-lock.json),
-# treesitter parsers (tests/parser-revisions.lua), and mason tools
+# treesitter parsers (parser-revisions.lua), and mason tools
 # (mason-tool-versions.lock). Idempotent — safe to re-run.
 sync warm:
 	@./scripts/warm-cache.sh
@@ -31,10 +31,10 @@ check:
 	@./scripts/warm-cache.sh --check-only
 
 lint:
-	@stylua --check lua init.lua tests
+	@stylua --check lua init.lua tests parser-revisions.lua
 
 fmt:
-	@stylua lua init.lua tests
+	@stylua lua init.lua tests parser-revisions.lua
 
 test: test-unit test-smoke test-e2e
 

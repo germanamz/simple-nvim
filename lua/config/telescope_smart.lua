@@ -39,6 +39,7 @@ local Overlay = require("util.overlay")
 local path_util = require("util.path")
 local palette = require("config.palette")
 local fs = require("util.fs")
+local pool = require("util.pool")
 
 -- ===================== helpers =====================
 
@@ -89,8 +90,14 @@ end
 -- --untracked-files=all lists each untracked file individually; without it git
 -- collapses a fully-untracked directory to a single "dir/" entry, which would
 -- show (and try to open) the directory instead of the new file.
+-- --ignore-submodules=all matches git_changes_async: the sync path has no
+-- submodule recursion, so a dirty-gitlink row would surface as a bogus file
+-- entry (see the e2e contract in telescope_smart_spec).
 local function parse_worktree_status(root, codes, counts)
-  local lines, ok = git.run({ "status", "--porcelain", "--untracked-files=all" }, { cwd = root })
+  local lines, ok = git.run(
+    { "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=all" },
+    { cwd = root }
+  )
   if not ok then
     return
   end
@@ -133,7 +140,10 @@ local function parse_committed_history(root, base, codes, counts)
   -- base's current tip: it shows what changed on my branch since it forked off
   -- base — the "changed since base" intent — and matches the `git log base..HEAD`
   -- preview semantics. (base advancing upstream doesn't masquerade as my work.)
-  local lines, ok = git.run({ "diff", "--name-status", base .. "...HEAD" }, { cwd = root })
+  local lines, ok = git.run(
+    { "diff", "--name-status", "--ignore-submodules=all", base .. "...HEAD" },
+    { cwd = root }
+  )
   if not ok then
     return
   end
@@ -200,37 +210,26 @@ local function has_submodules(root)
 end
 M._has_submodules = has_submodules
 
--- Run worker(item, done) over `items` with at most `limit` in flight, calling
--- on_complete after the last done(). Bounds the concurrent git processes a
--- superproject spawns, so hundreds of submodules can't fork-bomb the machine.
--- Workers run asynchronously (vim.system) and MUST call done() exactly once.
-local SUBMODULE_CONCURRENCY = 8
+-- Bounded fan-out over the submodule statuses, via the shared util.pool
+-- (config.ignore_filter's oracle drains through the same pool and bound).
+-- Thin re-exports keep the existing unit-spec seams stable.
+local SUBMODULE_CONCURRENCY = pool.GIT_CONCURRENCY
 M._SUBMODULE_CONCURRENCY = SUBMODULE_CONCURRENCY
 
-local function run_pool(items, limit, worker, on_complete)
-  local n = #items
-  if n == 0 then
-    return on_complete()
-  end
-  local idx, active, finished = 0, 0, 0
-  local function pump()
-    while active < limit and idx < n do
-      idx = idx + 1
-      active = active + 1
-      worker(items[idx], function()
-        active = active - 1
-        finished = finished + 1
-        if finished == n then
-          on_complete()
-        else
-          pump()
-        end
-      end)
-    end
-  end
-  pump()
-end
+local run_pool = pool.run
 M._run_pool = run_pool
+
+-- Matches util.git's TIMEOUT_MS: one bound for how long any single git call may
+-- run. A hung/slow submodule status is killed at the bound (its res.code != 0 →
+-- that submodule contributes nothing) so the pool always completes.
+local GIT_TIMEOUT_MS = 2000
+
+-- The outer whole-superproject status/diff get a larger bound than the
+-- per-submodule calls: they cover the entire tree, and killing a legitimate
+-- cold-cache status would blank every label. The bound still guarantees the
+-- pipeline completes — without one, a single hung spawn wedges refreshing[cwd]
+-- forever and silently disables every future refresh for that cwd.
+local BULK_GIT_TIMEOUT_MS = 5 * GIT_TIMEOUT_MS
 
 -- Async sibling of _git_changes: fetch `git status` (and, when a base is set,
 -- `git diff`) via vim.system so the UI never blocks on git over a large
@@ -260,7 +259,7 @@ local function git_changes_async(root, base, cb)
       "--untracked-files=all",
       "--ignore-submodules=all",
     },
-    { text = true },
+    { text = true, timeout = BULK_GIT_TIMEOUT_MS },
     function(wt)
       local wt_lines = wt.code == 0 and split_lines(wt.stdout) or {}
       vim.schedule(function()
@@ -290,7 +289,7 @@ local function git_changes_async(root, base, cb)
               "--ignore-submodules=all",
               base .. "...HEAD",
             },
-            { text = true },
+            { text = true, timeout = BULK_GIT_TIMEOUT_MS },
             function(df)
               local df_lines = df.code == 0 and split_lines(df.stdout) or {}
               vim.schedule(function()
@@ -305,11 +304,6 @@ local function git_changes_async(root, base, cb)
     end
   )
 end
-
--- Matches util.git's TIMEOUT_MS: one bound for how long any single git call may
--- run. A hung/slow submodule status is killed at the bound (its res.code != 0 →
--- that submodule contributes nothing) so the pool always completes.
-local GIT_TIMEOUT_MS = 2000
 
 -- List the superproject's checked-out submodule worktree paths asynchronously.
 -- Resolved fresh each call (never via a cache) so labels stay correct after a
@@ -385,7 +379,11 @@ end
 -- superproject doesn't freeze the editor while a picker is opening.
 function M._list_all_async(cwd, cb)
   vim.system(list_all_cmd(), { cwd = cwd, text = true }, function(out)
-    local files = out.code == 0 and split_lines(out.stdout) or {}
+    -- Keep whatever the walker printed regardless of exit code: rg exits 2 on
+    -- a partial-error walk (one unreadable directory) while still emitting the
+    -- full valid listing, and the sync sibling (vim.fn.systemlist) likewise
+    -- ignores exit codes. split_lines maps nil/empty stdout to {}.
+    local files = split_lines(out.stdout)
     vim.schedule(function()
       cb(files)
     end)

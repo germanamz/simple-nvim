@@ -30,7 +30,9 @@ local TIMEOUT_MS = 2000
 
 -- Run a git command. `opts.cwd`, when non-empty, inserts `-C <cwd>` right after
 -- `git` so the command runs against that repo. Returns the output lines (stdout
--- only) and a boolean `ok` (true when git exited 0). A timeout counts as not-ok.
+-- only), a boolean `ok` (true when git exited 0), and `timed_out` (true when
+-- the call hit TIMEOUT_MS — so callers can tell a transient hang from git
+-- definitively saying no; see review_base's prune-vs-retry decision).
 function M.run(args, opts)
   local cmd = { "git" }
   if opts and opts.cwd and opts.cwd ~= "" then
@@ -40,11 +42,14 @@ function M.run(args, opts)
   vim.list_extend(cmd, args)
   local res = vim.system(cmd, { text = true }):wait(TIMEOUT_MS)
   if not res then
-    -- :wait(timeout) returns nil when it had to SIGKILL the process; treat the
-    -- timed-out call as a failure with no output.
-    return {}, false
+    -- wait(timeout) normally returns a completed result (code=124, signal=9)
+    -- after SIGKILLing a timed-out process; nil only when the process survives
+    -- even the SIGKILL within the wait window (e.g. uninterruptible sleep on a
+    -- hung network gitdir). Either way it timed out.
+    return {}, false, true
   end
-  return vim.split(res.stdout or "", "\n", { trimempty = true }), res.code == 0
+  local timed_out = res.code == 124 and res.signal == 9
+  return vim.split(res.stdout or "", "\n", { trimempty = true }), res.code == 0, timed_out
 end
 
 -- Run a command and return its first output line, or nil when the command
@@ -85,6 +90,19 @@ end
 -- membership changes mid-session (git init, submodule add/remove).
 function M._clear_root_cache()
   root_cache = {}
+end
+
+-- Read-only peek at the root memo, for callers that must never block the main
+-- loop (config.ignore_filter resolves cache misses through its own async
+-- rev-parse instead of M.root's synchronous wait).
+function M._cached_root(dir)
+  return root_cache[dir]
+end
+
+-- Prime the root memo with an externally-resolved toplevel, so an async
+-- resolve warms the same cache the synchronous callers read.
+function M._prime_root(dir, top)
+  root_cache[dir] = top
 end
 
 -- Repo toplevel for buffer `buf`, resolved from its start dir (its file's
@@ -150,13 +168,15 @@ function M.git_dir(root)
   return M.first_line({ "rev-parse", "--absolute-git-dir" }, { cwd = root })
 end
 
--- True when `ref` resolves to an object in `root`.
+-- True when `ref` resolves to an object in `root`. The second return marks a
+-- timed-out (not definitively failed) check, so callers can retry later
+-- instead of treating a transient hang as "ref is gone".
 function M.resolve(root, ref)
   if not root or not ref or ref == "" then
     return false
   end
-  local _, ok = M.run({ "rev-parse", "--verify", "--quiet", ref }, { cwd = root })
-  return ok
+  local _, ok, timed_out = M.run({ "rev-parse", "--verify", "--quiet", ref }, { cwd = root })
+  return ok, timed_out
 end
 
 -- True when `relpath` exists in `ref` (e.g. the file was committed in that ref).

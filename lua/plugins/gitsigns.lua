@@ -4,10 +4,9 @@ return {
   opts = function()
     local review_base = require("config.review_base")
     local git = require("util.git")
-    local path = require("util.path")
 
     local function apply_base(bufnr)
-      local root = git.root(path.buf_start_dir(bufnr))
+      local root = git.buf_root(bufnr)
       local ref = root and review_base.get(root) or nil
       -- gitsigns has only ONE global base (config.base), shared by every attached
       -- buffer across every repo/submodule. change_base re-diffs ALL attached
@@ -61,7 +60,7 @@ return {
         -- press because change_base fires from ReviewBaseChanged without
         -- re-running on_attach, so attach-time state would go stale.
         map("n", "<leader>hr", function()
-          local root = git.root(path.buf_start_dir(bufnr))
+          local root = git.buf_root(bufnr)
           local ref = root and review_base.get(root)
           if ref then
             local ok = vim.fn.confirm(
@@ -379,11 +378,24 @@ return {
         local tries = 0
         local function settle()
           tries = tries + 1
-          local buf = vim.api.nvim_get_current_buf()
-          local h = gs.get_hunks(buf)
-          if h and #h > 0 then
+          -- Probe every loaded buffer, not just the current one: toggling from
+          -- a clean/untracked buffer would otherwise exhaust the tries and
+          -- leave other buffers' line backgrounds hidden until their next
+          -- GitSignsUpdate. On exhaustion still repaint once so the toggle
+          -- always converges. Bounded: at most 40 sweeps on an explicit toggle.
+          local ready = false
+          for _, b in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_loaded(b) then
+              local h = gs.get_hunks(b)
+              if h and #h > 0 then
+                ready = true
+                break
+              end
+            end
+          end
+          if ready or tries >= 40 then
             repaint_all()
-          elseif tries < 40 then
+          else
             vim.defer_fn(settle, 25)
           end
         end
@@ -437,17 +449,8 @@ return {
       repaint_all()
       require("config.statusline").refresh_all()
       -- Reload the tree's git decorator against fresh codes, if it's on screen
-      -- (mirrors nvim-tree.lua's own ReviewBaseChanged refresh).
-      if package.loaded["nvim-tree"] then
-        local api = require("nvim-tree.api")
-        if api.tree.is_visible() then
-          require("config.telescope_smart")._refresh_async(vim.fn.getcwd(), function()
-            if api.tree.is_visible() then
-              api.tree.reload()
-            end
-          end)
-        end
-      end
+      -- (the same helper nvim-tree.lua's own event handlers use).
+      require("config.nvim_tree_git").refresh_labels()
       vim.notify("Refreshed git hunks & status")
     end, { desc = "Refresh git hunks & status" })
 

@@ -18,11 +18,10 @@ local function clear()
   require("util.git")._clear_root_cache()
   require("config.formatters")._clear_python_cache()
   -- A submodule add/remove changes both root-partitioning and ignore answers in
-  -- config.ignore_filter's oracle cache, so drop it on the same triggers. pcall:
-  -- ignore_filter may not be loaded yet (nvim-tree is lazy).
-  pcall(function()
-    require("config.ignore_filter")._clear()
-  end)
+  -- config.ignore_filter's oracle cache, so drop it on the same triggers
+  -- (init.lua loads ignore_filter unconditionally at startup, so it is always
+  -- present here).
+  require("config.ignore_filter")._clear()
 end
 
 -- Exposed as the manual hatch (wired into <leader>gR) and for tests.
