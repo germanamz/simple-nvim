@@ -81,14 +81,6 @@ end
 
 local find_frontmatter_end = require("util.markdown").frontmatter_end
 
-function M.frontmatter_end(bufnr)
-  bufnr = bufnr or vim.api.nvim_get_current_buf()
-  if not vim.api.nvim_buf_is_valid(bufnr) then
-    return 0
-  end
-  return find_frontmatter_end(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false))
-end
-
 -- Joins a path of integers into a key for the counters dict. Empty entries
 -- (used for level-skipping like H2 → H4) become empty path components, so
 -- {2, 0, 1} keys as "2..1" and "§2..1" is addressable but unusual.

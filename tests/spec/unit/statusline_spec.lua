@@ -169,4 +169,70 @@ describe("config.statusline", function()
       assert.are.equal(0, #roots_seen)
     end)
   end)
+
+  -- Behavioral lock for the cross-instance staleness fix: another nvim/tool can
+  -- change git state while this instance is unfocused, and only the FocusGained
+  -- sweep can repair a NON-CURRENT buffer whose branch is already cached (the
+  -- BufEnter gate never re-resolves a non-nil nvim_git_branch). refresh() calls
+  -- path.buf_start_dir(buf) synchronously per swept buffer, so replacing that
+  -- field on the shared util.path table captures exactly which buffers the
+  -- handler reached — the same spy idiom as the buf_in_root scoping tests.
+  describe("FocusGained sweep", function()
+    local nvim_env = require("helpers.nvim_env")
+    local git_fixture = require("helpers.git_fixture")
+    local wait = require("helpers.wait")
+    local path = require("util.path")
+    local env_root, repo, other, refreshed, orig_buf_start_dir
+
+    before_each(function()
+      env_root = nvim_env.setup_isolated_env()
+      require("config.statusline").setup()
+      -- A distinctive branch name: refresh()'s async callback checks only buffer
+      -- validity, so a stale callback from an earlier test can land on a recycled
+      -- buffer number — but it can only ever write "" or another repo's branch,
+      -- never this one.
+      repo = git_fixture.repo({
+        base_branch = "focus-swept",
+        commits = { { files = { ["other.txt"] = "other\n" }, message = "init" } },
+      })
+      other = vim.fn.bufadd(repo .. "/other.txt")
+      -- Mark the buffer already-resolved with a value no longer matching git
+      -- reality BEFORE loading it: bufload fires a BufEnter here, and a nil
+      -- branch would let the BufEnter gate resolve the buffer outside the
+      -- sweep. With it set, only the FocusGained sweep may overwrite it.
+      vim.b[other].nvim_git_branch = "outdated"
+      vim.b[other].nvim_review_base = ""
+      vim.fn.bufload(other)
+      refreshed = {}
+      orig_buf_start_dir = path.buf_start_dir
+      path.buf_start_dir = function(b)
+        refreshed[b] = true
+        return orig_buf_start_dir(b)
+      end
+    end)
+
+    after_each(function()
+      path.buf_start_dir = orig_buf_start_dir
+      require("config.git_head")._stop_all()
+      if other and vim.api.nvim_buf_is_valid(other) then
+        vim.api.nvim_buf_delete(other, { force = true })
+      end
+      vim.fn.delete(repo, "rf")
+      nvim_env.teardown(env_root)
+    end)
+
+    it("re-resolves a non-current already-resolved buffer", function()
+      assert.are_not.equal(other, vim.api.nvim_get_current_buf())
+      vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+      assert.is_true(refreshed[other])
+      assert.is_true(refreshed[vim.api.nvim_get_current_buf()])
+    end)
+
+    it("overwrites the stale cached branch once the async resolve lands", function()
+      vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+      wait.wait_for(function()
+        return vim.b[other].nvim_git_branch == "focus-swept"
+      end, nil, "non-current buffer's branch cache was never re-resolved")
+    end)
+  end)
 end)

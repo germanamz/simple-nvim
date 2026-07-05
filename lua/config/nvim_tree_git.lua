@@ -76,7 +76,10 @@ function M.decorator()
   -- tree render: scroll, expand, focus, SmartCodesRefreshed). Matches the
   -- block_guides/lsp_refs/gitsigns ColorScheme pattern.
   git_status_codes.define_highlights()
+  -- Named augroup with clear=true: a rebuild after a package.loaded reset
+  -- replaces the autocmd instead of stacking a duplicate.
   vim.api.nvim_create_autocmd("ColorScheme", {
+    group = vim.api.nvim_create_augroup("nvim_tree_git_hl", { clear = true }),
     callback = git_status_codes.define_highlights,
   })
 

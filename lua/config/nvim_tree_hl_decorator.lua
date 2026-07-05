@@ -24,7 +24,13 @@ return function(spec)
     Decorator = require("nvim-tree.api").Decorator:extend()
 
     spec.define_highlights()
-    vim.api.nvim_create_autocmd("ColorScheme", { callback = spec.define_highlights })
+    -- Named per-decorator augroup (keyed by the unique spec.group): clear=true
+    -- makes a rebuild after a package.loaded reset replace the autocmd instead
+    -- of stacking a duplicate, while siblings keep their own registrations.
+    vim.api.nvim_create_autocmd("ColorScheme", {
+      group = vim.api.nvim_create_augroup("nvim_tree_hl_" .. spec.group, { clear = true }),
+      callback = spec.define_highlights,
+    })
 
     function Decorator:new()
       self.enabled = true

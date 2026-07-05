@@ -424,11 +424,20 @@ local function ms_now()
   return vim.uv.hrtime() / 1e6
 end
 
+-- Canonical cache key: "cwd" and "cwd/" must converge on one cache/refreshing
+-- entry (a trailing-slash cwd once produced a divergent key — the
+-- SmartCodesRefreshed bug). The "(.)/$" pattern keeps the filesystem root "/"
+-- from collapsing to "".
+local function canonical_cwd(cwd)
+  return (cwd:gsub("(.)/$", "%1"))
+end
+M._canonical_cwd = canonical_cwd
+
 -- Async core: resolve root, fetch git changes (worktree status across the repo
 -- AND its submodules) off the main thread, rewrite the per-path keys relative to
 -- cwd, store them in the cache, then hand them to cb.
 local function refresh_codes_async(cwd, cb)
-  cwd = cwd or vim.fn.getcwd()
+  cwd = canonical_cwd(cwd or vim.fn.getcwd())
   local root = git.root(cwd)
   if not root then
     cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = cwd, time = ms_now() }
@@ -459,7 +468,7 @@ M._refresh_async = refresh_codes_async
 local refreshing = {}
 
 local function refresh_codes(cwd)
-  cwd = cwd or vim.fn.getcwd()
+  cwd = canonical_cwd(cwd or vim.fn.getcwd())
   local now = ms_now()
   if cache.cwd == cwd and (now - cache.time) < 500 then
     return cache.codes, cache.counts, cache.base, cache.root

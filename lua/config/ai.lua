@@ -38,7 +38,12 @@ local M = {}
 
 local state_util = require("util.state")
 
-local DEFAULT_MODEL = "qwen2.5-coder:7b-base"
+-- The single home for the default completion model. config.ai_models reads
+-- this export for its "nothing installed yet" hint, so the two modules can
+-- never disagree on the fallback. Exported from THIS side of the dependency
+-- (ai_models already requires config.ai) so no require cycle appears.
+M.DEFAULT_MODEL = "qwen2.5-coder:7b-base"
+
 local GATE_AUGROUP = "ai_completions_gate"
 
 -- Common Ollama install locations, checked in addition to PATH so a GUI Neovim
@@ -85,7 +90,7 @@ end
 function M.load_persisted_model()
   local model = vim.trim(state_util.read_file(M.model_path()) or "")
   if model == "" then
-    return DEFAULT_MODEL
+    return M.DEFAULT_MODEL
   end
   return model
 end

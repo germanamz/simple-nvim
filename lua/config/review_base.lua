@@ -33,6 +33,16 @@ local cache
 -- whenever the cache is — another instance may have rewritten the store.
 local validated = {}
 
+-- vim.uv.now() (monotonic ms) of the last resolve that TIMED OUT, per root. A
+-- timed-out gitdir would otherwise pay util.git's 2s-bounded sync resolve on
+-- every M.get from the statusline/gitsigns hot paths; within this window the
+-- persisted base is returned without re-running resolve. Cleared by a resolve
+-- that completes either way (success or definitive failure) — only a timeout
+-- extends it. Deliberately NOT reset with the cache: it tracks git
+-- responsiveness, not store contents.
+local timeout_at = {}
+local TIMEOUT_BACKOFF_MS = 10000
+
 -- The actual disk read; read_state() wraps it with memoization. The guarded
 -- file read lives in util.state; the JSON decode + degrade-to-{} semantics
 -- stay here.
@@ -116,9 +126,11 @@ vim.api.nvim_create_autocmd("FocusGained", {
 -- startup bootstrap produced, but paid one root at a time on demand instead of
 -- sweeping every persisted base at launch). A resolve that merely TIMED OUT
 -- (the hung/network gitdir util.git's bound anticipates) must not destroy
--- persisted user state: the ref is returned unvalidated so a later read
--- retries. `validated` makes this at most one git spawn per root per cache
--- lifetime, keeping the gitsigns-attach / statusline hot path cheap.
+-- persisted user state: the ref is returned unvalidated and the resolve is
+-- retried only after TIMEOUT_BACKOFF_MS, so a hung gitdir costs one bounded
+-- spawn per window instead of one per read. `validated` makes a completed
+-- resolve at most one git spawn per root per cache lifetime, keeping the
+-- gitsigns-attach / statusline hot path cheap.
 function M.get(root)
   if not root then
     return nil
@@ -127,17 +139,24 @@ function M.get(root)
   if ref == nil or validated[root] then
     return ref
   end
+  local backed_off_at = timeout_at[root]
+  if backed_off_at and vim.uv.now() - backed_off_at < TIMEOUT_BACKOFF_MS then
+    return ref
+  end
   if vim.fn.isdirectory(root) == 1 then
     local ok, timed_out = git.resolve(root, ref)
     if ok then
       validated[root] = true
+      timeout_at[root] = nil
       return ref
     end
     if timed_out then
+      timeout_at[root] = vim.uv.now()
       return ref
     end
   end
   validated[root] = true
+  timeout_at[root] = nil
   local pruned = copy_state()
   pruned[root] = nil
   pcall(write_state, pruned)
@@ -297,6 +316,8 @@ end
 M._CLEAR_SENTINEL = CLEAR_SENTINEL
 M._build_branch_entry = build_branch_entry
 M._apply_selection = apply_selection
+M._timeout_at = timeout_at
+M._TIMEOUT_BACKOFF_MS = TIMEOUT_BACKOFF_MS
 
 -- One shared message so the "outside a repo" warning reads identically wherever
 -- it surfaces (here, the smart picker).

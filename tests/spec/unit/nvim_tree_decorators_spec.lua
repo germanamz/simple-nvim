@@ -47,3 +47,53 @@ describe("config.nvim_tree_symlink._is_symlink", function()
     assert.is_false(symlink._is_symlink({ type = "directory", absolute_path = "/p/d" }))
   end)
 end)
+
+-- The factory's builder registers a ColorScheme re-highlight autocmd. It must
+-- live in a per-decorator named augroup (clear = true): a package.loaded reset
+-- plus re-require rebuilds the closure, and an ungrouped autocmd would stack a
+-- duplicate instead of replacing.
+describe("config.nvim_tree_hl_decorator ColorScheme registration", function()
+  local saved_api
+
+  local function colorscheme_count()
+    return #vim.api.nvim_get_autocmds({ event = "ColorScheme" })
+  end
+
+  before_each(function()
+    saved_api = package.loaded["nvim-tree.api"]
+    package.loaded["nvim-tree.api"] = {
+      Decorator = {
+        extend = function()
+          return {}
+        end,
+      },
+    }
+  end)
+
+  after_each(function()
+    package.loaded["nvim-tree.api"] = saved_api
+    package.loaded["config.nvim_tree_hl_decorator"] = nil
+    package.loaded["config.nvim_tree_dotfolder"] = nil
+    package.loaded["config.nvim_tree_symlink"] = nil
+    pcall(vim.api.nvim_del_augroup_by_name, "nvim_tree_hl_NvimTreeHiddenFolderHL")
+    pcall(vim.api.nvim_del_augroup_by_name, "nvim_tree_hl_NvimTreeSymlinkMark")
+  end)
+
+  it("keeps exactly one autocmd across a package.loaded reload", function()
+    local baseline = colorscheme_count()
+    require("config.nvim_tree_dotfolder").decorator()
+    assert.are.equal(baseline + 1, colorscheme_count())
+
+    package.loaded["config.nvim_tree_hl_decorator"] = nil
+    package.loaded["config.nvim_tree_dotfolder"] = nil
+    require("config.nvim_tree_dotfolder").decorator()
+    assert.are.equal(baseline + 1, colorscheme_count())
+  end)
+
+  it("keeps sibling decorators independent (augroup unique per spec)", function()
+    local baseline = colorscheme_count()
+    require("config.nvim_tree_dotfolder").decorator()
+    require("config.nvim_tree_symlink").decorator()
+    assert.are.equal(baseline + 2, colorscheme_count())
+  end)
+end)

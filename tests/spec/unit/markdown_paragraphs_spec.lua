@@ -534,39 +534,6 @@ describe("config.markdown_paragraphs", function()
     end)
   end)
 
-  describe("frontmatter_end", function()
-    local function set(lines)
-      vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-      return mp.frontmatter_end(bufnr)
-    end
-
-    it("returns 0 when buffer has no frontmatter", function()
-      assert.are.equal(0, set({ "Body line", "Another" }))
-    end)
-
-    it("returns the line of the closing --- when frontmatter is present", function()
-      assert.are.equal(
-        4,
-        set({
-          "---",
-          "title: Hello",
-          "tags: [a, b]",
-          "---",
-          "",
-          "Body",
-        })
-      )
-    end)
-
-    it("returns 0 for unclosed frontmatter", function()
-      assert.are.equal(0, set({ "---", "title: Hello", "Body without close" }))
-    end)
-
-    it("returns 0 when --- is not on line 1", function()
-      assert.are.equal(0, set({ "", "---", "title: Hello", "---" }))
-    end)
-  end)
-
   it("ignores frontmatter when numbering paragraphs", function()
     local data = compute_for({
       "---",

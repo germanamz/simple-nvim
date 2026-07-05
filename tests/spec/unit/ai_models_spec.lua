@@ -1,4 +1,5 @@
 local am = require("config.ai_models")
+local nvim_env = require("helpers.nvim_env")
 
 -- _build_rows(active, installed, cache_names, fim_only) is the modal's pure
 -- merge/rank core (three-source dedupe, the resolved-fim-beats-curated-hint
@@ -113,5 +114,27 @@ describe("config.ai_models._build_rows", function()
     assert.is_nil(by["llama3.1"]) -- curated chat family: fim = false
     assert.is_nil(by["zz-plain"]) -- unknown, name not coder/base
     assert.is_not_nil(by["qwen2.5-coder:7b-base"]) -- curated FIM tag survives
+  end)
+end)
+
+-- The default completion model is single-sourced: config.ai exports it and
+-- ai_models reads the export (its "nothing installed" hint), so the two
+-- modules cannot silently diverge on what the fallback model is.
+describe("config.ai_models default model", function()
+  local env_root
+
+  before_each(function()
+    env_root = nvim_env.setup_isolated_env()
+  end)
+
+  after_each(function()
+    nvim_env.teardown(env_root)
+  end)
+
+  it("exposes config.ai.DEFAULT_MODEL as the persisted-model fallback", function()
+    local ai = require("config.ai")
+    assert.are.equal("string", type(ai.DEFAULT_MODEL))
+    assert.is_true(#ai.DEFAULT_MODEL > 0)
+    assert.are.equal(ai.DEFAULT_MODEL, ai.load_persisted_model())
   end)
 end)

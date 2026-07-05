@@ -49,11 +49,6 @@ local OLLAMA_DELETE_URL = OLLAMA_HOST .. "/api/delete"
 -- scrape_library() for the fragility notes carried over from Report B.
 local LIBRARY_URL = "https://ollama.com/library"
 
--- Mirrors config.ai's DEFAULT_MODEL (kept a private literal there, not on its M).
--- Used only for the "nothing installed yet" hint string, so a duplicated literal
--- is cheaper than a cross-module getter; if the default ever changes, change both.
-local DEFAULT_MODEL = "qwen2.5-coder:7b-base"
-
 -- Cmdline progress throttle: at most one nvim_echo repaint per this interval, so
 -- a fast /api/pull stream can't flood redraws (design/Report A U4: ≤5/s).
 local PROGRESS_THROTTLE_MS = 200
@@ -812,7 +807,7 @@ function M.open()
     vim.notify(
       "Ollama unreachable — showing catalog only; start `ollama serve` to install/manage "
         .. "(default: `ollama pull "
-        .. DEFAULT_MODEL
+        .. require("config.ai").DEFAULT_MODEL
         .. "`)",
       vim.log.levels.WARN
     )

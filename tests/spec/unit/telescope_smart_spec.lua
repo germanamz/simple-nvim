@@ -488,6 +488,50 @@ describe("config.telescope_smart", function()
     end)
   end)
 
+  describe("cwd canonicalization", function()
+    local function untracked_repo_root()
+      local repo = git_fixture.repo({
+        commits = { { files = { ["a.lua"] = "x" } } },
+        untracked = { ["u.lua"] = "..." },
+      })
+      -- Resolved toplevel so the cwd-relative rewrite strips cleanly (the
+      -- /var vs /private/var macOS symlink, as in the _refresh_async spec).
+      return require("util.git").root(repo)
+    end
+
+    it("keeps the filesystem root and strips a single trailing slash", function()
+      assert.are.equal("/", M._canonical_cwd("/"))
+      assert.are.equal("/a/b", M._canonical_cwd("/a/b/"))
+      assert.are.equal("/a/b", M._canonical_cwd("/a/b"))
+    end)
+
+    it("a trailing-slash cwd reads the plain form's cache entry", function()
+      local root = untracked_repo_root()
+      local codes
+      M._refresh_async(root, function(c)
+        codes = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil and codes["u.lua"] ~= nil
+      end, 10))
+      local cached = M._refresh(root .. "/")
+      assert.are.equal("??", cached["u.lua"])
+    end)
+
+    it("an async refresh keyed with a trailing slash lands on the plain key", function()
+      local root = untracked_repo_root()
+      local codes
+      M._refresh_async(root .. "/", function(c)
+        codes = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil and codes["u.lua"] ~= nil
+      end, 10))
+      local cached = M._refresh(root)
+      assert.are.equal("??", cached["u.lua"])
+    end)
+  end)
+
   describe("_refresh_async (recursion wired in)", function()
     it("exposes submodule files as cwd-relative codes", function()
       local sp = git_fixture.superproject({ children = { "childA" } })

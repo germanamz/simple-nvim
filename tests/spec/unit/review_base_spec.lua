@@ -212,6 +212,103 @@ describe("config.review_base", function()
     end)
   end)
 
+  describe("timed-out validation (M.get)", function()
+    local repo, git, orig_resolve
+
+    before_each(function()
+      repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+      write_file(state_path(), vim.json.encode({ [repo] = "main" }))
+      git = require("util.git")
+      orig_resolve = git.resolve
+    end)
+
+    after_each(function()
+      git.resolve = orig_resolve
+    end)
+
+    it("returns the persisted base without pruning or validating on timeout", function()
+      local calls = 0
+      git.resolve = function()
+        calls = calls + 1
+        return false, true
+      end
+
+      assert.are.equal("main", M.get(repo))
+      assert.are.equal(1, calls)
+
+      -- Not pruned: the entry survives on disk.
+      local decoded = vim.json.decode(read_file(state_path()))
+      assert.are.equal("main", decoded[repo])
+
+      -- Not validated: once the backoff is rewound and git recovers, the next
+      -- read re-resolves instead of trusting the timed-out attempt.
+      M._timeout_at[repo] = M._timeout_at[repo] - M._TIMEOUT_BACKOFF_MS
+      git.resolve = function()
+        calls = calls + 1
+        return true, false
+      end
+      assert.are.equal("main", M.get(repo))
+      assert.are.equal(2, calls)
+    end)
+
+    it("does not re-resolve within the backoff window after a timeout", function()
+      local calls = 0
+      git.resolve = function()
+        calls = calls + 1
+        return false, true
+      end
+
+      assert.are.equal("main", M.get(repo))
+      assert.are.equal("main", M.get(repo))
+      assert.are.equal("main", M.get(repo))
+      assert.are.equal(1, calls)
+    end)
+
+    it("retries the resolve once the backoff window expires", function()
+      local calls = 0
+      git.resolve = function()
+        calls = calls + 1
+        return false, true
+      end
+      assert.are.equal("main", M.get(repo))
+      assert.are.equal(1, calls)
+
+      M._timeout_at[repo] = M._timeout_at[repo] - M._TIMEOUT_BACKOFF_MS
+      assert.are.equal("main", M.get(repo))
+      assert.are.equal(2, calls)
+    end)
+
+    it("clears the backoff when a retry succeeds", function()
+      git.resolve = function()
+        return false, true
+      end
+      assert.are.equal("main", M.get(repo))
+      assert.is_not_nil(M._timeout_at[repo])
+
+      M._timeout_at[repo] = M._timeout_at[repo] - M._TIMEOUT_BACKOFF_MS
+      git.resolve = function()
+        return true, false
+      end
+      assert.are.equal("main", M.get(repo))
+      assert.is_nil(M._timeout_at[repo])
+    end)
+
+    it("clears the backoff when a retry fails definitively (prunes)", function()
+      git.resolve = function()
+        return false, true
+      end
+      assert.are.equal("main", M.get(repo))
+      assert.is_not_nil(M._timeout_at[repo])
+
+      M._timeout_at[repo] = M._timeout_at[repo] - M._TIMEOUT_BACKOFF_MS
+      git.resolve = function()
+        return false, false
+      end
+      assert.is_nil(M.get(repo))
+      assert.is_nil(M._timeout_at[repo])
+    end)
+  end)
+
   describe("apply_selection", function()
     local repo
     before_each(function()
