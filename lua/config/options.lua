@@ -58,6 +58,65 @@ vim.keymap.set(
   { desc = "Clear search highlight" }
 )
 
+-- Native vim.snippet sessions (blink.cmp expands LSP/friendly-snippets items
+-- through vim.snippet.expand and never calls vim.snippet.stop) end on their own
+-- only from insert/select mode: the runtime's CursorMoved guard early-returns
+-- in normal mode, so after <Esc> the session survives and its SnippetTabstop
+-- extmark — Visual-linked by default — keeps the inserted text painted like a
+-- stuck visual selection (and later edits/formatting stretch it). Stop the
+-- session once the editor *settles* in plain normal mode. Tabstop jumps pass
+-- through normal mode transiently and must survive, in two shapes: core's own
+-- jump feedkeys "<Esc>…v…<C-g>" (typeahead drains before deferred callbacks
+-- run), and blink's snippet_forward, which vim.schedule()s its jump from a
+-- select-mode mapping whose s→n mode switch fires this autocmd BEFORE the
+-- mapping body queues that jump. Two defenses below, both order-independent
+-- of the exact event/typeahead interleaving:
+--   * the double schedule hops the check behind such a same-tick deferred
+--     jump, so the jump has RUN by the time the check reads state;
+--   * a fingerprint of the tabstop extmark highlight assignments taken when
+--     the autocmd fired. vim.snippet.jump() re-points SnippetTabstopActive at
+--     the destination tabstop synchronously — before its select keys drain —
+--     so "fingerprint changed" means a jump took over and the session must
+--     live, even while the editor still reads as normal mode. Buffer edits
+--     shift mark positions but never the id:hl assignment, so plain
+--     normal-mode editing can't spoof it.
+-- The "*:n" pattern needs new-mode exactly "n", so i_CTRL-O's "niI" never
+-- matches and a quick <C-o> command keeps the session too.
+local function snippet_tabstop_fingerprint()
+  local ns = vim.api.nvim_get_namespaces()["nvim.snippet"]
+  if not ns then
+    return ""
+  end
+  local parts = {}
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, { details = true })) do
+    parts[#parts + 1] = m[1] .. ":" .. (m[4].hl_group or "")
+  end
+  table.sort(parts)
+  return table.concat(parts, ";")
+end
+
+vim.api.nvim_create_autocmd("ModeChanged", {
+  pattern = "*:n",
+  desc = "End lingering snippet session on return to normal mode",
+  callback = function()
+    if not vim.snippet.active() then
+      return
+    end
+    local fingerprint = snippet_tabstop_fingerprint()
+    vim.schedule(function()
+      vim.schedule(function()
+        if
+          vim.snippet.active()
+          and vim.api.nvim_get_mode().mode == "n"
+          and snippet_tabstop_fingerprint() == fingerprint
+        then
+          vim.snippet.stop()
+        end
+      end)
+    end)
+  end,
+})
+
 -- netrw: tree-style listing with banner. g:netrw_treedepthstring doesn't always
 -- take effect (newer netrw caches it), so we also hide the bar character by
 -- setting its highlight foreground to the Normal background. Re-applied on

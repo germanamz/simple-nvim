@@ -22,10 +22,17 @@ return {
     -- "enter" preset: Enter accepts, C-space opens the menu, C-n/C-p (and the
     -- arrow keys) move the selection, C-e hides. Tab is AI-first: if minuet has
     -- an inline suggestion painted it accepts that (and stops); otherwise it
-    -- accepts the blink menu selection, else falls back to a literal Tab. The
+    -- jumps to the next snippet tabstop when a session is active (the enter
+    -- preset's own snippet_forward, which this whole-chain override would
+    -- otherwise drop — core's default Tab mapping covers the no-menu case via
+    -- "fallback", but with the menu open "accept" would win over the jump);
+    -- otherwise it accepts the blink menu selection, else falls back to a
+    -- literal Tab. Enter remains the canonical menu accept throughout. The
     -- function runs in blink's insert-mode keymap runner, where a truthy return
     -- means "handled, stop here" and nil/false falls through to the next entry
-    -- ("accept" then "fallback") — see saghen/blink.cmp keymap/apply.lua.
+    -- — see saghen/blink.cmp keymap/apply.lua. A chain containing a snippet
+    -- command is also mapped in select mode, so Tab on a selected placeholder
+    -- jumps without relying on core's default mapping surviving.
     keymap = {
       preset = "enter",
       ["<Tab>"] = {
@@ -44,6 +51,7 @@ return {
             return true
           end
         end,
+        "snippet_forward",
         "accept",
         "fallback",
       },

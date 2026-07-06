@@ -74,7 +74,8 @@ return {
         auto_trigger_ft = { "*" },
         keymap = {
           -- accept stays unset — the smart <Tab> in lua/plugins/completion.lua
-          -- owns whole-suggestion accept (AI-first, then blink menu, then Tab).
+          -- owns whole-suggestion accept (AI-first, then snippet tabstop jump,
+          -- then blink menu, then Tab).
           -- next/prev/accept_n_lines unused (n_completions = 1).
           accept = nil,
           accept_line = "<C-l>",
