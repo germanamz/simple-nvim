@@ -296,6 +296,49 @@ describe("config.telescope_smart", function()
     end)
   end)
 
+  describe("_list_all_async", function()
+    local captured
+
+    local function stub_vim_system(result)
+      local orig = vim.system
+      vim.system = function(cmd, opts, on_exit)
+        captured = { cmd = cmd, opts = opts }
+        on_exit(result)
+      end
+      return function()
+        vim.system = orig
+      end
+    end
+
+    local function list_async(result)
+      captured = nil
+      restore_fn = stub_vim_system(result)
+      local got
+      M._list_all_async("/some/cwd", function(files)
+        got = files
+      end)
+      assert.is_true(vim.wait(1000, function()
+        return got ~= nil
+      end, 10))
+      return got
+    end
+
+    it("bounds the walker with a timeout", function()
+      list_async({ code = 0, signal = 0, stdout = "a.lua\n" })
+      assert.are.equal(10000, captured.opts.timeout)
+    end)
+
+    it("treats a timed-out (SIGTERM'd) walker as a failed listing", function()
+      local got = list_async({ code = 124, signal = 15, stdout = "partial.lua\n" })
+      assert.are.same({}, got)
+    end)
+
+    it("still keeps a partial-error walk's output (rg exits 2)", function()
+      local got = list_async({ code = 2, signal = 0, stdout = "a.lua\nb.lua\n" })
+      assert.are.same({ "a.lua", "b.lua" }, got)
+    end)
+  end)
+
   describe("_build_legend_segments", function()
     local counts = {
       added = 2,

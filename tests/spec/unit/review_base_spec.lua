@@ -195,7 +195,7 @@ describe("config.review_base", function()
       assert.are.equal(1, calls) -- the second get skips the spawn
     end)
 
-    it("re-validates after the cache is invalidated by another instance", function()
+    it("keeps the validated set on FocusGained when the stored ref is unchanged", function()
       local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
       write_file(state_path(), vim.json.encode({ [repo] = "main" }))
       local git = require("util.git")
@@ -205,8 +205,29 @@ describe("config.review_base", function()
         return orig(...)
       end
       assert.are.equal("main", M.get(repo)) -- calls = 1, now validated
-      vim.api.nvim_exec_autocmds("FocusGained", {}) -- another instance edited the store
-      M.get(repo) -- must re-validate
+      vim.api.nvim_exec_autocmds("FocusGained", {}) -- focus bounce, store untouched
+      assert.are.equal("main", M.get(repo))
+      git.resolve = orig
+      -- Validation vouches for the (root, ref) pair, which didn't move — wiping
+      -- it here made every focus event re-run one synchronous git resolve per
+      -- open root via the statusline's FocusGained sweep.
+      assert.are.equal(1, calls)
+    end)
+
+    it("re-validates a root whose ref another instance changed on disk", function()
+      local repo = git_fixture.repo({ commits = { { files = { ["a.lua"] = "x" } } } })
+      vim.fn.system({ "git", "-C", repo, "branch", "feature", "HEAD" })
+      write_file(state_path(), vim.json.encode({ [repo] = "main" }))
+      local git = require("util.git")
+      local calls, orig = 0, git.resolve
+      git.resolve = function(...)
+        calls = calls + 1
+        return orig(...)
+      end
+      assert.are.equal("main", M.get(repo)) -- calls = 1, now validated
+      write_file(state_path(), vim.json.encode({ [repo] = "feature" })) -- another instance
+      vim.api.nvim_exec_autocmds("FocusGained", {})
+      assert.are.equal("feature", M.get(repo)) -- re-decoded AND re-validated
       git.resolve = orig
       assert.are.equal(2, calls)
     end)

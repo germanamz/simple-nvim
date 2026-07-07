@@ -154,8 +154,9 @@ local function drain()
   end
 
   -- dir -> toplevel, or false when the dir sits outside any work tree. Kept
-  -- separate from util.git's memo, which caches only successes (a non-repo dir
-  -- must stay cheap to re-probe later without a synchronous fallback here).
+  -- separate from util.git's memo because these resolve asynchronously via the
+  -- pool; util.git's cache (which also memoizes definitive misses as false,
+  -- skipped by the `== nil` gate above) is only primed on success below.
   local roots = {}
   pool.run(dirs, pool.GIT_CONCURRENCY, function(dir, done)
     vim.system(

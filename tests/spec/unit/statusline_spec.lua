@@ -235,4 +235,124 @@ describe("config.statusline", function()
       end, nil, "non-current buffer's branch cache was never re-resolved")
     end)
   end)
+
+  -- Behavioral lock for the sweep's spawn dedup: refresh()'s git answer is a
+  -- function of the buffer's start dir alone, so N buffers sharing a directory
+  -- must cost ONE rev-parse per sweep (result fanned out to all of them), not N
+  -- identical concurrent spawns per alt-tab — and a focus bounce while a sweep
+  -- is still in flight must not stack a second identical sweep.
+  describe("FocusGained sweep dedup", function()
+    local nvim_env = require("helpers.nvim_env")
+    local git_fixture = require("helpers.git_fixture")
+    local wait = require("helpers.wait")
+    local env_root, repo, repo_dir, opened, spawns, spawn_opts, orig_system
+
+    local function repo_spawns()
+      local n = 0
+      for _, dir in ipairs(spawns) do
+        if dir == repo_dir then
+          n = n + 1
+        end
+      end
+      return n
+    end
+
+    before_each(function()
+      env_root = nvim_env.setup_isolated_env()
+      require("config.statusline").setup()
+      repo = git_fixture.repo({
+        base_branch = "swept-once",
+        commits = {
+          { files = { ["a.txt"] = "a\n", ["b.txt"] = "b\n", ["c.txt"] = "c\n" }, message = "init" },
+        },
+      })
+      -- Buffer names carry the symlink-resolved path (tempname() lands under
+      -- /var → /private/var on macOS), so the spawn key is the realpath.
+      repo_dir = assert(vim.uv.fs_realpath(repo))
+      opened = {}
+      for _, name in ipairs({ "a.txt", "b.txt", "c.txt" }) do
+        local b = vim.fn.bufadd(repo .. "/" .. name)
+        -- Pre-resolved with a stale value so the bufload BufEnter can't refresh:
+        -- only the FocusGained sweep may move these to the fixture's branch.
+        vim.b[b].nvim_git_branch = "stale"
+        vim.b[b].nvim_review_base = ""
+        vim.fn.bufload(b)
+        opened[#opened + 1] = b
+      end
+      -- Spy, not stub: the real spawns still run (the fan-out assertion needs
+      -- their results); only the statusline's own rev-parse argv
+      -- (`git -C <dir> ... --show-toplevel ...`) is counted, keyed by its dir.
+      spawns = {}
+      spawn_opts = {}
+      orig_system = vim.system
+      vim.system = function(cmd, opts, ...)
+        if cmd[1] == "git" and vim.tbl_contains(cmd, "--show-toplevel") then
+          spawns[#spawns + 1] = cmd[3]
+          spawn_opts[#spawn_opts + 1] = opts
+        end
+        return orig_system(cmd, opts, ...)
+      end
+    end)
+
+    after_each(function()
+      vim.system = orig_system
+      require("config.git_head")._stop_all()
+      for _, b in ipairs(opened) do
+        if vim.api.nvim_buf_is_valid(b) then
+          vim.api.nvim_buf_delete(b, { force = true })
+        end
+      end
+      vim.fn.delete(repo, "rf")
+      nvim_env.teardown(env_root)
+    end)
+
+    it("spawns one git process per unique directory and fans the result out", function()
+      vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+      assert.are.equal(1, repo_spawns())
+      for _, b in ipairs(opened) do
+        wait.wait_for(function()
+          return vim.b[b].nvim_git_branch == "swept-once"
+        end, nil, "buffer " .. b .. " never received the shared resolve")
+      end
+    end)
+
+    it("does not stack a second sweep while one is in flight", function()
+      vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+      vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+      assert.are.equal(1, repo_spawns())
+      -- The guard must release once the sweep's async results land: keep
+      -- knocking and exactly one more sweep eventually gets through.
+      wait.wait_for(function()
+        vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+        return repo_spawns() >= 2
+      end, nil, "in-flight guard never released after the sweep completed")
+      assert.are.equal(2, repo_spawns())
+    end)
+
+    -- The in-flight guard only releases via on_done, so the spawn it rides on
+    -- must be bounded: an unbounded hung rev-parse (network gitdir) would
+    -- otherwise wedge `sweeping` true and silently drop every future sweep.
+    it("bounds the sweep's git spawn with a timeout", function()
+      vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+      assert.are.equal(1, repo_spawns())
+      assert.are.equal(10000, spawn_opts[#spawn_opts].timeout)
+    end)
+
+    it("releases the in-flight guard even when the fan-out errors", function()
+      local rb = require("config.review_base")
+      local orig_get = rb.get
+      rb.get = function()
+        error("boom")
+      end
+      vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+      assert.are.equal(1, repo_spawns())
+      -- Keep knocking: the guard must release despite the erroring fan-out.
+      local ok, err = pcall(wait.wait_for, function()
+        vim.api.nvim_exec_autocmds("FocusGained", { modeline = false })
+        return repo_spawns() >= 2
+      end, nil, "in-flight guard wedged after an erroring fan-out")
+      rb.get = orig_get
+      assert.is_true(ok, err)
+    end)
+  end)
 end)

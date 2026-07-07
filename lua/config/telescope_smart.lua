@@ -231,6 +231,11 @@ local GIT_TIMEOUT_MS = 2000
 -- forever and silently disables every future refresh for that cwd.
 local BULK_GIT_TIMEOUT_MS = 5 * GIT_TIMEOUT_MS
 
+-- The full-tree file walker (rg/fd/find) gets the same whole-tree bound as the
+-- bulk git calls: without one, a wedged walker lingers forever and its callback
+-- never fires, so the picker never opens.
+local WALKER_TIMEOUT_MS = 10000
+
 -- Async sibling of _git_changes: fetch `git status` (and, when a base is set,
 -- `git diff`) via vim.system so the UI never blocks on git over a large
 -- superproject tree. vim.system callbacks run in a fast context where most of
@@ -378,12 +383,15 @@ end
 -- Async sibling of _list_all: stream the file list off the main thread so a big
 -- superproject doesn't freeze the editor while a picker is opening.
 function M._list_all_async(cwd, cb)
-  vim.system(list_all_cmd(), { cwd = cwd, text = true }, function(out)
+  vim.system(list_all_cmd(), { cwd = cwd, text = true, timeout = WALKER_TIMEOUT_MS }, function(out)
     -- Keep whatever the walker printed regardless of exit code: rg exits 2 on
     -- a partial-error walk (one unreadable directory) while still emitting the
     -- full valid listing, and the sync sibling (vim.fn.systemlist) likewise
-    -- ignores exit codes. split_lines maps nil/empty stdout to {}.
-    local files = split_lines(out.stdout)
+    -- ignores exit codes. split_lines maps nil/empty stdout to {}. A timed-out
+    -- (code 124) or signal-killed walker is different: its truncated listing is
+    -- not the tree, so it degrades to {} like the git spawns' failures.
+    local timed_out = out.code == 124 or (out.signal or 0) ~= 0
+    local files = timed_out and {} or split_lines(out.stdout)
     vim.schedule(function()
       cb(files)
     end)

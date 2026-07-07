@@ -9,8 +9,9 @@
 -- so a git diagnostic ("fatal: not a git repository") never pollutes the parsed
 -- lines; and :wait(TIMEOUT_MS) bounds the call, so a hung or network submodule
 -- gitdir degrades to ok=false instead of freezing Neovim. A timed-out call is
--- treated as a plain failure — and M.root only caches successes, so it is not
--- poisoned and stays cheap to re-probe. The synchronous bulk status/diff path
+-- treated as a plain failure — and M.root never memoizes a timeout (only
+-- definitive answers), so it is not poisoned and stays cheap to re-probe. The
+-- synchronous bulk status/diff path
 -- (M._git_changes) is test-only; production resolves the porcelain/diff through
 -- config.telescope_smart's own async vim.system, unaffected by this bound.
 --
@@ -69,19 +70,27 @@ end
 -- and this is on hot paths that re-resolve the same dirs constantly (gitsigns
 -- attach + new-vs-base per buffer, the smart picker, the tree decorator). In a
 -- superproject that collapses N blocking `rev-parse` spawns — one per buffer
--- across submodules — to one per distinct directory. Only successful lookups are
--- cached (a non-repo dir is cheap to re-probe and could later become a repo).
+-- across submodules — to one per distinct directory. Definitive misses are
+-- memoized too (as false): buffer churn (pickers, previews, help buffers)
+-- re-resolves the same non-repo dirs constantly, and each miss would otherwise
+-- be a fresh blocking spawn. Only a timeout is left uncached — a transient hang
+-- must stay re-probeable. A dir that later becomes a repo (git init, submodule
+-- add) is rediscovered through the same invalidation that already covers stale
+-- positives: config.dir_cache clears the whole memo via _clear_root_cache.
 local root_cache = {}
 
 function M.root(start)
   local key = start or vim.fn.getcwd()
   local cached = root_cache[key]
-  if cached then
-    return cached
+  if cached ~= nil then
+    return cached or nil
   end
-  local r = M.first_line({ "rev-parse", "--show-toplevel" }, { cwd = start })
+  local lines, ok, timed_out = M.run({ "rev-parse", "--show-toplevel" }, { cwd = start })
+  local r = (ok and lines[1] and lines[1] ~= "") and lines[1] or nil
   if r then
     root_cache[key] = r
+  elseif not timed_out then
+    root_cache[key] = false
   end
   return r
 end
@@ -94,7 +103,8 @@ end
 
 -- Read-only peek at the root memo, for callers that must never block the main
 -- loop (config.ignore_filter resolves cache misses through its own async
--- rev-parse instead of M.root's synchronous wait).
+-- rev-parse instead of M.root's synchronous wait). Returns the raw entry:
+-- false is a memoized "not a repo", nil means unresolved.
 function M._cached_root(dir)
   return root_cache[dir]
 end

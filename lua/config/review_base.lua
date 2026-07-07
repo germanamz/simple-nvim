@@ -29,8 +29,10 @@ local cache
 
 -- Roots whose stored ref has been validated against git this session. Lazy
 -- validation (in M.get) prunes a stale base on first read; this set then spares
--- the per-read git spawn on every subsequent read of the same root. Reset
--- whenever the cache is — another instance may have rewritten the store.
+-- the per-read git spawn on every subsequent read of the same root. A root's
+-- entry vouches for its (root, ref) PAIR, so it must be dropped when that
+-- root's stored ref changes (write_state and the FocusGained re-decode both
+-- enforce this), not merely because the cache was re-read.
 local validated = {}
 
 -- vim.uv.now() (monotonic ms) of the last resolve that TIMED OUT, per root. A
@@ -96,6 +98,26 @@ local function invalidate_cache()
   validated = {}
 end
 
+-- Re-decode the store from disk, keeping each root's validation unless its
+-- stored ref actually moved (another instance changed or removed it). A wipe
+-- of `validated` here would make the statusline's FocusGained sweep — one
+-- M.get per open root — pay a synchronous 2s-bounded git resolve per root on
+-- every alt-tab, for refs that almost never change between focus events.
+local function reload_from_disk()
+  if not cache then
+    -- Nothing decoded yet, so nothing can be stale; the first read decodes and
+    -- validates lazily (and `validated` is empty whenever `cache` is nil).
+    return
+  end
+  local old = cache
+  cache = decode_state()
+  for root in pairs(validated) do
+    if cache[root] ~= old[root] then
+      validated[root] = nil
+    end
+  end
+end
+
 local function fire(root, ref)
   vim.api.nvim_exec_autocmds("User", {
     pattern = "ReviewBaseChanged",
@@ -103,12 +125,14 @@ local function fire(root, ref)
   })
 end
 
--- Invalidate the cache when the shared JSON can change without passing through
+-- Refresh the cache when the shared JSON can change without passing through
 -- write_state: `User ReviewBaseChanged` for any in-instance broadcast (defensive
 -- — our own set/clear already wrote through), and `FocusGained` for another nvim
--- instance editing the same file while this one was unfocused. An augroup with
--- clear=true so a module reload in tests replaces these rather than stacking
--- them; the next read_state() then re-decodes from disk.
+-- instance editing the same file while this one was unfocused. FocusGained
+-- re-decodes eagerly so per-root validation survives for unchanged refs (see
+-- reload_from_disk); the rare in-instance broadcast keeps the full lazy
+-- invalidate. An augroup with clear=true so a module reload in tests replaces
+-- these rather than stacking them.
 local cache_group = vim.api.nvim_create_augroup("ReviewBaseCache", { clear = true })
 vim.api.nvim_create_autocmd("User", {
   group = cache_group,
@@ -117,7 +141,7 @@ vim.api.nvim_create_autocmd("User", {
 })
 vim.api.nvim_create_autocmd("FocusGained", {
   group = cache_group,
-  callback = invalidate_cache,
+  callback = reload_from_disk,
 })
 
 -- The stored review base for `root`, validating it lazily on first read this

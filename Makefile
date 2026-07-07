@@ -38,18 +38,16 @@ fmt:
 
 test: test-unit test-smoke test-e2e
 
+# All test targets go through run-plenary.sh, which reaps child nvims that a
+# hung spec would otherwise leave orphaned when the parent exits.
 test-unit:
-	@nvim --headless -u tests/minimal_init.lua \
-		-c "PlenaryBustedDirectory tests/spec/unit { minimal_init = 'tests/minimal_init.lua' }"
+	@scripts/run-plenary.sh tests/minimal_init.lua tests/spec/unit
 
 test-smoke:
-	@nvim --headless -u tests/full_init.lua \
-		-c "PlenaryBustedDirectory tests/spec/smoke { minimal_init = 'tests/full_init.lua' }"
+	@scripts/run-plenary.sh tests/full_init.lua tests/spec/smoke
 
 test-e2e:
-	@nvim --headless -u tests/full_init.lua \
-		-c "PlenaryBustedDirectory tests/spec/e2e { minimal_init = 'tests/full_init.lua' }"
+	@scripts/run-plenary.sh tests/full_init.lua tests/spec/e2e
 
 test-lsp:
-	@nvim --headless -u tests/full_init.lua \
-		-c "PlenaryBustedDirectory tests/spec/e2e-lsp { minimal_init = 'tests/full_init.lua' }"
+	@scripts/run-plenary.sh tests/full_init.lua tests/spec/e2e-lsp

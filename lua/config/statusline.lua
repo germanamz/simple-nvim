@@ -9,26 +9,33 @@ local M = {}
 local path = require("util.path")
 local git = require("util.git")
 
+-- Bounds the async rev-parse spawn. The FocusGained sweep's in-flight guard
+-- only releases via refresh_dir's on_done, so an unbounded spawn hung on a
+-- network gitdir would wedge the guard and silently drop every future sweep.
+local GIT_TIMEOUT_MS = 10000
+
 -- Resolve repo toplevel, HEAD sha, and branch in one git spawn, off the main
--- thread. `--show-toplevel` prints even when the HEAD lookups fail (e.g. a repo
+-- thread, and fan the result out to every buffer in `bufs` — the answer is a
+-- function of `dir` alone, so buffers sharing a start dir share one spawn.
+-- `--show-toplevel` prints even when the HEAD lookups fail (e.g. a repo
 -- with no commits yet), so the toplevel is parsed regardless of exit code and
 -- the sha/branch only on success. Detached HEAD prints "HEAD" → treated as none.
 -- The sha is only used to seed config.git_head's watcher (which gates on it).
-local function refresh(buf)
-  if not vim.api.nvim_buf_is_valid(buf) then
-    return
-  end
+-- `on_done` fires exactly once in every outcome — result applied, spawn failed
+-- or timed out, or the fan-out itself errored — because the FocusGained
+-- sweep's in-flight guard hangs off it and must never wedge.
+local function refresh_dir(dir, bufs, on_done)
   local cmd = {
     "git",
     "-C",
-    path.buf_start_dir(buf),
+    dir,
     "rev-parse",
     "--show-toplevel",
     "HEAD",
     "--abbrev-ref",
     "HEAD",
   }
-  local spawned = pcall(vim.system, cmd, { text = true }, function(out)
+  local spawned = pcall(vim.system, cmd, { text = true, timeout = GIT_TIMEOUT_MS }, function(out)
     local lines = vim.split(out.stdout or "", "\n", { trimempty = true })
     -- exit 0 prints { toplevel, sha, branch-or-"HEAD" }; a no-commit repo exits
     -- nonzero with just { toplevel } (no sha), and outside a repo prints nothing.
@@ -40,29 +47,52 @@ local function refresh(buf)
       branch = ""
     end
     vim.schedule(function()
-      if not vim.api.nvim_buf_is_valid(buf) then
-        return
+      local ok, err = pcall(function()
+        local base = (root and require("config.review_base").get(root)) or ""
+        for _, buf in ipairs(bufs) do
+          if vim.api.nvim_buf_is_valid(buf) then
+            vim.b[buf].nvim_review_base = base
+            vim.b[buf].nvim_git_branch = (root and branch) or ""
+          end
+        end
+        -- Lazily start the repo's HEAD watcher; its HeadChanged broadcast drives
+        -- refresh_all_buffers, so external checkouts repaint without waiting for
+        -- a buffer event. Hand it the {sha, branch} we just resolved so its first
+        -- watch doesn't re-spawn git.head (normalize detached/unborn "" → nil).
+        if root then
+          require("config.git_head").watch(
+            root,
+            { sha = sha, branch = branch ~= "" and branch or nil }
+          )
+        end
+        vim.cmd("redrawstatus!")
+      end)
+      if on_done then
+        on_done()
       end
-      local review_base = require("config.review_base")
-      vim.b[buf].nvim_review_base = (root and review_base.get(root)) or ""
-      vim.b[buf].nvim_git_branch = (root and branch) or ""
-      -- Lazily start the repo's HEAD watcher; its HeadChanged broadcast drives
-      -- refresh_all_buffers, so external checkouts repaint without waiting for
-      -- a buffer event. Hand it the {sha, branch} we just resolved so its first
-      -- watch doesn't re-spawn git.head (normalize detached/unborn "" → nil).
-      if root then
-        require("config.git_head").watch(
-          root,
-          { sha = sha, branch = branch ~= "" and branch or nil }
-        )
+      if not ok then
+        vim.notify("statusline: refresh fan-out failed: " .. tostring(err), vim.log.levels.WARN)
       end
-      vim.cmd("redrawstatus!")
     end)
   end)
   if not spawned then
-    vim.b[buf].nvim_review_base = ""
-    vim.b[buf].nvim_git_branch = ""
+    for _, buf in ipairs(bufs) do
+      if vim.api.nvim_buf_is_valid(buf) then
+        vim.b[buf].nvim_review_base = ""
+        vim.b[buf].nvim_git_branch = ""
+      end
+    end
+    if on_done then
+      on_done()
+    end
   end
+end
+
+local function refresh(buf)
+  if not vim.api.nvim_buf_is_valid(buf) then
+    return
+  end
+  refresh_dir(path.buf_start_dir(buf), { buf })
 end
 
 -- Refresh loaded buffers' cached branch/base and repaint the statusline. With a
@@ -73,11 +103,30 @@ end
 -- VimEnter startup pass and the <leader>gR manual refresh, where any root may
 -- have changed). The buffer-list scan itself stays O(buffers) — cheap, and
 -- buf_in_root's root resolution is memoized.
-local function refresh_all_buffers(root)
+local function refresh_all_buffers(root, on_done)
+  -- Group buffers by their spawn key (start dir): N buffers in one directory
+  -- get identical git answers, so the sweep costs one spawn per unique
+  -- directory (fanned out by refresh_dir), not one per buffer.
+  local groups = {}
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_loaded(buf) and (root == nil or git.buf_in_root(buf, root)) then
-      refresh(buf)
+      local dir = path.buf_start_dir(buf)
+      groups[dir] = groups[dir] or {}
+      table.insert(groups[dir], buf)
     end
+  end
+  local pending = vim.tbl_count(groups)
+  local function dir_done()
+    pending = pending - 1
+    if pending == 0 and on_done then
+      on_done()
+    end
+  end
+  if pending == 0 and on_done then
+    on_done()
+  end
+  for dir, bufs in pairs(groups) do
+    refresh_dir(dir, bufs, dir_done)
   end
   vim.cmd("redrawstatus!")
 end
@@ -155,10 +204,20 @@ function M.setup()
   -- ANY loaded buffer's branch/base, not just the focused one, while the
   -- BufEnter gate above never re-resolves an already-resolved buffer. Sweep
   -- them all (async spawns, and focus events are rare — once per alt-tab).
+  -- Focus can bounce faster than a sweep completes (tmux pane hopping), and a
+  -- sweep already in flight will deliver the same answers — so a second
+  -- FocusGained is dropped until the current sweep's results have landed.
+  local sweeping = false
   vim.api.nvim_create_autocmd("FocusGained", {
     group = group,
     callback = function()
-      refresh_all_buffers()
+      if sweeping then
+        return
+      end
+      sweeping = true
+      refresh_all_buffers(nil, function()
+        sweeping = false
+      end)
     end,
   })
   -- Netrw sets a window-local statusline (after FileType fires) that overrides

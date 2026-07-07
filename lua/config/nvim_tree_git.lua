@@ -40,6 +40,14 @@ end
 -- HeadChanged and FocusGained handlers (lua/plugins/nvim-tree.lua) and the
 -- <leader>gR manual hatch (lua/plugins/gitsigns.lua). No-op when nvim-tree
 -- isn't loaded or the tree isn't on screen — skip the git spawn entirely.
+-- Per-cwd trailing coalescing: rapid triggers (rebase, focus toggling) must
+-- not stack overlapping whole-tree git pipelines. While one is in flight, new
+-- triggers collapse into a single queued rerun that goes back through
+-- refresh_labels — so it re-reads cwd/visibility — once the in-flight one
+-- completes. At most 1 running + 1 queued, and the final refresh always uses
+-- the then-current inputs, which is what the old always-spawn gave us.
+local inflight, trailing = {}, {}
+
 function M.refresh_labels()
   if not package.loaded["nvim-tree"] then
     return
@@ -48,15 +56,90 @@ function M.refresh_labels()
   if not api.tree.is_visible() then
     return
   end
+  local cwd = vim.fn.getcwd()
+  if inflight[cwd] then
+    trailing[cwd] = true
+    return
+  end
+  inflight[cwd] = true
   -- telescope_smart resolved at call time, not module load: the e2e specs spy
   -- on _refresh_async by swapping the module field. Going through the async
-  -- core directly (not the deduped non-blocking read) guarantees a refresh
-  -- with the *current* inputs even if a prior refresh is still in flight.
-  require("config.telescope_smart")._refresh_async(vim.fn.getcwd(), function()
+  -- core directly (not the deduped non-blocking read) keeps the refresh
+  -- unconditional on the 500ms cache TTL.
+  require("config.telescope_smart")._refresh_async(cwd, function()
+    inflight[cwd] = nil
     if api.tree.is_visible() then
       api.tree.reload()
     end
+    if trailing[cwd] then
+      trailing[cwd] = nil
+      M.refresh_labels()
+    end
   end)
+end
+
+-- Trailing-slash- and symlink-insensitive directory compare. The decorator
+-- keys the codes cache with plain getcwd() like every other caller, so
+-- SmartCodesRefreshed's data.cwd matches a raw `==` — this survives as
+-- defense in depth for symlinked cwds.
+local function same_dir(a, b)
+  return vim.fn.resolve(vim.fn.fnamemodify(a, ":p")) == vim.fn.resolve(vim.fn.fnamemodify(b, ":p"))
+end
+
+-- Register the repaint autocmds (called from lua/plugins/nvim-tree.lua's
+-- config() once the plugin is loaded). One augroup with clear = true keeps
+-- re-registration idempotent: a config() re-run (:Lazy reload) replaces the
+-- handlers instead of stacking duplicate git pipelines per event.
+function M.register_autocmds()
+  local group = vim.api.nvim_create_augroup("nvim_tree_git_refresh", { clear = true })
+  -- Re-render the tree when the review base or HEAD changes (external
+  -- checkout) so labels appear or vanish immediately. Force-refresh the
+  -- codes cache first — its 500ms TTL could otherwise serve codes computed
+  -- against the old base or branch.
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = { "ReviewBaseChanged", "HeadChanged" },
+    callback = function(args)
+      -- Both events carry their repo root in data.root and fire per-submodule
+      -- (each watched root has its own HEAD watcher). The decorator only ever
+      -- computes codes for getcwd(), so a change in a *different* root can't
+      -- alter any displayed label — skip the refresh for it. resolve() both
+      -- sides so a symlinked cwd still matches.
+      local root = args.data and args.data.root
+      if root and vim.fn.resolve(root) ~= vim.fn.resolve(vim.fn.getcwd()) then
+        return
+      end
+      M.refresh_labels()
+    end,
+  })
+  -- The codes cache refreshes asynchronously, so the decorator's first render
+  -- on a cold cache shows no git labels. When a refresh for the displayed cwd
+  -- lands, reload the tree so the labels appear. The reload runs a fresh
+  -- decorator pass that reads the now-warm cache (no further async kick), so
+  -- this does not loop.
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "SmartCodesRefreshed",
+    callback = function(args)
+      local api = require("nvim-tree.api")
+      local cwd = args.data and args.data.cwd
+      if cwd and same_dir(cwd, vim.fn.getcwd()) and api.tree.is_visible() then
+        api.tree.reload()
+      end
+    end,
+  })
+  -- Re-sync the git decorations when focus returns to nvim. A commit or
+  -- `git add` from another terminal changes file status without moving HEAD,
+  -- so config.git_head's HEAD watcher never fires ReviewBaseChanged/HeadChanged
+  -- and the labels would stay stale until a manual reload. (gitsigns hunks
+  -- and the statusline re-sync on the same FocusGained event from their own
+  -- modules.)
+  vim.api.nvim_create_autocmd("FocusGained", {
+    group = group,
+    callback = function()
+      M.refresh_labels()
+    end,
+  })
 end
 
 local Decorator

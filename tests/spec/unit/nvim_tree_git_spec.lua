@@ -31,6 +31,67 @@ describe("config.nvim_tree_git._dir_markers", function()
   end)
 end)
 
+-- refresh_labels must coalesce rapid triggers (rebase, focus toggling): at
+-- most one whole-tree pipeline in flight per cwd, plus one queued trailing
+-- refresh that runs with the then-current inputs once the in-flight one
+-- completes. Without it every trigger spawned an overlapping git pipeline.
+describe("config.nvim_tree_git.refresh_labels coalescing", function()
+  local saved_tree, saved_api, saved_smart
+  local calls, module
+
+  before_each(function()
+    saved_tree = package.loaded["nvim-tree"]
+    saved_api = package.loaded["nvim-tree.api"]
+    saved_smart = package.loaded["config.telescope_smart"]
+    package.loaded["nvim-tree"] = true
+    package.loaded["nvim-tree.api"] = {
+      tree = {
+        is_visible = function()
+          return true
+        end,
+        reload = function() end,
+      },
+    }
+    calls = {}
+    package.loaded["config.telescope_smart"] = {
+      _refresh_async = function(cwd, cb)
+        table.insert(calls, { cwd = cwd, cb = cb })
+      end,
+    }
+    package.loaded["config.nvim_tree_git"] = nil
+    module = require("config.nvim_tree_git")
+  end)
+
+  after_each(function()
+    package.loaded["nvim-tree"] = saved_tree
+    package.loaded["nvim-tree.api"] = saved_api
+    package.loaded["config.telescope_smart"] = saved_smart
+    package.loaded["config.nvim_tree_git"] = nil
+  end)
+
+  it("coalesces rapid triggers into one running + one trailing refresh", function()
+    for _ = 1, 5 do
+      module.refresh_labels()
+    end
+    assert.are.equal(1, #calls)
+
+    calls[1].cb({})
+    assert.are.equal(2, #calls)
+
+    calls[2].cb({})
+    assert.are.equal(2, #calls)
+  end)
+
+  it("spawns a fresh pipeline immediately once idle", function()
+    module.refresh_labels()
+    calls[1].cb({})
+    assert.are.equal(1, #calls)
+
+    module.refresh_labels()
+    assert.are.equal(2, #calls)
+  end)
+end)
+
 -- decorator() registers a ColorScheme re-highlight autocmd. It must live in a
 -- named augroup (clear = true): a package.loaded reset plus re-require empties
 -- the module-scope Decorator memo, and an ungrouped autocmd would stack a
@@ -67,5 +128,34 @@ describe("config.nvim_tree_git.decorator ColorScheme registration", function()
     package.loaded["config.nvim_tree_git"] = nil
     require("config.nvim_tree_git").decorator()
     assert.are.equal(baseline + 1, colorscheme_count())
+  end)
+end)
+
+-- register_autocmds() runs from the plugin's config(), which re-runs on
+-- :Lazy reload. Without a cleared augroup each re-run would stack duplicate
+-- handlers (N re-runs = N git pipelines per FocusGained).
+describe("config.nvim_tree_git.register_autocmds", function()
+  local function counts()
+    return {
+      review = #vim.api.nvim_get_autocmds({ event = "User", pattern = "ReviewBaseChanged" }),
+      head = #vim.api.nvim_get_autocmds({ event = "User", pattern = "HeadChanged" }),
+      refreshed = #vim.api.nvim_get_autocmds({ event = "User", pattern = "SmartCodesRefreshed" }),
+      focus = #vim.api.nvim_get_autocmds({ event = "FocusGained" }),
+    }
+  end
+
+  after_each(function()
+    pcall(vim.api.nvim_del_augroup_by_name, "nvim_tree_git_refresh")
+  end)
+
+  it("registers each handler exactly once even when called twice", function()
+    local baseline = counts()
+    nvim_tree_git.register_autocmds()
+    nvim_tree_git.register_autocmds()
+    local after = counts()
+    assert.are.equal(baseline.review + 1, after.review)
+    assert.are.equal(baseline.head + 1, after.head)
+    assert.are.equal(baseline.refreshed + 1, after.refreshed)
+    assert.are.equal(baseline.focus + 1, after.focus)
   end)
 end)

@@ -427,6 +427,17 @@ local function pull_model(model, on_progress, on_done, on_err)
     -- --fail-with-body: an HTTP >=400 yields a nonzero exit (so on_exit treats it
     -- as failure) while still delivering the JSON error body for us to surface.
     "--fail-with-body",
+    -- Stall watchdog, deliberately NOT --max-time: pulls are legitimately long,
+    -- but a wedged daemon must not hold active_pull for the whole session. Under
+    -- 1 byte/s for 300s curl aborts with exit 28, which on_exit already surfaces
+    -- as a failed pull and clears the guard. 300s (not 60) because ollama's
+    -- stream goes byte-silent during single-status phases ("verifying sha256
+    -- digest", "writing manifest") and verifying a multi-GB layer can
+    -- legitimately exceed a minute.
+    "--speed-limit",
+    "1",
+    "--speed-time",
+    "300",
     "-X",
     "POST",
     "-H",
@@ -570,16 +581,24 @@ local function scrape_library(on_done, on_err)
     end
   end
 
-  -- Fallback: curl via vim.system (Report A), also async.
-  local sok = pcall(vim.system, { "curl", "-sSL", LIBRARY_URL }, { text = true }, function(res)
-    vim.schedule(function()
-      if res.code == 0 and res.stdout and res.stdout ~= "" then
-        handle(res.stdout)
-      else
-        on_err(vim.trim(res.stderr or "") ~= "" and res.stderr or "curl failed")
-      end
-    end)
-  end)
+  -- Fallback: curl via vim.system (Report A), also async. Bounded like the
+  -- plenary path's raw --max-time above: a stalled curl would otherwise never
+  -- reach on_exit, so on_err never runs and active_scrape wedges true, blocking
+  -- <C-u> for the rest of the session.
+  local sok = pcall(
+    vim.system,
+    { "curl", "-sSL", "--max-time", "10", LIBRARY_URL },
+    { text = true },
+    function(res)
+      vim.schedule(function()
+        if res.code == 0 and res.stdout and res.stdout ~= "" then
+          handle(res.stdout)
+        else
+          on_err(vim.trim(res.stderr or "") ~= "" and res.stderr or "curl failed")
+        end
+      end)
+    end
+  )
   if not sok then
     on_err("no HTTP client (plenary.curl / curl) available")
   end
@@ -750,6 +769,10 @@ end
 -- exported reference stays valid.
 M._build_rows = build_rows
 M._show_cache = show_cache
+-- pull_model / scrape_library seams exist so the specs can pin the curl
+-- watchdog argv and drive on_exit with vim.system stubbed (never real curl).
+M._pull_model = pull_model
+M._scrape_library = scrape_library
 
 -- One-line display: <marker> <name> <FIM badge> <size> <desc>. Marker precedence
 -- ★ active > ● installed > ○ available (design). Plain string (no highlight

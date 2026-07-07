@@ -104,14 +104,39 @@ describe("util.git", function()
       assert.is_nil(git.root("/nonexistent"))
     end)
 
-    it("re-probes a directory that only later becomes a repo", function()
-      -- root() caches only successful lookups, so a failed (or timed-out, post
-      -- P5) resolve never poisons the cache — the dir is cheaply re-probed and
-      -- resolves once `git init` makes it a work tree.
+    it("memoizes a negative result so a non-repo dir spawns git at most once", function()
+      -- Buffer churn (pickers, previews, help buffers) re-resolves the same
+      -- non-repo dirs constantly, and each miss is a synchronous main-thread
+      -- vim.system():wait() — so a definitive "not a repo" must be cached too.
+      local dir = vim.fn.tempname() .. "-not-a-repo"
+      vim.fn.mkdir(dir, "p")
+      local real_system, spawns = vim.system, 0
+      vim.system = function(...)
+        spawns = spawns + 1
+        return real_system(...)
+      end
+      local first = git.root(dir)
+      local first_spawns = spawns
+      local second = git.root(dir)
+      local second_spawns = spawns
+      vim.system = real_system
+      vim.fn.delete(dir, "rf")
+      assert.is_nil(first)
+      assert.are.equal(1, first_spawns)
+      assert.is_nil(second)
+      assert.are.equal(1, second_spawns)
+    end)
+
+    it("discovers a dir that later becomes a repo after cache invalidation", function()
+      -- The negative memo holds until the dir_cache invalidation path
+      -- (_clear_root_cache, wired to DirChanged / .gitmodules / <leader>gR)
+      -- drops it — the same clear that already covers stale positive entries.
       local dir = vim.fn.tempname() .. "-becomes-repo"
       vim.fn.mkdir(dir, "p")
       assert.is_nil(git.root(dir))
       vim.fn.system({ "git", "-C", dir, "init", "-q", "--initial-branch=main" })
+      assert.is_nil(git.root(dir))
+      git._clear_root_cache()
       assert.are.equal(vim.fn.resolve(dir), vim.fn.resolve(git.root(dir)))
       vim.fn.delete(dir, "rf")
     end)

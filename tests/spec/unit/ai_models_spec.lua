@@ -138,3 +138,93 @@ describe("config.ai_models default model", function()
     assert.are.equal(ai.DEFAULT_MODEL, ai.load_persisted_model())
   end)
 end)
+
+-- pull_model / scrape_library shell out to raw curl via vim.system; these specs
+-- pin the watchdog argv (stall / timeout guards) and the active_pull lifecycle.
+-- vim.system is stubbed to capture argv and hand the on_exit callback to the
+-- test — real curl to ollama.com / localhost must never run here.
+describe("config.ai_models curl watchdogs", function()
+  local real_system, spawns
+
+  local function argv_has_pair(argv, flag, value)
+    for i, a in ipairs(argv) do
+      if a == flag and argv[i + 1] == value then
+        return true
+      end
+    end
+    return false
+  end
+
+  before_each(function()
+    spawns = {}
+    real_system = vim.system
+    vim.system = function(argv, opts, on_exit)
+      local s = { argv = argv, opts = opts }
+      function s.exit(res)
+        s.exited = true
+        if on_exit then
+          on_exit(res)
+        end
+      end
+      spawns[#spawns + 1] = s
+      return { pid = 0 }
+    end
+  end)
+
+  after_each(function()
+    -- Complete every "process" the test left running so active_pull never
+    -- wedges into the next case (on_exit is the only place the module clears
+    -- it), then drain the callbacks it scheduled.
+    for _, s in ipairs(spawns) do
+      if not s.exited then
+        s.exit({ code = 0 })
+      end
+    end
+    vim.wait(10)
+    vim.system = real_system
+  end)
+
+  it("pull_model curl argv carries stall detection (--speed-limit/--speed-time)", function()
+    am._pull_model("stub-model", function() end, function() end, function() end)
+    assert.are.equal(1, #spawns)
+    local argv = spawns[1].argv
+    assert.are.equal("curl", argv[1])
+    assert.is_true(argv_has_pair(argv, "--speed-limit", "1"))
+    assert.is_true(argv_has_pair(argv, "--speed-time", "300"))
+  end)
+
+  it("a nonzero pull exit (curl 28 stall abort) fails the pull and frees the guard", function()
+    local err_msg
+    am._pull_model("stub-model", function() end, function()
+      error("on_done must not run for a nonzero exit")
+    end, function(e)
+      err_msg = e
+    end)
+    assert.are.equal(1, #spawns)
+    spawns[1].exit({ code = 28 })
+    vim.wait(200, function()
+      return err_msg ~= nil
+    end)
+    assert.are.equal("string", type(err_msg))
+    assert.is_truthy(err_msg:find("28", 1, true))
+    -- Guard cleared: a second pull must spawn, not be rejected as concurrent.
+    am._pull_model("stub-model", function() end, function() end, function() end)
+    assert.are.equal(2, #spawns)
+  end)
+
+  it("the vim.system scrape fallback bounds curl with --max-time 10", function()
+    local real_curl = package.loaded["plenary.curl"]
+    package.loaded["plenary.curl"] = {
+      get = function()
+        error("forced failure: route scrape_library onto the vim.system fallback")
+      end,
+    }
+    local ok, err = pcall(am._scrape_library, function() end, function() end)
+    package.loaded["plenary.curl"] = real_curl
+    assert.is_true(ok, err)
+    assert.are.equal(1, #spawns)
+    local argv = spawns[1].argv
+    assert.are.equal("curl", argv[1])
+    assert.is_true(argv_has_pair(argv, "--max-time", "10"))
+  end)
+end)
