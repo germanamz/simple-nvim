@@ -29,6 +29,12 @@ return {
       default_format_opts = { lsp_format = "fallback" },
       notify_on_error = true,
       format_on_save = function(buf)
+        -- :FormatDisable (global) / :FormatDisable! (this buffer) flip these,
+        -- so a plain :w then saves untouched. Buffer flag wins so a per-buffer
+        -- disable holds even when formatting is globally on.
+        if vim.g.disable_autoformat or vim.b[buf].disable_autoformat then
+          return nil
+        end
         if require("util.largefile").is_large(buf) then
           return nil
         end
@@ -59,6 +65,34 @@ return {
         require("config.formatters")._clear_python_cache()
       end,
     })
+
+    -- Toggle format-on-save. The bang scopes to the current buffer (vim.b),
+    -- bare scopes globally (vim.g); FormatEnable clears both so it always
+    -- restores regardless of how it was disabled. <leader>F still formats on
+    -- demand either way — the flags only gate the BufWritePre pass.
+    vim.api.nvim_create_user_command("FormatDisable", function(a)
+      if a.bang then
+        vim.b.disable_autoformat = true
+      else
+        vim.g.disable_autoformat = true
+      end
+    end, { bang = true, desc = "Disable format-on-save (! = current buffer)" })
+
+    vim.api.nvim_create_user_command("FormatEnable", function()
+      vim.b.disable_autoformat = false
+      vim.g.disable_autoformat = false
+    end, { desc = "Re-enable format-on-save" })
+
+    -- Global toggle, matching the other <leader>u* switches. Clears the
+    -- buffer-local flag too so re-enabling globally isn't shadowed by a stray
+    -- :FormatDisable! on the current buffer.
+    vim.keymap.set("n", "<leader>uf", function()
+      vim.g.disable_autoformat = not vim.g.disable_autoformat
+      if not vim.g.disable_autoformat then
+        vim.b.disable_autoformat = false
+      end
+      vim.notify("Format-on-save " .. (vim.g.disable_autoformat and "disabled" or "enabled"))
+    end, { desc = "Toggle format-on-save" })
 
     -- On-demand format. Unlike on-save (capped at 1000ms and skipped entirely
     -- on large files), <leader>F is an explicit ask, so give it a generous
