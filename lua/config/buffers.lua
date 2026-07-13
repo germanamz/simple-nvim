@@ -25,6 +25,32 @@ function M._pick_target(others, alt)
   return others[#others]
 end
 
+-- Reduce the view to just the nvim-tree explorer -- the same default view
+-- `nvim .` opens. Used when the last real buffer goes: open the tree, drop
+-- every other window, then sweep the throwaway [No Name] buffers (the startup
+-- one, plus the empties nvim spawns when a displayed buffer is deleted) now
+-- that they're hidden behind the tree, so they don't pile up across a session.
+local function show_tree_only()
+  require("lazy").load({ plugins = { "nvim-tree.lua" } })
+  require("nvim-tree.api").tree.open()
+  local tree_win = vim.api.nvim_get_current_win()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if win ~= tree_win then
+      pcall(vim.api.nvim_win_close, win, false)
+    end
+  end
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if
+      vim.bo[b].buflisted
+      and vim.bo[b].buftype == ""
+      and not vim.bo[b].modified
+      and vim.api.nvim_buf_get_name(b) == ""
+    then
+      pcall(vim.api.nvim_buf_delete, b, { force = false })
+    end
+  end
+end
+
 -- Delete the current buffer without closing its window. When other *real*
 -- buffers remain, switch to one first so the window stays on a file instead of
 -- collapsing (which would quit nvim if it's the last window). When the last real
@@ -50,29 +76,36 @@ function M.delete_current()
   end
 
   -- No real buffers left: delete cur first so unsaved-changes errors still abort
-  -- loudly (nvim leaves a throwaway empty [No Name] in the window), then open
-  -- nvim-tree and drop every other window so we land on just the tree.
+  -- loudly (nvim leaves a throwaway empty [No Name] in the window), then land
+  -- on just the tree.
   vim.cmd("bdelete " .. cur)
-  require("lazy").load({ plugins = { "nvim-tree.lua" } })
-  require("nvim-tree.api").tree.open()
-  local tree_win = vim.api.nvim_get_current_win()
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if win ~= tree_win then
-      pcall(vim.api.nvim_win_close, win, false)
+  show_tree_only()
+end
+
+-- Close every buffer without unsaved changes (<leader>bad). Modified buffers
+-- survive, as does anything bdelete refuses without force (e.g. a terminal
+-- with a running job). Afterwards, anything real still listed keeps the
+-- current layout; otherwise fall back to the nvim-tree explorer, the same
+-- last-buffer fallback delete_current uses.
+function M.delete_all_saved()
+  -- Park the window on a buffer that will survive (unsaved work) up front, so
+  -- deleting the current buffer doesn't strand the window on a fresh throwaway
+  -- [No Name] buffer.
+  local keepers = vim.tbl_filter(function(b)
+    return vim.bo[b].buflisted and vim.bo[b].modified
+  end, vim.api.nvim_list_bufs())
+  if #keepers > 0 and not vim.bo[vim.api.nvim_get_current_buf()].modified then
+    vim.api.nvim_set_current_buf(M._pick_target(keepers, vim.fn.bufnr("#")))
+  end
+
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.bo[b].buflisted and not vim.bo[b].modified then
+      pcall(vim.cmd, "bdelete " .. b)
     end
   end
-  -- Sweep up the throwaway [No Name] buffers (the startup one, plus the empty
-  -- buffer nvim spawns when the last file is deleted) now that they're hidden
-  -- behind the tree, so they don't pile up across a session.
-  for _, b in ipairs(vim.api.nvim_list_bufs()) do
-    if
-      vim.bo[b].buflisted
-      and vim.bo[b].buftype == ""
-      and not vim.bo[b].modified
-      and vim.api.nvim_buf_get_name(b) == ""
-    then
-      pcall(vim.api.nvim_buf_delete, b, { force = false })
-    end
+
+  if #vim.tbl_filter(M._is_real, vim.api.nvim_list_bufs()) == 0 then
+    show_tree_only()
   end
 end
 

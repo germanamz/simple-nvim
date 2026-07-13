@@ -164,6 +164,15 @@ vim.keymap.set(
   { desc = "Delete buffer" }
 )
 
+-- Close every buffer without unsaved changes -- the "clean up my session"
+-- sibling of <leader>bd, with the same tree fallback when nothing is left.
+vim.keymap.set(
+  "n",
+  "<leader>bad",
+  require("config.buffers").delete_all_saved,
+  { desc = "Delete all saved buffers" }
+)
+
 -- Quit all windows, discarding unsaved changes
 vim.keymap.set("n", "<leader>qa", "<cmd>qa!<cr>", { desc = "Quit all (force)" })
 
