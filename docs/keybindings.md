@@ -200,7 +200,10 @@ All window commands start with `<C-w>` (Ctrl-W). `splitbelow` and
 | `:ls`                          | list buffers                          |
 
 Tip: `<Space>fb` is faster than `:ls` and lets you `<C-d>` in insert mode to
-delete the buffer under the cursor.
+delete the buffer under the cursor. A legend floats under the picker decoding
+the indicator column: `+` modified, `%` current window, `#` alternate
+(`<C-^>`), `a` active, `h` hidden, `=` read-only. (Unlike `:ls`, the picker
+never shows `-`/`u`/`x`/`R`/`F` — telescope doesn't render those.)
 
 `<Space>e` opens nvim-tree and reveals the current file, expanding the whole
 ancestry from the project root down to it (and tracking the focused buffer as

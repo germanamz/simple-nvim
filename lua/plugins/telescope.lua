@@ -37,7 +37,15 @@ return {
         end,
         desc = "Live grep (project root)",
       },
-      { "<leader>fb", "<cmd>Telescope buffers<cr>", desc = "Buffers" },
+      {
+        "<leader>fb",
+        function()
+          -- Buffers picker with a flags legend (what the +/%/#/a/h indicator
+          -- column means) floated under the results window.
+          require("config.buffers_legend").open()
+        end,
+        desc = "Buffers",
+      },
       { "<leader>fh", "<cmd>Telescope help_tags<cr>", desc = "Help tags" },
       { "<leader>fr", "<cmd>Telescope oldfiles cwd_only=true<cr>", desc = "Recent files (cwd)" },
       {

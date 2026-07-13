@@ -36,6 +36,7 @@ local review_base = require("config.review_base")
 local git = require("util.git")
 local git_status_codes = require("config.git_status_codes")
 local Overlay = require("util.overlay")
+local picker_legend = require("util.picker_legend")
 local path_util = require("util.path")
 local palette = require("config.palette")
 local fs = require("util.fs")
@@ -514,65 +515,6 @@ local function close_legend()
   legend:close()
 end
 
-local function append_segment(text, ranges, seg, separator)
-  if separator and #text > 0 then
-    text = text .. separator
-  end
-  if seg.icon and seg.icon ~= "" then
-    local s = #text
-    text = text .. seg.icon
-    if seg.icon_hls then
-      for _, h in ipairs(seg.icon_hls) do
-        table.insert(ranges, { h[3], s + h[1], s + h[2] })
-      end
-    else
-      table.insert(ranges, { seg.icon_hl or "SmartFilesLegend", s, #text })
-    end
-  end
-  if seg.count ~= nil then
-    if seg.icon and seg.icon ~= "" then
-      text = text .. " "
-    end
-    local s = #text
-    text = text .. tostring(seg.count)
-    table.insert(ranges, { "SmartFilesLegendCount", s, #text })
-  end
-  if seg.label and seg.label ~= "" then
-    text = text .. " "
-    local s = #text
-    text = text .. seg.label
-    table.insert(ranges, { "SmartFilesLegend", s, #text })
-  end
-  return text
-end
-
-local function render_segments(segs, separator)
-  local text, ranges = "", {}
-  for i, seg in ipairs(segs) do
-    text = append_segment(text, ranges, seg, i > 1 and separator or nil)
-  end
-  return text, ranges
-end
-
-local function fit_line(text, ranges, width)
-  local w = vim.api.nvim_strwidth(text)
-  if w < width then
-    local pad = math.floor((width - w) / 2)
-    if pad > 0 then
-      text = string.rep(" ", pad) .. text
-      for _, r in ipairs(ranges) do
-        r[2] = r[2] + pad
-        r[3] = r[3] + pad
-      end
-    end
-    local extra = width - vim.api.nvim_strwidth(text)
-    if extra > 0 then
-      text = text .. string.rep(" ", extra)
-    end
-  end
-  return text, ranges
-end
-
 -- Pure: turn the counts table into the two legend rows (worktree + base),
 -- dropping zero-count entries and appending a "vs <base>" trailer when a base
 -- is set and has any nonzero category. Exposed for unit testing.
@@ -632,76 +574,22 @@ local function build_legend_segments(counts, base)
 end
 M._build_legend_segments = build_legend_segments
 
--- Resolve the telescope results window for a prompt buffer, or nil if telescope
--- isn't loaded / the window is gone.
-local function picker_results_win(prompt_bufnr)
-  local ok, action_state = pcall(require, "telescope.actions.state")
-  if not ok then
-    return nil
-  end
-  local picker = action_state.get_current_picker(prompt_bufnr)
-  local results_win = picker and picker.results_win
-  if not results_win or not vim.api.nvim_win_is_valid(results_win) then
-    return nil
-  end
-  return results_win
-end
-
 -- Render the segment rows into padded statuscolumn lines + their highlights.
 local function render_legend_lines(groups, width)
   local lines, ranges_by_line = {}, {}
   for _, segs in ipairs({ groups.worktree, groups.base_list }) do
     if #segs > 0 then
-      local text, ranges = render_segments(segs, "   ")
-      text, ranges = fit_line(text, ranges, width)
+      local text, ranges = picker_legend.render_segments(segs, {
+        separator = "   ",
+        default_hl = "SmartFilesLegend",
+        count_hl = "SmartFilesLegendCount",
+      })
+      text, ranges = picker_legend.fit_line(text, ranges, width)
       table.insert(lines, text)
       table.insert(ranges_by_line, ranges)
     end
   end
   return lines, ranges_by_line
-end
-
--- Create the floating legend buffer + window anchored just BELOW the telescope
--- results window (so it never occludes result rows), falling back to overlaying
--- the window's bottom rows only when there's no room beneath it. No-op if the
--- legend would be taller than results.
-local function create_legend_window(results_win, lines, ranges_by_line)
-  local pos = vim.api.nvim_win_get_position(results_win)
-  local width = vim.api.nvim_win_get_width(results_win)
-  local height = vim.api.nvim_win_get_height(results_win)
-  if #lines > height then
-    return
-  end
-
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  local ns = vim.api.nvim_create_namespace("smart_files_legend")
-  for lnum, ranges in ipairs(ranges_by_line) do
-    for _, r in ipairs(ranges) do
-      vim.api.nvim_buf_set_extmark(buf, ns, lnum - 1, r[2], { end_col = r[3], hl_group = r[1] })
-    end
-  end
-
-  -- Prefer the row directly under the results window; only overlay the bottom
-  -- rows (the old anchor) when sitting below would run into the command line.
-  -- vim.o.lines counts the cmdline rows, so reserve cmdheight of them.
-  local below_row = pos[1] + height
-  local row = below_row
-  if below_row + #lines > vim.o.lines - vim.o.cmdheight then
-    row = pos[1] + height - #lines
-  end
-
-  legend:mount(buf, {
-    relative = "editor",
-    row = row,
-    col = pos[2],
-    width = width,
-    height = #lines,
-    style = "minimal",
-    focusable = false,
-    noautocmd = true,
-    zindex = 250,
-  })
 end
 
 local function open_legend(prompt_bufnr, counts, base)
@@ -710,7 +598,7 @@ local function open_legend(prompt_bufnr, counts, base)
   if not counts then
     return
   end
-  local results_win = picker_results_win(prompt_bufnr)
+  local results_win = picker_legend.results_win(prompt_bufnr)
   if not results_win then
     return
   end
@@ -725,7 +613,7 @@ local function open_legend(prompt_bufnr, counts, base)
   if #lines == 0 then
     return
   end
-  create_legend_window(results_win, lines, ranges_by_line)
+  picker_legend.mount(legend, results_win, "smart_files_legend", lines, ranges_by_line)
 end
 
 -- ===================== picker core =====================
@@ -748,26 +636,9 @@ local function open_picker(opts)
       sorter = conf.file_sorter({}),
       previewer = conf.file_previewer({}),
       attach_mappings = function(prompt_bufnr, _)
-        vim.schedule(function()
+        picker_legend.attach(prompt_bufnr, function()
           open_legend(prompt_bufnr, opts.counts, opts.base)
-        end)
-        vim.api.nvim_create_autocmd({ "BufWipeout", "BufLeave" }, {
-          buffer = prompt_bufnr,
-          once = true,
-          callback = close_legend,
-        })
-        -- Telescope repositions its own windows in place on a terminal resize
-        -- (same prompt_bufnr), so the editor-anchored legend would be left
-        -- stranded. Re-render it at the new results-window position. The
-        -- buffer-local autocmd is auto-removed when the prompt buffer is wiped.
-        vim.api.nvim_create_autocmd("VimResized", {
-          buffer = prompt_bufnr,
-          callback = function()
-            vim.schedule(function()
-              open_legend(prompt_bufnr, opts.counts, opts.base)
-            end)
-          end,
-        })
+        end, close_legend)
         return true
       end,
     })

@@ -248,6 +248,61 @@ describe("e2e: telescope", function()
     end)
   end)
 
+  describe("<leader>fb (buffers + flags legend)", function()
+    -- The legend float is non-focusable and holds both "+ modified" and
+    -- "= read-only"; no other test window contains that pair.
+    local function legend_win()
+      for _, win in ipairs(vim.api.nvim_list_wins()) do
+        local buf = vim.api.nvim_win_get_buf(win)
+        local text = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "\n")
+        if text:find("+ modified", 1, true) and text:find("= read-only", 1, true) then
+          return win
+        end
+      end
+      return nil
+    end
+
+    -- Deleted in an after_each (not at the end of the it-block) so a failing
+    -- wait doesn't leak the listed buffer into later specs of this shared
+    -- session.
+    local target_buf
+
+    after_each(function()
+      if target_buf and vim.api.nvim_buf_is_valid(target_buf) then
+        pcall(vim.api.nvim_buf_delete, target_buf, { force = true })
+      end
+      target_buf = nil
+    end)
+
+    it("shows a flags legend under the picker and closes it with the picker", function()
+      -- A named listed buffer for the picker to show, created via the API so
+      -- no BufReadPost/FileType/LSP autocmd chain fires: the shared headless
+      -- session caches the LSP log path from the FIRST isolated env, so
+      -- editing a real .lua file in a later env errors mid-autocmd (and that
+      -- error leaks into the next spec).
+      target_buf = vim.api.nvim_create_buf(true, false)
+      vim.api.nvim_buf_set_name(target_buf, root .. "/legend-target.txt")
+
+      press("<Space>fb")
+      wait.wait_for_buffer({ filetype = "TelescopePrompt", timeout = 3000 })
+
+      wait.wait_for(function()
+        return legend_win() ~= nil
+      end, 3000, "flags legend float did not appear")
+
+      local win = assert(legend_win())
+      assert.is_false(
+        vim.api.nvim_win_get_config(win).focusable,
+        "legend float should not be focusable"
+      )
+
+      close_picker()
+      wait.wait_for(function()
+        return legend_win() == nil
+      end, 2000, "flags legend float did not close with the picker")
+    end)
+  end)
+
   describe("<leader>gB (review_base picker)", function()
     it("opens picker with [ clear base ] entry and branch list", function()
       local repo = git_fixture.repo({
