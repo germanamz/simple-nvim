@@ -399,6 +399,16 @@ describe("config.telescope_smart", function()
     it("returns an empty table for empty input", function()
       assert.are.same({}, M._parse_config_values({}))
     end)
+
+    it("skips blank and whitespace-only lines amid valid entries", function()
+      local lines = {
+        "submodule.a.path a",
+        "",
+        "   ",
+        "submodule.b.path sub/b",
+      }
+      assert.are.same({ "a", "sub/b" }, M._parse_config_values(lines))
+    end)
   end)
 
   describe("_parse_submodule_status", function()
