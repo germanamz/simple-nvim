@@ -638,5 +638,42 @@ describe("config.telescope_smart", function()
         end
       )
     end)
+
+    it("mounts a bottom-center badge and tears it down on close", function()
+      M._mount_loading()
+      assert.is_true(vim.api.nvim_win_is_valid(M._loading.win))
+      assert.is_true(vim.api.nvim_buf_is_valid(M._loading.buf))
+      local cfg = vim.api.nvim_win_get_config(M._loading.win)
+      assert.are.equal("editor", cfg.relative)
+      assert.is_false(cfg.focusable)
+      M._loading:close()
+      assert.is_nil(M._loading.win)
+      assert.is_nil(M._loading.buf)
+    end)
+
+    it("creates the debounce timer lazily and reuses one handle across presses", function()
+      local created, orig = 0, vim.uv.new_timer
+      vim.uv.new_timer = function()
+        created = created + 1
+        return orig()
+      end
+      package.loaded["config.telescope_smart"] = nil
+      local M2 = require("config.telescope_smart")
+      -- Re-arm many times with a definitely-stale gen so no float can mount even
+      -- if a fire slipped through; the point is the handle-allocation count.
+      local ok, err = pcall(function()
+        assert.are.equal(0, created) -- requiring the module allocates NO timer (lazy)
+        for _ = 1, 20 do
+          M2._arm_loading(-1, function()
+            return false
+          end)
+        end
+        assert.are.equal(1, created) -- one timer, created on first arm, reused via stop/start
+      end)
+      vim.uv.new_timer = orig -- restore even on failure
+      M2._loading_timer():stop() -- cancel the pending debounce this test armed
+      package.loaded["config.telescope_smart"] = nil
+      assert.is_true(ok, tostring(err))
+    end)
   end)
 end)

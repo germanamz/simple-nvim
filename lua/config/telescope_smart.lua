@@ -706,6 +706,71 @@ local function load_guard(my_gen, live_gen, opened)
 end
 M._load_guard = load_guard
 
+-- Module state for the debounced float. Overlay.new() is a plain table (no OS
+-- handle), so it's safe at module scope like `legend`. The debounce timer is
+-- created LAZILY (loading_timer) so merely requiring the module allocates no
+-- libuv handle — and the test harness's per-test module reloads don't strand one.
+local loading = Overlay.new() -- OWN instance; sharing `legend` would make the two evict each other.
+local load_timer = nil -- the ONE reused debounce timer; created on first arm, never per-call.
+local load_gen = 0 -- generation token; bumped each smart_files() press so a stale press is a no-op.
+local LOAD_DEBOUNCE_MS = 150 -- flash-free on ~120 ms git; appears promptly on genuinely slow repos.
+
+-- Lazily create (once) and return the shared debounce timer. One handle for the
+-- module's lifetime, reused via stop/start — never a fresh per-call timer, and
+-- never :close()d on dismiss (that would make the next :start() throw). Lazy so
+-- requiring the module (and the test harness's reloads) allocates no handle.
+local function loading_timer()
+  if not load_timer then
+    load_timer = vim.uv.new_timer()
+  end
+  return load_timer
+end
+
+-- Build the one-line badge buffer and mount it on the `loading` overlay:
+-- borderless, non-entering, bottom-center — mirrors review_base's "active base"
+-- badge (review_base.lua:247). Overlay:mount self-closes any prior mount.
+local function mount_loading_float()
+  local text = "  Loading changes…  "
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, { text })
+  local width = vim.api.nvim_strwidth(text)
+  loading:mount(buf, {
+    relative = "editor",
+    row = vim.o.lines - 4,
+    col = math.floor((vim.o.columns - width) / 2),
+    width = width,
+    height = 1,
+    style = "minimal",
+    border = "none",
+    focusable = false,
+    noautocmd = true,
+    zindex = 250,
+  })
+end
+M._mount_loading = mount_loading_float
+
+-- Arm (or re-arm) the shared debounce timer for this press. Reuses the ONE
+-- module-local timer (stop-then-start) — never allocates a per-press handle, and
+-- never :close()s it (that would make the next :start() throw). `is_opened` is
+-- read at fire time so a picker that opened before the debounce elapsed cancels
+-- the mount; the generation guard cancels a superseded press's mount.
+local function arm_loading(my_gen, is_opened)
+  local t = loading_timer()
+  t:stop()
+  t:start(
+    LOAD_DEBOUNCE_MS,
+    0,
+    vim.schedule_wrap(function()
+      if load_guard(my_gen, load_gen, is_opened()).mount then
+        mount_loading_float()
+      end
+    end)
+  )
+end
+M._arm_loading = arm_loading
+M._loading = loading
+M._loading_timer = loading_timer
+
 -- Both pickers fetch git status (and the file list) asynchronously and open in
 -- the callback: the editor never blocks while git/rg run over the superproject,
 -- and by the time open_picker builds its entries the cache is fresh, so the
