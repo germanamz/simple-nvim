@@ -203,6 +203,22 @@ local function parse_submodule_status(lines)
 end
 M._parse_submodule_status = parse_submodule_status
 
+-- Extract the value column from `git config --get-regexp` output lines
+-- ("submodule.<name>.path <value>" -> "<value>"). The git-side regex already
+-- restricts these to submodule path entries, so each value is a submodule path.
+-- Values may contain spaces, so capture everything after the first key token.
+local function parse_config_values(lines)
+  local vals = {}
+  for _, line in ipairs(lines) do
+    local v = line:match("^%S+%s+(.+)$")
+    if v and v ~= "" then
+      vals[#vals + 1] = v
+    end
+  end
+  return vals
+end
+M._parse_config_values = parse_config_values
+
 -- Cheap gate for the recursion: a repo has submodules only if a .gitmodules sits
 -- at its toplevel. One fs_stat and zero git spawns, so the common single-repo
 -- case never pays for submodule discovery.

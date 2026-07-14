@@ -386,6 +386,21 @@ describe("config.telescope_smart", function()
     end)
   end)
 
+  describe("_parse_config_values", function()
+    it("extracts the value column from get-regexp lines", function()
+      local lines = {
+        "submodule.childA.path childA",
+        "submodule.sub/deep.path sub/deep",
+        "submodule.spaced.path my dir/sub",
+      }
+      assert.are.same({ "childA", "sub/deep", "my dir/sub" }, M._parse_config_values(lines))
+    end)
+
+    it("returns an empty table for empty input", function()
+      assert.are.same({}, M._parse_config_values({}))
+    end)
+  end)
+
   describe("_parse_submodule_status", function()
     it("parses checked-out submodule paths recursively and skips uninitialized", function()
       local lines = {
