@@ -411,21 +411,6 @@ describe("config.telescope_smart", function()
     end)
   end)
 
-  describe("_parse_submodule_status", function()
-    it("parses checked-out submodule paths recursively and skips uninitialized", function()
-      local lines = {
-        " aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa childA (heads/main)",
-        "-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb childB",
-        " cccccccccccccccccccccccccccccccccccccccc childA/grand (heads/main)",
-        "+dddddddddddddddddddddddddddddddddddddddd childC",
-      }
-      local paths = M._parse_submodule_status(lines)
-      -- childB is uninitialized ('-') and has no worktree, so it is skipped;
-      -- '+' (a different commit checked out) is still a live worktree.
-      assert.are.same({ "childA", "childA/grand", "childC" }, paths)
-    end)
-  end)
-
   describe("_has_submodules", function()
     it("is true with a .gitmodules and false without", function()
       local sp = git_fixture.superproject({ children = { "childA" } })
@@ -485,6 +470,22 @@ describe("config.telescope_smart", function()
       end, 10))
       table.sort(got)
       assert.are.same({ "childA", "childA/grand", "childB" }, got)
+    end)
+
+    it("skips an uninitialized (deinitialized) submodule", function()
+      local sp = git_fixture.superproject({ children = { "childA", "childB" } })
+      -- Deinit childB: removes its worktree/.git so only its .gitmodules entry
+      -- remains. Discovery must skip it (no checked-out worktree to status).
+      vim.fn.system({ "git", "-C", sp.root, "submodule", "deinit", "-f", "childB" })
+      local got
+      M._submodule_paths_async(sp.root, function(p)
+        got = p
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return got ~= nil
+      end, 10))
+      table.sort(got)
+      assert.are.same({ "childA" }, got)
     end)
   end)
 

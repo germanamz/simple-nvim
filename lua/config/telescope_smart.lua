@@ -183,26 +183,6 @@ end
 
 -- ===================== submodule recursion =====================
 
--- Parse `git submodule status --recursive` into the checked-out submodule
--- worktree paths, relative to the superproject and nested as "childA/grand".
--- Each line is "<char><sha> <path>[ (<describe>)]"; the leading char is ' '/'+'/
--- 'U' for a present worktree and '-' for an uninitialized one (no worktree to
--- status), which is skipped.
-local function parse_submodule_status(lines)
-  local paths = {}
-  for _, line in ipairs(lines) do
-    if line:sub(1, 1) ~= "-" then
-      local rest = line:sub(2)
-      local path = rest:match("^%x+%s+(.-)%s*%b()%s*$") or rest:match("^%x+%s+(.+)$")
-      if path and path ~= "" then
-        paths[#paths + 1] = path
-      end
-    end
-  end
-  return paths
-end
-M._parse_submodule_status = parse_submodule_status
-
 -- Extract the value column from `git config --get-regexp` output lines
 -- ("submodule.<name>.path <value>" -> "<value>"). The git-side regex already
 -- restricts these to submodule path entries, so each value is a submodule path.
@@ -327,21 +307,68 @@ local function git_changes_async(root, base, cb)
   )
 end
 
--- List the superproject's checked-out submodule worktree paths asynchronously.
--- Resolved fresh each call (never via a cache) so labels stay correct after a
--- submodule add/remove. cb runs on the main loop with the path list (empty on
--- failure or timeout).
-local function submodule_paths_async(root, cb)
+-- Direct (one level) submodule paths declared in `dir`/.gitmodules, async.
+-- Reads ONLY .gitmodules via `git config` (no index/tree walk), so it stays
+-- cheap even under a 20k-file superproject. cb runs on the main loop with the
+-- declared path list (empty on missing file / read failure / timeout).
+local function direct_submodule_paths_async(dir, cb)
   vim.system(
-    { "git", "-C", root, "submodule", "status", "--recursive" },
+    { "git", "config", "--file", dir .. "/.gitmodules", "--get-regexp", "^submodule\\..*\\.path$" },
     { text = true, timeout = GIT_TIMEOUT_MS },
     function(res)
-      local paths = res.code == 0 and parse_submodule_status(split_lines(res.stdout)) or {}
+      local paths = res.code == 0 and parse_config_values(split_lines(res.stdout)) or {}
       vim.schedule(function()
         cb(paths)
       end)
     end
   )
+end
+
+-- Checked-out submodule worktree paths under `root`, superproject-relative and
+-- nested as "child/grand", resolved fresh each call. Replaces the pathologically
+-- slow `git submodule status --recursive` (~7 s at 200 submodules — it spawns a
+-- subprocess per submodule to resolve a SHA/describe we discard) with cheap
+-- per-directory .gitmodules reads gated by fs_stat, bounded by
+-- SUBMODULE_CONCURRENCY so a deeply nested tree can't fork-bomb:
+--   * fs_stat(sub/.git)        -> skip uninitialized submodules (no worktree)
+--   * fs_stat(sub/.gitmodules) -> recurse ONLY into submodules that themselves
+--                                 contain submodules (near-zero cost when flat)
+local function submodule_paths_async(root, cb)
+  local result = {}
+  local queue = { { dir = root, prefix = "" } }
+  local head, active, finished = 1, 0, false
+
+  local function done_if_idle()
+    if not finished and active == 0 and head > #queue then
+      finished = true
+      cb(result)
+    end
+  end
+
+  local function pump()
+    while active < SUBMODULE_CONCURRENCY and head <= #queue do
+      local item = queue[head]
+      head = head + 1
+      active = active + 1
+      direct_submodule_paths_async(item.dir, function(paths)
+        for _, p in ipairs(paths) do
+          local subdir = item.dir .. "/" .. p
+          if vim.uv.fs_stat(subdir .. "/.git") then
+            result[#result + 1] = item.prefix .. p
+            if vim.uv.fs_stat(subdir .. "/.gitmodules") then
+              queue[#queue + 1] = { dir = subdir, prefix = item.prefix .. p .. "/" }
+            end
+          end
+        end
+        active = active - 1
+        pump()
+        done_if_idle()
+      end)
+    end
+    done_if_idle()
+  end
+
+  pump()
 end
 M._submodule_paths_async = submodule_paths_async
 
