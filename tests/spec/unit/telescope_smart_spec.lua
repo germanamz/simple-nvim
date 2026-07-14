@@ -676,4 +676,80 @@ describe("config.telescope_smart", function()
       assert.is_true(ok, tostring(err))
     end)
   end)
+
+  -- The float PRIMITIVES are unit-tested above (_load_guard, mount, timer reuse);
+  -- this covers their COMPOSITION inside M.smart_files(): the async seams
+  -- (M._refresh_async / M._list_all_async) are stubbed to CAPTURE their callbacks
+  -- and M._open_picker to a spy, so the whole flow runs synchronously — no
+  -- telescope, no real 150 ms timer. Without these seams a refactor could reorder
+  -- arm-vs-kick, move the dismiss to the git callback, or drop the fire-once guard
+  -- and every primitive test above would stay green.
+  describe("smart_files wiring", function()
+    local function wire()
+      local w = { refresh = {}, list = {}, opens = {}, closes = 0 }
+      M._refresh_async = function(_cwd, cb)
+        w.refresh[#w.refresh + 1] = cb
+      end
+      M._list_all_async = function(_cwd, cb)
+        w.list[#w.list + 1] = cb
+      end
+      M._open_picker = function(opts)
+        w.opens[#w.opens + 1] = opts
+      end
+      local orig_close = M._loading.close
+      M._loading.close = function(self)
+        w.closes = w.closes + 1
+        return orig_close(self)
+      end
+      -- smart_files() arms the shared debounce timer; cancel it on teardown so no
+      -- scheduled mount survives the test (mirrors the lazy-timer test above).
+      restore_fn = function()
+        M._loading_timer():stop()
+      end
+      return w
+    end
+
+    it("routes through the module-table seams and does not open synchronously", function()
+      local w = wire()
+      M.smart_files()
+      assert.are.equal(1, #w.refresh) -- git refresh kicked via M._refresh_async
+      assert.are.equal(1, #w.list) -- walk kicked via M._list_all_async
+      assert.are.equal(0, #w.opens) -- nothing opens until both resolve
+    end)
+
+    it("dismisses the float and opens only once BOTH git and the walk resolve", function()
+      local w = wire()
+      M.smart_files()
+      w.refresh[1]({}, nil, "main") -- git resolves first...
+      assert.are.equal(0, #w.opens) -- ...maybe_open gates on both, so no open yet
+      assert.are.equal(0, w.closes) -- ...and the float is NOT dismissed at git alone
+      w.list[1]({ "a.lua" }) -- walk resolves -> picker opens
+      assert.are.equal(1, #w.opens)
+      assert.are.equal(1, w.closes) -- float dismissed inside maybe_open, on open
+    end)
+
+    it("opens the picker exactly once even if a callback fires again", function()
+      local w = wire()
+      M.smart_files()
+      w.refresh[1]({}, nil, "main")
+      w.list[1]({ "a.lua" })
+      assert.are.equal(1, #w.opens)
+      w.list[1]({ "a.lua", "b.lua" }) -- a stray re-resolve of either op
+      w.refresh[1]({}, nil, "main")
+      assert.are.equal(1, #w.opens) -- fire-once guard holds
+      assert.are.equal(1, w.closes) -- and no second dismiss
+    end)
+
+    it("a superseded press never dismisses the newer press's float", function()
+      local w = wire()
+      M.smart_files() -- press 1 (gen 1): captures refresh[1], list[1]
+      M.smart_files() -- press 2 (gen 2): captures refresh[2], list[2]
+      w.refresh[1]({}, nil, "main") -- resolve the STALE press fully
+      w.list[1]({ "a.lua" })
+      assert.are.equal(0, w.closes) -- stale gen -> gen-guarded dismiss is a no-op
+      w.refresh[2]({}, nil, "main") -- resolve the CURRENT press
+      w.list[2]({ "a.lua" })
+      assert.are.equal(1, w.closes) -- current gen -> float dismissed exactly once
+    end)
+  end)
 end)

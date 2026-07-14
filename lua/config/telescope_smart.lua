@@ -687,6 +687,10 @@ local function open_picker(opts)
     })
     :find()
 end
+-- Exported so smart_files() routes the open through the module table — a seam the
+-- wiring test replaces with a spy to drive the float composition without opening
+-- telescope. Behavior-neutral: M._open_picker IS open_picker.
+M._open_picker = open_picker
 
 -- ===================== loading float =====================
 
@@ -804,7 +808,10 @@ function M.smart_files()
       loading:close()
     end
     local base = codes_res.base
-    open_picker({
+    -- Routed through the module table (M._open_picker / M._refresh_async) so the
+    -- wiring test can stub the open + the git refresh and drive this composition
+    -- synchronously. Behavior-identical to calling the locals directly.
+    M._open_picker({
       title = base and ("Files (base: " .. base .. ")") or "Files",
       results = M._merge_results(codes_res.codes, files_res),
       cwd = cwd,
@@ -813,7 +820,7 @@ function M.smart_files()
     })
   end
 
-  refresh_codes_async(cwd, function(codes, counts, base)
+  M._refresh_async(cwd, function(codes, counts, base)
     codes_res = { codes = codes, counts = counts, base = base }
     maybe_open()
   end)
