@@ -688,6 +688,24 @@ local function open_picker(opts)
     :find()
 end
 
+-- ===================== loading float =====================
+
+-- A debounced "Loading changes…" badge shown while smart_files() prepares
+-- (git status + the rg walk). P1 made the picker open fast; this only makes the
+-- residual wait (cold cache, very large submodule counts, slow FS) visible so it
+-- never reads as a freeze. Below the debounce the float never shows — intended.
+
+-- Pure race decisions for the debounced float, as a function of this press's
+-- generation vs the live generation and whether the picker has opened:
+--   * mount   -> the debounce should show the float (still current, not yet open)
+--   * dismiss -> a resolving callback should close it (still current). A stale
+--                press (my_gen ~= live_gen) must never touch the shared overlay.
+local function load_guard(my_gen, live_gen, opened)
+  local current = my_gen == live_gen
+  return { mount = current and not opened, dismiss = current }
+end
+M._load_guard = load_guard
+
 -- Both pickers fetch git status (and the file list) asynchronously and open in
 -- the callback: the editor never blocks while git/rg run over the superproject,
 -- and by the time open_picker builds its entries the cache is fresh, so the

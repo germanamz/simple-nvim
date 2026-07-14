@@ -619,4 +619,24 @@ describe("config.telescope_smart", function()
       assert.is_truthy(codes["childA/new.lua"])
     end)
   end)
+
+  describe("loading float", function()
+    describe("_load_guard", function()
+      it("mounts only when the press is current and the picker is not yet open", function()
+        assert.is_true(M._load_guard(3, 3, false).mount) -- current + not opened -> mount
+        assert.is_false(M._load_guard(3, 3, true).mount) -- current but already opened -> no mount
+        assert.is_false(M._load_guard(2, 3, false).mount) -- stale press -> never mounts
+        assert.is_false(M._load_guard(2, 3, true).mount)
+      end)
+
+      it(
+        "dismisses only for the current generation (stale press never closes a newer float)",
+        function()
+          assert.is_true(M._load_guard(3, 3, true).dismiss) -- current -> dismiss
+          assert.is_true(M._load_guard(3, 3, false).dismiss) -- current, dismiss ignores opened
+          assert.is_false(M._load_guard(2, 3, true).dismiss) -- superseded press -> must NOT close
+        end
+      )
+    end)
+  end)
 end)
