@@ -777,10 +777,31 @@ M._loading_timer = loading_timer
 -- status prefixes (via the patched gen_from_file) are correct on first render.
 function M.smart_files()
   local cwd = vim.fn.getcwd()
+  load_gen = load_gen + 1
+  local my_gen = load_gen
+  local opened = false
   local codes_res, files_res
+
+  -- Arm the debounce BEFORE kicking the async ops: refresh_codes_async's
+  -- not-a-repo callback fires synchronously, so the press state must exist first.
+  arm_loading(my_gen, function()
+    return opened
+  end)
+
   local function maybe_open()
     if not (codes_res and files_res) then
       return
+    end
+    if opened then
+      return -- fire once; a double-resolve must not re-open or re-dismiss.
+    end
+    opened = true
+    loading_timer():stop() -- arm ran first, so the timer exists; accessor is nil-safe regardless.
+    -- Stale-check BEFORE touching the shared overlay: a superseded press must
+    -- never close a newer press's float. Unconditional for the current gen, so
+    -- the zero-changes and degraded-`{}` paths also dismiss.
+    if load_guard(my_gen, load_gen, opened).dismiss then
+      loading:close()
     end
     local base = codes_res.base
     open_picker({
@@ -791,6 +812,7 @@ function M.smart_files()
       base = base,
     })
   end
+
   refresh_codes_async(cwd, function(codes, counts, base)
     codes_res = { codes = codes, counts = counts, base = base }
     maybe_open()
