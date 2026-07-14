@@ -4,8 +4,11 @@
 local M = {}
 
 -- The shared bound on concurrent git processes a superproject fan-out may
--- spawn, so hundreds of submodules can't fork-bomb the machine.
-M.GIT_CONCURRENCY = 8
+-- spawn, so hundreds of submodules can't fork-bomb the machine. Scaled to the
+-- machine (cores - 2) with a floor so low-core boxes stay parallel and a cap so
+-- big boxes don't fork-storm. Computed once at module load (core count is
+-- stable per session).
+M.GIT_CONCURRENCY = math.max(4, math.min((vim.uv.available_parallelism() or 8) - 2, 24))
 
 -- Run worker(item, done) over `items` with at most `limit` in flight, calling
 -- on_complete after the last done(). Workers run asynchronously (vim.system)
