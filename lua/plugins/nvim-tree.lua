@@ -40,6 +40,16 @@ return {
       end,
     },
     view = { width = 35 },
+    -- Long names lose their tail to the 35-column sidebar, so let nvim-tree pop
+    -- a one-line float over the cursor row whenever the row renders wider than
+    -- the window. It only fires when the name is actually truncated, and it
+    -- replays the row's NvimTreeHighlights extmarks, so the git labels and the
+    -- grey/blue/teal decorator colours below carry into the float. Two silent
+    -- no-ops worth knowing: the float is suppressed unless the tree window sits
+    -- at screen column 0 (fine — view.side is left by default) and unless 'wrap'
+    -- is off (nvim-tree forces that itself). The decorators are merged into this
+    -- table in config() below.
+    renderer = { full_name = true },
     -- Coalesce fs-watcher churn. A superproject's many submodule .git dirs and
     -- build outputs emit bursts of events; the 50ms default reloads too eagerly.
     filesystem_watchers = { enable = true, debounce_delay = 200 },
@@ -89,27 +99,33 @@ return {
     -- porcelain labels, same review base — see config.nvim_tree_git). Built
     -- here, not in `opts`, because the decorator class extends nvim-tree.api
     -- and so can only be created once the plugin is loaded.
-    opts.renderer = {
-      decorators = {
-        "Open",
-        "Hidden",
-        "Modified",
-        "Bookmark",
-        "Diagnostics",
-        "Copied",
-        require("config.nvim_tree_git").decorator(),
-        -- Three sibling decorators that colour classes of nodes. Order matters:
-        -- create_combined_group force-merges in list order, so the LAST one wins
-        -- an overlap. git-ignored is placed last so an ignored dot-folder (.next,
-        -- .venv, ...) reads grey ("ignored") rather than blue ("dot-folder").
-        --   • dot-folders  -> blue  (.git, .github, ...; folders only)
-        --   • symlinks     -> teal  (file and directory links)
-        --   • git-ignored  -> grey  (shown via I; from config.ignore_filter)
-        require("config.nvim_tree_dotfolder").decorator(),
-        require("config.nvim_tree_symlink").decorator(),
-        require("config.nvim_tree_ignore").decorator(),
-        "Cut",
-      },
+    --
+    -- Assign into opts.renderer rather than replacing it: lazy hands config()
+    -- the MERGED opts, so a wholesale `opts.renderer = {...}` would silently
+    -- drop the sibling renderer keys declared above (full_name among them)
+    -- before setup() ever saw them. Handing nvim-tree a partial renderer table
+    -- is fine — it deep-merges over its defaults — while `decorators`, being a
+    -- list, still replaces the default list wholesale, which is what drops the
+    -- builtin "Git" decorator.
+    opts.renderer.decorators = {
+      "Open",
+      "Hidden",
+      "Modified",
+      "Bookmark",
+      "Diagnostics",
+      "Copied",
+      require("config.nvim_tree_git").decorator(),
+      -- Three sibling decorators that colour classes of nodes. Order matters:
+      -- create_combined_group force-merges in list order, so the LAST one wins
+      -- an overlap. git-ignored is placed last so an ignored dot-folder (.next,
+      -- .venv, ...) reads grey ("ignored") rather than blue ("dot-folder").
+      --   • dot-folders  -> blue  (.git, .github, ...; folders only)
+      --   • symlinks     -> teal  (file and directory links)
+      --   • git-ignored  -> grey  (shown via I; from config.ignore_filter)
+      require("config.nvim_tree_dotfolder").decorator(),
+      require("config.nvim_tree_symlink").decorator(),
+      require("config.nvim_tree_ignore").decorator(),
+      "Cut",
     }
     require("nvim-tree").setup(opts)
     -- Subscribe to nvim-tree's rename/move/delete events and forward them to
