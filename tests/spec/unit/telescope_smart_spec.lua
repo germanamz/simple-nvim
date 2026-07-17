@@ -567,6 +567,32 @@ describe("config.telescope_smart", function()
       assert.is_true(dirty["childA"]) -- surfaced as a dirty submodule
     end)
 
+    it("reflects a submodule change on a second recursion (revalidates the cache)", function()
+      -- The submodule cache must not serve stale codes: staging a file inside a
+      -- submodule moves its index key, so the next recursion re-scans it.
+      local sp = git_fixture.superproject({ children = { "childA" } })
+      local c1
+      M._recursive_changes_async(sp.root, nil, function(c)
+        c1 = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return c1 ~= nil
+      end, 10))
+      assert.is_nil(c1["childA/new.lua"]) -- clean on first pass
+
+      write_file(sp.children.childA, "new.lua", "x\n")
+      vim.fn.system({ "git", "-C", sp.children.childA, "add", "new.lua" })
+
+      local c2
+      M._recursive_changes_async(sp.root, nil, function(c)
+        c2 = c
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return c2 ~= nil
+      end, 10))
+      assert.is_truthy(c2["childA/new.lua"]) -- re-scanned after the index moved
+    end)
+
     it("leaves dirty_subs empty for a clean / worktree-only-dirty submodule", function()
       -- A submodule with working-tree changes but a matching HEAD is NOT
       -- commit-diverged: Tier 0 stays silent (its dirt rolls up from file codes).

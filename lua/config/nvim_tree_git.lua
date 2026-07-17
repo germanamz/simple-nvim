@@ -99,6 +99,11 @@ function M.refresh_labels(opts)
   local repo_status = require("config.repo_status")
   if opts and opts.hard then
     repo_status.invalidate_all()
+    -- Hard flush also drops every cached submodule status so <leader>gR /
+    -- HeadChanged / ReviewBaseChanged re-scan even submodules whose index key is
+    -- unchanged (a bare external edit the cheap key can't see). The soft path
+    -- relies on recursive_changes_async's index-keyed revalidate instead.
+    require("config.submodule_status").invalidate_all()
   else
     repo_status.revalidate()
   end

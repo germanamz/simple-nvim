@@ -410,6 +410,13 @@ local function recursive_changes_async(root, base, cb)
     return git_changes_async(root, base, cb)
   end
   submodule_paths_async(root, function(paths)
+    -- Drop cached submodule statuses whose git index moved (stage/commit/
+    -- checkout) since they were scanned, so this refresh re-scans exactly the
+    -- changed submodules — restoring the always-fresh semantics of the old
+    -- always-recurse path while keeping unchanged submodules a zero-spawn cache
+    -- hit. (index_key can't see a bare unstaged edit — the documented gap that
+    -- <leader>gR force-flushes.)
+    submodule_status.revalidate()
     -- The subpath set lets the outer status classify its --ignore-submodules=dirty
     -- gitlink rows (commit-diverged submodules) into dirty_subs instead of codes.
     local submodules = {}

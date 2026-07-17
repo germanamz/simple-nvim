@@ -143,15 +143,16 @@ end)
 -- RepoStatusChanged event (fired by config.repo_status / config.nvim_tree_submodule
 -- when a resolve lands) reloads the tree so the labels repaint.
 describe("config.nvim_tree_git repo_status wiring", function()
-  local saved_tree, saved_api, saved_smart, saved_repo
-  local reloads, invalidations, revalidations, module
+  local saved_tree, saved_api, saved_smart, saved_repo, saved_sub
+  local reloads, invalidations, revalidations, sub_invalidations, module
 
   before_each(function()
     saved_tree = package.loaded["nvim-tree"]
     saved_api = package.loaded["nvim-tree.api"]
     saved_smart = package.loaded["config.telescope_smart"]
     saved_repo = package.loaded["config.repo_status"]
-    reloads, invalidations, revalidations = 0, 0, 0
+    saved_sub = package.loaded["config.submodule_status"]
+    reloads, invalidations, revalidations, sub_invalidations = 0, 0, 0, 0
     package.loaded["nvim-tree"] = true
     package.loaded["nvim-tree.api"] = {
       tree = {
@@ -174,6 +175,11 @@ describe("config.nvim_tree_git repo_status wiring", function()
         revalidations = revalidations + 1
       end,
     }
+    package.loaded["config.submodule_status"] = {
+      invalidate_all = function()
+        sub_invalidations = sub_invalidations + 1
+      end,
+    }
     package.loaded["config.nvim_tree_git"] = nil
     module = require("config.nvim_tree_git")
   end)
@@ -183,6 +189,7 @@ describe("config.nvim_tree_git repo_status wiring", function()
     package.loaded["nvim-tree.api"] = saved_api
     package.loaded["config.telescope_smart"] = saved_smart
     package.loaded["config.repo_status"] = saved_repo
+    package.loaded["config.submodule_status"] = saved_sub
     package.loaded["config.nvim_tree_git"] = nil
     pcall(vim.api.nvim_del_augroup_by_name, "nvim_tree_git_refresh")
   end)
@@ -195,10 +202,12 @@ describe("config.nvim_tree_git repo_status wiring", function()
     assert.are.equal(0, invalidations)
   end)
 
-  it("hard-flushes the repo_status cache on a hard refresh", function()
-    -- HeadChanged / ReviewBaseChanged / <leader>gR pass { hard = true }.
+  it("hard-flushes both the repo_status and submodule_status caches on a hard refresh", function()
+    -- HeadChanged / ReviewBaseChanged / <leader>gR pass { hard = true } so even a
+    -- submodule whose cheap index key is unchanged (a bare external edit) re-scans.
     module.refresh_labels({ hard = true })
     assert.are.equal(1, invalidations)
+    assert.are.equal(1, sub_invalidations)
     assert.are.equal(0, revalidations)
   end)
 
