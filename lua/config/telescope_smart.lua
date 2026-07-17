@@ -63,38 +63,52 @@ M._format_prefix = git_status_codes.code_to_display
 -- the submodule recursion) is prepended to each path key so a submodule's files
 -- merge into the superproject-relative codes as "childA/<path>"; "" for the
 -- outer repo.
-local function apply_worktree_lines(lines, codes, counts, prefix)
+-- `submodules` (a subpath->true set, only for the OUTER status) and `dirty_subs`
+-- (an accumulator) turn a submodule gitlink row — present when the outer status
+-- runs with --ignore-submodules=dirty — into a dirty-subtree signal instead of a
+-- file code. Such a row is a commit-diverged (bumped-pointer) submodule; it must
+-- NOT become a "childA" file entry (the picker would try to open it) nor inflate
+-- the legend counts, so it is recorded and skipped. Per-submodule statuses pass
+-- neither and behave exactly as before.
+local function apply_worktree_lines(lines, codes, counts, prefix, submodules, dirty_subs)
   prefix = prefix or ""
   for _, line in ipairs(lines) do
     if #line >= 4 then
-      local x = line:sub(1, 1)
-      local y = line:sub(2, 2)
-      codes[prefix .. parse_status_path(line:sub(4))] = x .. y
+      local path = prefix .. parse_status_path(line:sub(4))
+      if submodules and submodules[path] then
+        if dirty_subs then
+          dirty_subs[path] = true
+        end
+      else
+        local x = line:sub(1, 1)
+        local y = line:sub(2, 2)
+        codes[path] = x .. y
 
-      local cat = git_status_codes.category(git_status_codes.dominant_letter(x, y))
-      if cat then
-        counts[cat] = counts[cat] + 1
-      end
-      if x ~= " " and x ~= "?" then
-        counts.staged = counts.staged + 1
-      end
-      if y ~= " " and y ~= "?" then
-        counts.unstaged = counts.unstaged + 1
-      end
-      if x == "?" and y == "?" then
-        counts.unstaged = counts.unstaged + 1
+        local cat = git_status_codes.category(git_status_codes.dominant_letter(x, y))
+        if cat then
+          counts[cat] = counts[cat] + 1
+        end
+        if x ~= " " and x ~= "?" then
+          counts.staged = counts.staged + 1
+        end
+        if y ~= " " and y ~= "?" then
+          counts.unstaged = counts.unstaged + 1
+        end
+        if x == "?" and y == "?" then
+          counts.unstaged = counts.unstaged + 1
+        end
       end
     end
   end
 end
 
--- Sync fetch + parse of `git status --porcelain`.
--- --untracked-files=all lists each untracked file individually; without it git
--- collapses a fully-untracked directory to a single "dir/" entry, which would
--- show (and try to open) the directory instead of the new file.
--- --ignore-submodules=all matches git_changes_async: the sync path has no
--- submodule recursion, so a dirty-gitlink row would surface as a bogus file
--- entry (see the e2e contract in telescope_smart_spec).
+-- Sync fetch + parse of `git status --porcelain` (test-only; production uses the
+-- async git_changes_async). --untracked-files=all lists each untracked file
+-- individually; without it git collapses a fully-untracked directory to a single
+-- "dir/" entry, which would show (and try to open) the directory instead of the
+-- new file. --ignore-submodules=all (not =dirty like the async path): the sync
+-- path has no submodule recursion and no dirty_subs classifier, so it must not
+-- emit gitlink rows that would surface as bogus file entries.
 local function parse_worktree_status(root, codes, counts)
   local lines, ok = git.run(
     { "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=all" },
@@ -239,20 +253,24 @@ local WALKER_TIMEOUT_MS = 10000
 -- superproject tree. vim.system callbacks run in a fast context where most of
 -- the API is off-limits, so all parsing is vim.schedule'd back onto the main
 -- loop. Calls cb(codes, counts).
-local function git_changes_async(root, base, cb)
+local function git_changes_async(root, base, cb, submodules)
+  local dirty_subs = {}
   local function finish(wt_lines, df_lines)
     local codes, counts = {}, fresh_counts()
-    apply_worktree_lines(wt_lines, codes, counts)
+    apply_worktree_lines(wt_lines, codes, counts, "", submodules, dirty_subs)
     if df_lines then
       apply_committed_lines(df_lines, codes, counts)
     end
-    cb(codes, counts)
+    cb(codes, counts, dirty_subs)
   end
   vim.system(
-    -- --ignore-submodules=all: the recursion path resolves per-file status
-    -- INSIDE each submodule itself, so the outer status must not collapse a
-    -- dirty submodule to a single gitlink row (which would show as a bogus
-    -- "childA" file). No-op for a plain repo with no submodules.
+    -- --ignore-submodules=dirty (Tier 0): report a submodule ONLY when its
+    -- checked-out commit differs from the recorded gitlink (a bumped pointer),
+    -- while skipping the expensive per-submodule working-tree scan. The recursion
+    -- resolves per-file status inside each submodule separately, so
+    -- apply_worktree_lines routes these gitlink rows into `dirty_subs` (a rollup
+    -- signal) rather than letting them collapse a submodule to a bogus "childA"
+    -- file. =dirty vs =all is a no-op for a plain repo with no submodules.
     {
       "git",
       "-C",
@@ -260,7 +278,7 @@ local function git_changes_async(root, base, cb)
       "status",
       "--porcelain",
       "--untracked-files=all",
-      "--ignore-submodules=all",
+      "--ignore-submodules=dirty",
     },
     { text = true, timeout = BULK_GIT_TIMEOUT_MS },
     function(wt)
@@ -392,7 +410,13 @@ local function recursive_changes_async(root, base, cb)
     return git_changes_async(root, base, cb)
   end
   submodule_paths_async(root, function(paths)
-    git_changes_async(root, base, function(codes, counts)
+    -- The subpath set lets the outer status classify its --ignore-submodules=dirty
+    -- gitlink rows (commit-diverged submodules) into dirty_subs instead of codes.
+    local submodules = {}
+    for _, subpath in ipairs(paths) do
+      submodules[subpath] = true
+    end
+    git_changes_async(root, base, function(codes, counts, dirty_subs)
       local items = {}
       for _, subpath in ipairs(paths) do
         items[#items + 1] = { key = subpath, dir = root .. "/" .. subpath }
@@ -401,13 +425,15 @@ local function recursive_changes_async(root, base, cb)
         -- Merge each submodule's cached worktree lines under its "subpath/"
         -- prefix — same apply_worktree_lines as the old inline pool, so the
         -- codes/counts semantics are byte-for-byte unchanged; only the source is
-        -- now the shared, incrementally-cached scan.
+        -- now the shared, incrementally-cached scan. (No submodule set here: a
+        -- submodule's own status is --ignore-submodules=all, so it has no gitlink
+        -- rows to classify.)
         for _, subpath in ipairs(paths) do
           apply_worktree_lines(results[subpath] or {}, codes, counts, subpath .. "/")
         end
-        cb(codes, counts)
+        cb(codes, counts, dirty_subs)
       end)
-    end)
+    end, submodules)
   end)
 end
 M._recursive_changes_async = recursive_changes_async
@@ -470,7 +496,8 @@ end
 
 -- ===================== codes cache (per-cwd, short TTL) =====================
 
-local cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = nil, time = 0 }
+local cache =
+  { codes = {}, counts = nil, base = nil, root = nil, cwd = nil, time = 0, dirty_subs = {} }
 
 local function ms_now()
   return vim.uv.hrtime() / 1e6
@@ -492,19 +519,44 @@ local function refresh_codes_async(cwd, cb)
   cwd = canonical_cwd(cwd or vim.fn.getcwd())
   local root = git.root(cwd)
   if not root then
-    cache = { codes = {}, counts = nil, base = nil, root = nil, cwd = cwd, time = ms_now() }
+    cache = {
+      codes = {},
+      counts = nil,
+      base = nil,
+      root = nil,
+      cwd = cwd,
+      time = ms_now(),
+      dirty_subs = {},
+    }
     if cb then
       cb({}, nil, nil, nil)
     end
     return
   end
   local base = review_base.get(root)
-  recursive_changes_async(root, base, function(raw_codes, counts)
+  recursive_changes_async(root, base, function(raw_codes, counts, raw_dirty_subs)
     local codes = {}
     for p, c in pairs(raw_codes) do
       codes[path_util.relative(root .. "/" .. p, cwd)] = c
     end
-    cache = { codes = codes, counts = counts, base = base, root = root, cwd = cwd, time = ms_now() }
+    -- Rewrite the dirty-submodule subpaths to cwd-relative too, so the tree's
+    -- _dir_markers keys them the same way it keys file codes. path_util.relative
+    -- :p-normalizes, which APPENDS a trailing slash for an existing directory
+    -- ("childA" -> "childA/"); strip it so the key matches the slash-free form
+    -- _dir_icon looks up (rel:gsub("/$","")) and _dir_markers' ancestor walk.
+    local dirty_subs = {}
+    for p in pairs(raw_dirty_subs or {}) do
+      dirty_subs[(path_util.relative(root .. "/" .. p, cwd):gsub("/$", ""))] = true
+    end
+    cache = {
+      codes = codes,
+      counts = counts,
+      base = base,
+      root = root,
+      cwd = cwd,
+      time = ms_now(),
+      dirty_subs = dirty_subs,
+    }
     if cb then
       cb(codes, counts, base, root)
     end
@@ -522,8 +574,11 @@ local refreshing = {}
 local function refresh_codes(cwd)
   cwd = canonical_cwd(cwd or vim.fn.getcwd())
   local now = ms_now()
+  -- The 5th return, dirty_subs, is the Tier-0 commit-diverged submodule set; only
+  -- the tree decorator reads it (extra returns are ignored by the gen_from_file
+  -- and picker callers, which take the first).
   if cache.cwd == cwd and (now - cache.time) < 500 then
-    return cache.codes, cache.counts, cache.base, cache.root
+    return cache.codes, cache.counts, cache.base, cache.root, cache.dirty_subs
   end
   if not refreshing[cwd] then
     refreshing[cwd] = true
@@ -533,11 +588,11 @@ local function refresh_codes(cwd)
     end)
   end
   if cache.cwd == cwd then
-    return cache.codes, cache.counts, cache.base, cache.root
+    return cache.codes, cache.counts, cache.base, cache.root, cache.dirty_subs
   end
   local root = git.root(cwd)
   local base = root and review_base.get(root) or nil
-  return {}, nil, base, root
+  return {}, nil, base, root, {}
 end
 
 function M._refresh(cwd)

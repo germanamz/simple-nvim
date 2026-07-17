@@ -539,6 +539,50 @@ describe("config.telescope_smart", function()
       assert.is_truthy(codes["a.lua"])
     end)
 
+    it("reports a commit-diverged submodule as a dirty_sub, not a file code", function()
+      -- Advance childA's HEAD past the recorded gitlink: the superproject sees it
+      -- as commit-diverged (bumped pointer) while its working tree stays clean, so
+      -- the recursion inside finds no files. Tier 0 (--ignore-submodules=dirty on
+      -- the outer status) must surface it in dirty_subs, and it must NOT leak into
+      -- codes as a bogus "childA" file entry.
+      local sp = git_fixture.superproject({ children = { "childA" } })
+      vim.fn.system({
+        "git",
+        "-C",
+        sp.children.childA,
+        "commit",
+        "--allow-empty",
+        "--no-gpg-sign",
+        "-m",
+        "advance",
+      })
+      local codes, dirty
+      M._recursive_changes_async(sp.root, nil, function(c, _, d)
+        codes, dirty = c, d
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil
+      end, 10))
+      assert.is_nil(codes["childA"]) -- not a bogus file entry
+      assert.is_true(dirty["childA"]) -- surfaced as a dirty submodule
+    end)
+
+    it("leaves dirty_subs empty for a clean / worktree-only-dirty submodule", function()
+      -- A submodule with working-tree changes but a matching HEAD is NOT
+      -- commit-diverged: Tier 0 stays silent (its dirt rolls up from file codes).
+      local sp = git_fixture.superproject({ children = { "childA" } })
+      write_file(sp.children.childA, "new.lua", "x\n")
+      local codes, dirty
+      M._recursive_changes_async(sp.root, nil, function(c, _, d)
+        codes, dirty = c, d
+      end)
+      assert.is_true(vim.wait(3000, function()
+        return codes ~= nil
+      end, 10))
+      assert.is_truthy(codes["childA/new.lua"])
+      assert.are.same({}, dirty)
+    end)
+
     it("applies the base diff to the outer repo only; submodules give worktree codes", function()
       local sp = git_fixture.superproject({ children = { "childA" } })
       vim.fn.system({ "git", "-C", sp.root, "branch", "base" })

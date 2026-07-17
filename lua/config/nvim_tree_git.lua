@@ -30,23 +30,36 @@ end
 
 -- Pure: directory relpath -> highlight group for the subtree marker. A dir
 -- containing any worktree change is marked SmartFilesModified; one containing
--- only base-vs-HEAD changes is marked SmartFilesBase.
-function M._dir_markers(codes)
+-- only base-vs-HEAD changes is marked SmartFilesBase. `dirty_subs` (Tier 0) is a
+-- set of submodule relpaths that are dirty with NO file codes of their own — a
+-- commit-diverged (bumped-pointer) submodule the recursion sees as clean inside;
+-- each such submodule marks its own folder AND its ancestors worktree-dirty, so a
+-- collapsed folder still shows a bumped submodule buried under it. Modified always
+-- dominates Base (a worktree change outranks a base-only sibling).
+function M._dir_markers(codes, dirty_subs)
   local dirs = {}
-  for p, code in pairs(codes) do
-    local base_only = code:sub(1, 1) == "b"
-    local dir = p
+  -- Walk `path`'s ancestor directories, applying `hl`. Modified overwrites; Base
+  -- only fills an unmarked dir (so it never demotes a Modified ancestor).
+  local function mark_ancestors(path, hl)
+    local dir = path
     while true do
       dir = dir:match("^(.*)/[^/]+$")
       if not dir or dir == "" then
         break
       end
-      if base_only then
-        dirs[dir] = dirs[dir] or "SmartFilesBase"
-      else
+      if hl == "SmartFilesModified" then
         dirs[dir] = "SmartFilesModified"
+      else
+        dirs[dir] = dirs[dir] or "SmartFilesBase"
       end
     end
+  end
+  for p, code in pairs(codes) do
+    mark_ancestors(p, code:sub(1, 1) == "b" and "SmartFilesBase" or "SmartFilesModified")
+  end
+  for sub in pairs(dirty_subs or {}) do
+    dirs[sub] = "SmartFilesModified" -- the submodule folder itself
+    mark_ancestors(sub, "SmartFilesModified")
   end
   return dirs
 end
@@ -241,8 +254,13 @@ function M.decorator()
     -- kicked a second full recursive scan. path_util.relative :p-normalizes
     -- its base itself, so rendering is unchanged.
     self.cwd = vim.fn.getcwd()
-    self.codes = require("config.telescope_smart")._refresh(self.cwd)
-    self.dirs = M._dir_markers(self.codes)
+    -- _refresh also returns the Tier-0 dirty-submodule set (cwd-relative): the
+    -- commit-diverged submodules that have no file codes of their own, so their
+    -- rollups come from here rather than the recursion.
+    local codes, _counts, _base, _root, dirty_subs =
+      require("config.telescope_smart")._refresh(self.cwd)
+    self.codes = codes
+    self.dirs = M._dir_markers(self.codes, dirty_subs)
   end
 
   function Decorator:icons(node)

@@ -102,6 +102,37 @@ describe("e2e: nvim-tree git labels", function()
     wait_for_line("%?%*%s+new%.lua")
   end)
 
+  it("marks a bumped (commit-diverged) submodule's collapsed row via Tier 0", function()
+    -- A submodule pointer bumped to a new commit but with a clean worktree: the
+    -- recursion inside finds no files, so the marker can only come from Tier 0
+    -- (the outer --ignore-submodules=dirty status -> dirty_subs). The childA row
+    -- must gain a "*" WITHOUT expanding it.
+    local sp = git_fixture.superproject({ children = { "childA" } })
+    vim.fn.system({
+      "git",
+      "-C",
+      sp.children.childA,
+      "commit",
+      "--allow-empty",
+      "--no-gpg-sign",
+      "-m",
+      "advance",
+    })
+    vim.fn.chdir(sp.root)
+
+    open_tree(sp.root)
+    local childA_line
+    wait.wait_for(function()
+      for _, l in ipairs(tree_lines()) do
+        if l:find("childA", 1, true) then
+          childA_line = l
+          return l:find("*", 1, true) ~= nil
+        end
+      end
+      return false
+    end, 3000, "bumped submodule row never gained a * marker; last: " .. tostring(childA_line))
+  end)
+
   it("rolls a submodule-internal change up to its containing subdirectory", function()
     -- The reported case: a dirty file nested in a subdirectory of a submodule
     -- (e.g. lola-server/cmd/gql/main.go). The rollup marker must reach the

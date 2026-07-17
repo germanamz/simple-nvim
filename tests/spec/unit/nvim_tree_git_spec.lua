@@ -29,6 +29,26 @@ describe("config.nvim_tree_git._dir_markers", function()
     })
     assert.are.same({ ["a"] = "SmartFilesModified" }, dirs)
   end)
+
+  -- A commit-diverged submodule (bumped pointer, clean worktree) contributes no
+  -- file codes — the recursion inside it finds nothing — so it only rolls up via
+  -- the Tier-0 dirty_subs set: the submodule folder itself AND its ancestors are
+  -- marked worktree-dirty.
+  it("marks a dirty submodule folder and its ancestors from the dirty_subs set", function()
+    local dirs = nvim_tree_git._dir_markers({}, { ["libs/childA"] = true })
+    assert.are.same({
+      ["libs/childA"] = "SmartFilesModified",
+      ["libs"] = "SmartFilesModified",
+    }, dirs)
+  end)
+
+  it("unions dirty_subs with file-code rollups, worktree dominating", function()
+    local dirs = nvim_tree_git._dir_markers({ ["x/base.lua"] = "bM" }, { ["x/sub"] = true })
+    assert.are.same({
+      ["x"] = "SmartFilesModified", -- x holds the dirty submodule -> dominates base
+      ["x/sub"] = "SmartFilesModified",
+    }, dirs)
+  end)
 end)
 
 -- The decorator's directory-icon lookup. path_util.relative :p-normalizes a
