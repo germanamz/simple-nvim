@@ -39,6 +39,7 @@ return {
   json = "001c28d7a29832b06b0e831ec77845553c89b56d",
   yaml = "4463985dfccc640f3d6991e3396a2047610cf5f8",
   toml = "64b56832c2cffe41758f28e05c756a3a98d16f41",
+  sql = "851e9cb257ba7c66cc8c14214a31c44d2f1e954e",
   html = "73a3947324f6efddf9e17c0ea58d454843590cc0",
   css = "dda5cfc5722c429eaba1c910ca32c2c0c5bb1a3f",
   regex = "b2ac15e27fce703d2f37a79ccd94a5c0cbe9720b",

@@ -77,6 +77,7 @@ return {
         "jsonc",
         "yaml",
         "toml",
+        "sql",
         "html",
         "gohtmltmpl",
         "css",
