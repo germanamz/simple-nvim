@@ -41,6 +41,7 @@ local path_util = require("util.path")
 local palette = require("config.palette")
 local fs = require("util.fs")
 local pool = require("util.pool")
+local submodule_status = require("config.submodule_status")
 
 -- ===================== helpers =====================
 
@@ -375,36 +376,35 @@ M._submodule_paths_async = submodule_paths_async
 -- git_changes_async plus, for a superproject, each submodule's per-file worktree
 -- status merged under its "subpath/" prefix — so A/M/D/?* appear on files INSIDE
 -- submodules, which the outer --ignore-submodules=all status collapses away.
--- Discovery (submodule status) and the outer status stay serial to avoid the
--- root's index.lock; the per-submodule statuses then run through a bounded pool
--- — they live in distinct repos with distinct locks, and --ignore-submodules=all
--- keeps a parent from descending into (and racing on the index.lock of) its
--- nested child. The base...HEAD diff is scoped to the OUTER repo only this stage:
--- review_base is keyed by the outer toplevel, so a submodule's "changed since
--- base" is ill-defined; submodules contribute worktree codes, not bX.
+-- Discovery (submodule paths) and the outer status stay serial to avoid the
+-- root's index.lock; the per-submodule statuses then run through
+-- config.submodule_status, which owns the bounded pool AND a per-submodule cache
+-- keyed by the cheap git index state. So the whole-tree scan runs cold once and
+-- thereafter re-scans only the submodules whose index actually moved — a
+-- FocusGained/re-open over a 200-submodule superproject stops re-shelling every
+-- submodule. (Each lives in its own repo/lock, and --ignore-submodules=all keeps
+-- a parent from descending into a nested child.) The base...HEAD diff is scoped
+-- to the OUTER repo only: review_base is keyed by the outer toplevel, so a
+-- submodule's "changed since base" is ill-defined; submodules contribute
+-- worktree codes, not bX.
 local function recursive_changes_async(root, base, cb)
   if not has_submodules(root) then
     return git_changes_async(root, base, cb)
   end
   submodule_paths_async(root, function(paths)
     git_changes_async(root, base, function(codes, counts)
-      run_pool(paths, SUBMODULE_CONCURRENCY, function(subpath, done)
-        vim.system({
-          "git",
-          "-C",
-          root .. "/" .. subpath,
-          "status",
-          "--porcelain",
-          "--untracked-files=all",
-          "--ignore-submodules=all",
-        }, { text = true, timeout = GIT_TIMEOUT_MS }, function(res)
-          local sub_lines = res.code == 0 and split_lines(res.stdout) or {}
-          vim.schedule(function()
-            apply_worktree_lines(sub_lines, codes, counts, subpath .. "/")
-            done()
-          end)
-        end)
-      end, function()
+      local items = {}
+      for _, subpath in ipairs(paths) do
+        items[#items + 1] = { key = subpath, dir = root .. "/" .. subpath }
+      end
+      submodule_status.scan(items, function(results)
+        -- Merge each submodule's cached worktree lines under its "subpath/"
+        -- prefix — same apply_worktree_lines as the old inline pool, so the
+        -- codes/counts semantics are byte-for-byte unchanged; only the source is
+        -- now the shared, incrementally-cached scan.
+        for _, subpath in ipairs(paths) do
+          apply_worktree_lines(results[subpath] or {}, codes, counts, subpath .. "/")
+        end
         cb(codes, counts)
       end)
     end)
