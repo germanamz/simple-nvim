@@ -31,6 +31,32 @@ describe("config.nvim_tree_git._dir_markers", function()
   end)
 end)
 
+-- The decorator's directory-icon lookup. path_util.relative :p-normalizes a
+-- directory node's path, which APPENDS a trailing slash ("a/b" -> "a/b/"), while
+-- _dir_markers keys are slash-free. _dir_icon must strip that slash before the
+-- lookup or every directory rollup marker silently vanishes (the original bug).
+-- Glyph is by category: "*" flags a subtree holding worktree (uncommitted)
+-- changes, "•" a subtree that only differs from the review base.
+describe("config.nvim_tree_git._dir_icon", function()
+  it("marks a worktree-dirty dir with * despite the trailing slash", function()
+    assert.are.same(
+      { { str = "*", hl = { "SmartFilesModified" } } },
+      nvim_tree_git._dir_icon({ ["a/b"] = "SmartFilesModified" }, "a/b/")
+    )
+  end)
+
+  it("marks a base-only dir with a • bullet", function()
+    assert.are.same(
+      { { str = "•", hl = { "SmartFilesBase" } } },
+      nvim_tree_git._dir_icon({ ["a"] = "SmartFilesBase" }, "a/")
+    )
+  end)
+
+  it("returns nil for a clean dir", function()
+    assert.is_nil(nvim_tree_git._dir_icon({ ["a"] = "SmartFilesModified" }, "b/"))
+  end)
+end)
+
 -- refresh_labels must coalesce rapid triggers (rebase, focus toggling): at
 -- most one whole-tree pipeline in flight per cwd, plus one queued trailing
 -- refresh that runs with the then-current inputs once the in-flight one

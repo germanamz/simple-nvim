@@ -64,6 +64,29 @@ describe("e2e: nvim-tree git labels", function()
     wait_for_line("%?%*%s+new%.lua")
   end)
 
+  it("rolls a worktree change up to a * marker on the containing directory", function()
+    local repo = git_fixture.repo({
+      commits = { { files = { ["src/committed.lua"] = "return 1\n" }, message = "init" } },
+      modified = { ["src/committed.lua"] = "return 2\n" },
+    })
+    vim.fn.chdir(repo)
+
+    open_tree(repo)
+    -- The only tree line mentioning "src" is the directory row (the file row
+    -- underneath shows the basename committed.lua); it gains a "*" once the
+    -- codes cache warms and the rollup marker renders.
+    local src_line
+    wait.wait_for(function()
+      for _, l in ipairs(tree_lines()) do
+        if l:find("src", 1, true) then
+          src_line = l
+          return l:find("*", 1, true) ~= nil
+        end
+      end
+      return false
+    end, 3000, "src dir row never gained a * marker; last: " .. tostring(src_line))
+  end)
+
   it("labels a file inside a submodule via the recursive status", function()
     local sp = git_fixture.superproject({ children = { "childA" } })
     local f = assert(io.open(sp.children.childA .. "/new.lua", "w"))
@@ -77,6 +100,36 @@ describe("e2e: nvim-tree git labels", function()
     wait_for_line("childA")
     api.tree.expand_all()
     wait_for_line("%?%*%s+new%.lua")
+  end)
+
+  it("rolls a submodule-internal change up to its containing subdirectory", function()
+    -- The reported case: a dirty file nested in a subdirectory of a submodule
+    -- (e.g. lola-server/cmd/gql/main.go). The rollup marker must reach the
+    -- intermediate directory via the submodule-recursion codes, which key the
+    -- change as childA/deep/new.lua (superproject-relative).
+    local sp = git_fixture.superproject({ children = { "childA" } })
+    local deep = sp.children.childA .. "/deep"
+    vim.fn.mkdir(deep, "p")
+    local f = assert(io.open(deep .. "/new.lua", "w"))
+    f:write("return 1\n")
+    f:close()
+    vim.fn.chdir(sp.root)
+
+    local api = open_tree(sp.root)
+    wait_for_line("childA")
+    api.tree.expand_all()
+    -- "deep" appears only on the intermediate directory row; it gains the "*"
+    -- once the recursive codes warm.
+    local deep_line
+    wait.wait_for(function()
+      for _, l in ipairs(tree_lines()) do
+        if l:find("deep", 1, true) then
+          deep_line = l
+          return l:find("*", 1, true) ~= nil
+        end
+      end
+      return false
+    end, 3000, "deep dir row never gained a * marker; last: " .. tostring(deep_line))
   end)
 
   it("labels committed-vs-base changes and updates on ReviewBaseChanged", function()

@@ -11,6 +11,23 @@ local M = {}
 local git_status_codes = require("config.git_status_codes")
 local path_util = require("util.path")
 
+-- Pure: (dir-marker map from _dir_markers, a directory node's relpath) ->
+-- decorator icon list, or nil for a clean dir. path_util.relative :p-normalizes
+-- the node path, which APPENDS a trailing slash to a directory ("a/b" -> "a/b/"),
+-- but _dir_markers keys are slash-free — strip it before the lookup or the marker
+-- never matches (the bug that silently hid every directory rollup). Glyph by
+-- category: "*" flags a subtree with worktree (uncommitted) changes, mirroring
+-- the "*" unstaged marker on file codes; "•" a subtree that only differs from the
+-- review base (SmartFilesBase), which is committed, not uncommitted.
+function M._dir_icon(dirs, rel)
+  local hl = dirs[(rel:gsub("/$", ""))]
+  if not hl then
+    return nil
+  end
+  local glyph = hl == "SmartFilesBase" and "•" or "*"
+  return { { str = glyph, hl = { hl } } }
+end
+
 -- Pure: directory relpath -> highlight group for the subtree marker. A dir
 -- containing any worktree change is marked SmartFilesModified; one containing
 -- only base-vs-HEAD changes is marked SmartFilesBase.
@@ -211,8 +228,7 @@ function M.decorator()
   function Decorator:icons(node)
     local rel = path_util.relative(node.absolute_path, self.cwd)
     if node.type == "directory" then
-      local hl = self.dirs[rel]
-      return hl and { { str = "•", hl = { hl } } } or nil
+      return M._dir_icon(self.dirs, rel)
     end
     local label, hl = git_status_codes.code_to_icon(self.codes[rel])
     return label and { { str = label, hl = hl and { hl } or {} } } or nil
