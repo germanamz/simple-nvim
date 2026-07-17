@@ -449,8 +449,10 @@ return {
       repaint_all()
       require("config.statusline").refresh_all()
       -- Reload the tree's git decorator against fresh codes, if it's on screen
-      -- (the same helper nvim-tree.lua's own event handlers use).
-      require("config.nvim_tree_git").refresh_labels()
+      -- (the same helper nvim-tree.lua's own event handlers use). Hard flush: the
+      -- manual hatch must re-resolve even branch labels whose index key is
+      -- unchanged (e.g. an external unstaged edit the cheap key can't detect).
+      require("config.nvim_tree_git").refresh_labels({ hard = true })
       vim.notify("Refreshed git hunks & status")
     end, { desc = "Refresh git hunks & status" })
 

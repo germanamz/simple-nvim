@@ -228,6 +228,50 @@ describe("util.git", function()
     end)
   end)
 
+  -- index_key is the spawn-free change key that gates expensive status
+  -- re-resolves (repo_status, config.submodule_status) on FocusGained without a
+  -- per-dir git spawn: the mtime of the repo's git index, which advances on
+  -- stage/commit/checkout but NOT on a bare worktree edit (the documented gap).
+  describe("index_key", function()
+    it("returns a stable key that advances when the index is rewritten", function()
+      local repo = new_repo()
+      local k1 = git.index_key(repo)
+      assert.is_truthy(k1)
+      assert.are.equal(k1, git.index_key(repo)) -- stable with no git change
+      -- Staging rewrites the index -> the key must move.
+      local f = assert(io.open(repo .. "/b.lua", "w"))
+      f:write("-- b\n")
+      f:close()
+      vim.fn.system({ "git", "-C", repo, "add", "b.lua" })
+      assert.are_not.equal(k1, git.index_key(repo))
+    end)
+
+    it("does not move for a bare worktree edit (the documented staleness gap)", function()
+      local repo = new_repo()
+      local k1 = git.index_key(repo)
+      local f = assert(io.open(repo .. "/a.lua", "a"))
+      f:write("-- appended\n")
+      f:close()
+      assert.are.equal(k1, git.index_key(repo)) -- untracked/unstaged edit: index unchanged
+    end)
+
+    it("resolves a submodule's real gitdir via its .git file", function()
+      local sp = git_fixture.superproject({ children = { "childA" } })
+      local sub = sp.children.childA
+      -- A submodule's worktree has a `.git` FILE (gitdir: ../.git/modules/childA),
+      -- so a naive <dir>/.git/index stat would miss; index_key must follow it.
+      assert.are.equal("file", (vim.uv.fs_stat(sub .. "/.git") or {}).type)
+      assert.is_truthy(git.index_key(sub))
+    end)
+
+    it("returns nil for a non-repo directory", function()
+      local dir = vim.fn.tempname() .. "-not-a-repo"
+      vim.fn.mkdir(dir, "p")
+      assert.is_nil(git.index_key(dir))
+      vim.fn.delete(dir, "rf")
+    end)
+  end)
+
   -- parse_head turns one `git rev-parse HEAD --abbrev-ref HEAD` result into the
   -- { sha, branch } shape. Pure, so the sync head() and the async HEAD watcher
   -- (config.git_head._resolve_head) share exactly one parse.

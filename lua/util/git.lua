@@ -178,6 +178,68 @@ function M.git_dir(root)
   return M.first_line({ "rev-parse", "--absolute-git-dir" }, { cwd = root })
 end
 
+-- Spawn-free change key for a repo dir: the mtime of its git index. The index
+-- is rewritten by stage / commit / checkout / reset / submodule-update
+-- (verified empirically), so a changed key means "something git-visible
+-- happened" — enough to gate an expensive `git status` re-resolve on FocusGained
+-- without paying a per-dir spawn (config.repo_status, config.submodule_status).
+-- Two things it deliberately does NOT catch: a bare worktree edit (an untracked
+-- or unstaged change never touches the index — the documented staleness window,
+-- escape-hatched by <leader>gR and the in-session filesystem watcher) and, on
+-- its own, a HEAD move (config.git_head's HeadChanged already covers that). The
+-- index lives at <gitdir>/index; a submodule/worktree has a `.git` FILE that
+-- points its gitdir elsewhere (gitdir: ../.git/modules/<name>), so resolve that
+-- with pure fs before stat-ing. The resolved index path is invariant for a
+-- session, so memoize it (only positive resolutions — a missing .git stays cheap
+-- to re-probe). nil when the dir is not a repo or has no index yet (unborn).
+local index_path_cache = {}
+
+local function resolve_index_path(dir)
+  local cached = index_path_cache[dir]
+  if cached then
+    return cached
+  end
+  local dotgit = dir .. "/.git"
+  local st = vim.uv.fs_stat(dotgit)
+  local gitdir
+  if st and st.type == "directory" then
+    gitdir = dotgit
+  elseif st and st.type == "file" then
+    local f = io.open(dotgit, "r")
+    if f then
+      local line = f:read("*l") or ""
+      f:close()
+      local ref = line:match("^gitdir:%s*(.+)$")
+      if ref then
+        gitdir = ref:match("^/") and ref or vim.fn.simplify(dir .. "/" .. ref)
+      end
+    end
+  end
+  local idx = gitdir and (gitdir .. "/index") or nil
+  if idx then
+    index_path_cache[dir] = idx
+  end
+  return idx
+end
+
+function M.index_key(dir)
+  local idx = dir and resolve_index_path(dir)
+  if not idx then
+    return nil
+  end
+  local st = vim.uv.fs_stat(idx)
+  if not st or not st.mtime then
+    return nil
+  end
+  return st.mtime.sec .. "." .. st.mtime.nsec
+end
+
+-- Drop the memoized index paths (test seam; and the rare mid-session .git
+-- relocation, alongside _clear_root_cache).
+function M._clear_index_cache()
+  index_path_cache = {}
+end
+
 -- True when `ref` resolves to an object in `root`. The second return marks a
 -- timed-out (not definitively failed) check, so callers can retry later
 -- instead of treating a transient hang as "ref is gone".

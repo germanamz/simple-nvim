@@ -327,6 +327,33 @@ describe("config.repo_status", function()
       assert.is_nil(repo_status.get(repo))
     end)
 
+    it("revalidate keeps an entry whose git index is unchanged (no re-resolve storm)", function()
+      -- The FocusGained lever: unlike invalidate_all, revalidate keeps a cached
+      -- status whose cheap index key still matches, so a focus-gain with nothing
+      -- staged/committed re-resolves NO submodules.
+      local repo =
+        git_fixture.repo({ commits = { { files = { ["a.lua"] = "1\n" }, message = "init" } } })
+      repo_status.request(repo)
+      assert.is_true(wait_fired(1))
+      assert.is_not_nil(repo_status.get(repo))
+      repo_status.revalidate()
+      assert.is_not_nil(repo_status.get(repo)) -- index unchanged -> still cached
+    end)
+
+    it("revalidate drops an entry whose index moved (stage/commit/checkout)", function()
+      local repo =
+        git_fixture.repo({ commits = { { files = { ["a.lua"] = "1\n" }, message = "init" } } })
+      repo_status.request(repo)
+      assert.is_true(wait_fired(1))
+      -- Stage a new file: rewrites the index -> the cheap state key moves.
+      local f = assert(io.open(repo .. "/b.lua", "w"))
+      f:write("new\n")
+      f:close()
+      vim.fn.system({ "git", "-C", repo, "add", "b.lua" })
+      repo_status.revalidate()
+      assert.is_nil(repo_status.get(repo)) -- state changed -> dropped, next request re-resolves
+    end)
+
     it("does not cache or fire for a non-repo dir", function()
       local dir = vim.fn.tempname() .. "-plain"
       vim.fn.mkdir(dir, "p")

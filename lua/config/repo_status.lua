@@ -111,7 +111,12 @@ local GIT_TIMEOUT_MS = 10000
 local STATUS_ARGS =
   { "status", "--porcelain=v2", "--branch", "--untracked-files=all", "--ignore-submodules=all" }
 
--- dir -> status table (never a pending marker; get() must stay clean).
+local git = require("util.git")
+
+-- dir -> { status = <table>, state = <index key> } (never a pending marker;
+-- get() must stay clean). `state` is util.git.index_key at resolve time — the
+-- cheap, spawn-free change key that lets revalidate() keep an unchanged entry on
+-- FocusGained instead of nuking and re-resolving every visible submodule.
 local cache = {}
 -- Per-dir single-flight, mirroring nvim_tree_git.refresh_labels: `pending` marks
 -- an in-flight resolve; a request arriving mid-flight sets `trailing`, collapsing
@@ -173,7 +178,8 @@ M._resolve = default_resolve
 
 -- Cached status for `dir`, or nil when unresolved/failed. Never spawns.
 function M.get(dir)
-  return cache[dir]
+  local entry = cache[dir]
+  return entry and entry.status or nil
 end
 
 -- Schedule a resolve for `dir` (single-flight). On a successful resolve it
@@ -190,7 +196,10 @@ function M.request(dir)
   local started = M._resolve(dir, function(status)
     pending[dir] = nil
     if status then
-      cache[dir] = status
+      -- Capture the cheap index key alongside the status so a later revalidate()
+      -- can tell "nothing changed" (keep) from "restaged/committed/checked out"
+      -- (drop and re-resolve) without a spawn.
+      cache[dir] = { status = status, state = git.index_key(dir) }
       vim.api.nvim_exec_autocmds("User", { pattern = "RepoStatusChanged", data = { dir = dir } })
     end
     if trailing[dir] then
@@ -214,12 +223,26 @@ function M.label_plain(dir)
   return M.plain(s)
 end
 
--- Drop every cached status so the next render re-resolves. Called from
--- nvim_tree_git.refresh_labels on FocusGained / <leader>gR / HeadChanged; only
--- visible consumers re-request, so non-visible submodules simply fall out of
--- cache — "only when visible" holds on refresh, not just first paint.
+-- Drop every cached status so the next render re-resolves. The hard flush, for
+-- the manual <leader>gR hatch and the definitive HeadChanged / ReviewBaseChanged
+-- signals; only visible consumers re-request, so non-visible submodules simply
+-- fall out of cache — "only when visible" holds on refresh, not just first paint.
 function M.invalidate_all()
   cache = {}
+end
+
+-- The cheap FocusGained lever: drop only entries whose git index moved since they
+-- were resolved (stage / commit / checkout — see util.git.index_key), keeping the
+-- rest. Returning to nvim over a 200-submodule superproject with nothing changed
+-- then re-resolves ZERO submodules, instead of invalidate_all's re-resolve-every-
+-- visible-row storm. A bare external worktree edit is the documented gap (its
+-- index key does not move); <leader>gR force-flushes for that case.
+function M.revalidate()
+  for dir, entry in pairs(cache) do
+    if git.index_key(dir) ~= entry.state then
+      cache[dir] = nil
+    end
+  end
 end
 
 -- Test seam: clear all state and restore the real resolver.

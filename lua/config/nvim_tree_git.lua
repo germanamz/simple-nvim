@@ -65,7 +65,11 @@ end
 -- the then-current inputs, which is what the old always-spawn gave us.
 local inflight, trailing = {}, {}
 
-function M.refresh_labels()
+-- opts.hard = true force-flushes the branch-fact cache (the definitive
+-- HeadChanged / ReviewBaseChanged signals and the manual <leader>gR hatch);
+-- otherwise (FocusGained) it revalidates cheaply, keeping every submodule whose
+-- git index has not moved. Both then force-refresh the codes cache and reload.
+function M.refresh_labels(opts)
   if not package.loaded["nvim-tree"] then
     return
   end
@@ -73,14 +77,25 @@ function M.refresh_labels()
   if not api.tree.is_visible() then
     return
   end
-  -- Drop the per-dir branch-fact cache so the root header and every visible
-  -- submodule label re-resolve on this refresh (FocusGained / <leader>gR /
-  -- HeadChanged-for-cwd). Only visible consumers re-request, so non-visible
-  -- submodules just fall out of cache — "only when visible" holds on refresh too.
-  require("config.repo_status").invalidate_all()
+  -- Reconcile the per-dir branch-fact cache so the root header and visible
+  -- submodule labels re-resolve as needed. A hard flush drops everything; a
+  -- revalidate keeps entries whose git index is unchanged, so a focus-gain over a
+  -- 200-submodule superproject with nothing staged re-resolves NO submodules
+  -- (vs. the old invalidate-every-visible-row storm). Only visible consumers
+  -- re-request, so non-visible submodules stay out of cache either way.
+  local repo_status = require("config.repo_status")
+  if opts and opts.hard then
+    repo_status.invalidate_all()
+  else
+    repo_status.revalidate()
+  end
   local cwd = vim.fn.getcwd()
   if inflight[cwd] then
-    trailing[cwd] = true
+    -- OR-accumulate hardness so a HeadChanged coalescing behind an in-flight
+    -- FocusGained still force-flushes on the trailing rerun (a HEAD move that
+    -- left the index untouched would otherwise survive a soft revalidate).
+    local hard = (trailing[cwd] and trailing[cwd].hard) or (opts and opts.hard) or false
+    trailing[cwd] = { hard = hard }
     return
   end
   inflight[cwd] = true
@@ -94,8 +109,9 @@ function M.refresh_labels()
       api.tree.reload()
     end
     if trailing[cwd] then
+      local t = trailing[cwd]
       trailing[cwd] = nil
-      M.refresh_labels()
+      M.refresh_labels(t.hard and { hard = true } or nil)
     end
   end)
 end
@@ -131,7 +147,11 @@ function M.register_autocmds()
       if root and vim.fn.resolve(root) ~= vim.fn.resolve(vim.fn.getcwd()) then
         return
       end
-      M.refresh_labels()
+      -- Definitive change signals: hard-flush the branch-fact cache. A review-base
+      -- change is nvim-side state the index key can't see, and a HEAD move may
+      -- leave the index untouched (reset --soft) — so revalidate could keep a
+      -- stale label. Cheap: these are rare and scoped to the cwd root.
+      M.refresh_labels({ hard = true })
     end,
   })
   -- The codes cache refreshes asynchronously, so the decorator's first render

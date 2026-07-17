@@ -124,14 +124,14 @@ end)
 -- when a resolve lands) reloads the tree so the labels repaint.
 describe("config.nvim_tree_git repo_status wiring", function()
   local saved_tree, saved_api, saved_smart, saved_repo
-  local reloads, invalidations, module
+  local reloads, invalidations, revalidations, module
 
   before_each(function()
     saved_tree = package.loaded["nvim-tree"]
     saved_api = package.loaded["nvim-tree.api"]
     saved_smart = package.loaded["config.telescope_smart"]
     saved_repo = package.loaded["config.repo_status"]
-    reloads, invalidations = 0, 0
+    reloads, invalidations, revalidations = 0, 0, 0
     package.loaded["nvim-tree"] = true
     package.loaded["nvim-tree.api"] = {
       tree = {
@@ -150,6 +150,9 @@ describe("config.nvim_tree_git repo_status wiring", function()
       invalidate_all = function()
         invalidations = invalidations + 1
       end,
+      revalidate = function()
+        revalidations = revalidations + 1
+      end,
     }
     package.loaded["config.nvim_tree_git"] = nil
     module = require("config.nvim_tree_git")
@@ -164,9 +167,19 @@ describe("config.nvim_tree_git repo_status wiring", function()
     pcall(vim.api.nvim_del_augroup_by_name, "nvim_tree_git_refresh")
   end)
 
-  it("invalidates the repo_status cache on each refresh", function()
+  it("revalidates (not hard-flushes) the repo_status cache on a plain refresh", function()
+    -- The FocusGained path keeps unchanged submodules cached instead of nuking
+    -- and re-resolving every visible row.
     module.refresh_labels()
+    assert.are.equal(1, revalidations)
+    assert.are.equal(0, invalidations)
+  end)
+
+  it("hard-flushes the repo_status cache on a hard refresh", function()
+    -- HeadChanged / ReviewBaseChanged / <leader>gR pass { hard = true }.
+    module.refresh_labels({ hard = true })
     assert.are.equal(1, invalidations)
+    assert.are.equal(0, revalidations)
   end)
 
   it("reloads a visible tree when RepoStatusChanged fires", function()
