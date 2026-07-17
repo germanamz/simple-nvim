@@ -169,24 +169,59 @@ shape):
   `--ignore-submodules=dirty` and splits gitlink lines from file lines against
   the submodule set.
 
-## Phased implementation
+## Phased implementation (as shipped)
 
 Each phase is independently valuable, test-first, and lands as its own commit(s)
 on branch `perf/nvim-tree-git`.
 
-- **P1 — `repo_status` state-keyed cache.** Add `HEAD sha + index mtime` state to
-  the per-dir cache; `refresh_labels`/`FocusGained` revalidate instead of
-  `invalidate_all`. Kills the per-focus branch-label re-resolve storm. Lowest
-  risk, immediate `FocusGained` win.
-- **P2 — `config.submodule_status` module.** Per-submodule codes cache + state
-  key + bounded incremental scan + targeted invalidation. Pure/unit-testable
-  seams mirroring `repo_status`.
-- **P3 — Tier 0 outer status.** Switch to `--ignore-submodules=dirty`; split
-  gitlink lines against the submodule set into a dirty-submodule set; feed tree
-  rollups. Picker file-list filtering preserved.
-- **P4 — Tree decorator rewire.** Rollups union the dirty-submodule set; memoize
-  `_dir_markers`; lazy on-expand submodule codes via `submodule_status`.
-  `recursive_changes_async` delegates to the shared cache (picker benefits).
+- **P1 — `repo_status` state-keyed cache. (shipped)** Add a spawn-free
+  `util.git.index_key` (git index mtime) to the per-dir cache; `refresh_labels`
+  revalidates on `FocusGained` (keep unchanged submodules) instead of
+  `invalidate_all`, with `{ hard = true }` for the definitive HeadChanged /
+  ReviewBaseChanged / `<leader>gR` signals. Kills the per-focus branch-label
+  re-resolve storm.
+- **P2 — `config.submodule_status` module. (shipped)** Per-submodule codes cache
+  keyed by `index_key`, shared single-flight behind the pickers' bulk `scan()`
+  and the tree's on-demand `request()`. `telescope_smart.recursive_changes_async`
+  delegates its per-submodule statuses to it, so the whole-tree scan runs cold
+  once and re-scans only changed submodules thereafter. (A follow-up fix makes
+  the recursion `revalidate()` each run so a changed submodule is never served
+  stale, restoring the old always-fresh semantics incrementally.)
+- **P3 — Tier 0 outer status. (shipped)** Outer status switched to
+  `--ignore-submodules=dirty`; `apply_worktree_lines` classifies gitlink rows
+  against the discovered submodule set into a `dirty_subs` set (not codes/counts);
+  `dirty_subs` threads through the codes cache to the tree, where `_dir_markers`
+  rolls a bumped submodule up through its ancestors. Surfaces commit-diverged
+  submodules the recursion (which finds no files inside a clean-worktree
+  submodule) never could.
+
+### P4 — reframed: aggressive per-file laziness is moot under "full rollups"
+
+The original P4 was "the tree stops scanning collapsed submodules." Building
+P1–P3 surfaced why that is the wrong move **given the approved full-rollups
+requirement**: a collapsed, working-tree-dirty submodule (same HEAD, uncommitted
+edits) can only get its rollup marker by *scanning it*, and git offers no cheaper
+way. So full rollups **require** scanning every submodule — exactly what the
+cached, incremental Tier 2 scan already does, once, in the background.
+
+Per-file laziness would only skip **parsing** already-scanned lines for collapsed
+nodes (nvim-tree already skips *rendering* them) — a few microseconds of Lua, not
+the expensive axis (the git spawns). The scan itself cannot be skipped without
+losing the fidelity the user asked for. Therefore the shipped architecture
+(P1 state-keys + P2 cache + P3 Tier 0) is the achievable optimum:
+
+- **Cold open:** non-blocking; one outer status + one bounded background scan of
+  all submodules (the irreducible cost of full working-tree fidelity), cached.
+- **Every subsequent focus / refresh:** near-zero — only submodules whose index
+  moved re-scan; branch labels revalidate; commit-diverged rollups are instant
+  from Tier 0.
+- **Recurring per-focus 200-spawn storm (the actual pain): eliminated.**
+
+Remaining lever, if ever wanted: gate the *outer* status refresh on the outer
+repo's `index_key` too (skipping the 20k-file walk when nothing staged), trading
+live pickup of bare external edits for less steady-state work. Not shipped —
+current freshness/cost balance (500 ms TTL + filesystem watcher + `<leader>gR`)
+is good, and it would widen the documented staleness window.
 
 ## Test strategy
 
