@@ -125,4 +125,53 @@ describe("smoke: which-key keybinding documentation", function()
     assert.is_true(presets.motions)
     assert.is_true(presets.operators)
   end)
+
+  -- mini.ai adds text objects the which-key `text_objects` preset can't know
+  -- about: the custom `o` (dotted chain, see lua/plugins/mini-ai.lua +
+  -- lua/config/dotted_chain.lua) plus the builtin `f` (function call) and `a`
+  -- (argument). Without spec entries the popup shows `ao`/`io`/`af`/`aa` as bare
+  -- keys after an operator. These must be labeled in operator-pending AND visual
+  -- modes (mini.ai maps a/i in both), so assert the effective mode carries both.
+  local EXPECTED_TEXTOBJECTS = {
+    ["ao"] = "dotted chain",
+    ["io"] = "inner dotted chain",
+    ["af"] = "function call",
+    ["if"] = "inner function call",
+    ["aa"] = "argument",
+    ["ia"] = "inner argument",
+  }
+
+  -- Flatten opts.spec into { lhs -> { desc, mode-set } }, honouring the mode
+  -- inherited from an enclosing settings sub-table (which-key's nested form,
+  -- `{ mode = {...}, { "io", ... }, ... }`). A string [1] marks a mapping entry;
+  -- otherwise the table is a settings group to recurse into.
+  local function collect(list, inherited_mode, out)
+    local mode = list.mode or inherited_mode
+    for _, e in ipairs(list) do
+      if type(e) == "table" then
+        if type(e[1]) == "string" then
+          local m = e.mode or mode
+          local set = {}
+          for _, name in ipairs(type(m) == "table" and m or { m }) do
+            set[name] = true
+          end
+          out[e[1]] = { desc = e.desc, mode = set }
+        else
+          collect(e, mode, out)
+        end
+      end
+    end
+    return out
+  end
+
+  it("documents the mini.ai text objects in operator-pending and visual modes", function()
+    local by_lhs = collect(require("plugins.which-key")[1].opts.spec, { "n" }, {})
+    for lhs, desc in pairs(EXPECTED_TEXTOBJECTS) do
+      local entry = by_lhs[lhs]
+      assert.is_not_nil(entry, "which-key spec missing text object " .. lhs)
+      assert.are.equal(desc, entry.desc, "wrong desc for text object " .. lhs)
+      assert.is_true(entry.mode.o == true, lhs .. " not documented in operator-pending mode")
+      assert.is_true(entry.mode.x == true, lhs .. " not documented in visual mode")
+    end
+  end)
 end)

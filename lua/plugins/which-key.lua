@@ -34,6 +34,22 @@ return {
         -- 0.12 adds a default `grx` under the `gr` group (run code lens).
         { "grx", desc = "Run codelens" },
         { "gO", desc = "Document symbols" },
+        -- mini.ai (lua/plugins/mini-ai.lua) adds text objects the which-key
+        -- text_objects preset can't know about: the custom `o` (dotted chain,
+        -- lua/config/dotted_chain.lua) plus the builtin `f` (function call) and
+        -- `a` (argument). Label them in operator-pending AND visual modes —
+        -- mini.ai maps a/i in both — so the popup after an operator (d/c/y/v)
+        -- names them instead of showing bare `ao`/`io`/`af`/`aa`. Descs mirror
+        -- the preset's style (the `a`-group prefix already reads "around").
+        {
+          mode = { "o", "x" },
+          { "ao", desc = "dotted chain" },
+          { "io", desc = "inner dotted chain" },
+          { "af", desc = "function call" },
+          { "if", desc = "inner function call" },
+          { "aa", desc = "argument" },
+          { "ia", desc = "inner argument" },
+        },
       },
     },
     keys = {
