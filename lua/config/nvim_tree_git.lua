@@ -56,6 +56,11 @@ function M.refresh_labels()
   if not api.tree.is_visible() then
     return
   end
+  -- Drop the per-dir branch-fact cache so the root header and every visible
+  -- submodule label re-resolve on this refresh (FocusGained / <leader>gR /
+  -- HeadChanged-for-cwd). Only visible consumers re-request, so non-visible
+  -- submodules just fall out of cache — "only when visible" holds on refresh too.
+  require("config.repo_status").invalidate_all()
   local cwd = vim.fn.getcwd()
   if inflight[cwd] then
     trailing[cwd] = true
@@ -138,6 +143,24 @@ function M.register_autocmds()
     group = group,
     callback = function()
       M.refresh_labels()
+    end,
+  })
+  -- Reload when a branch-fact resolve lands: config.repo_status fires
+  -- RepoStatusChanged { dir } once a `git status --porcelain=v2 --branch`
+  -- completes (root header or a visible submodule), and config.nvim_tree_submodule
+  -- fires it once the submodule set is enumerated. The reload re-runs both the
+  -- root_folder_label and the submodule decorator against the now-warm caches —
+  -- a cache hit this time, so it does not loop. Unlike the getcwd-scoped
+  -- HeadChanged handler, this repaints regardless of which dir moved, so a
+  -- submodule's status lands even though getcwd() is the superproject.
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "RepoStatusChanged",
+    callback = function()
+      local api = require("nvim-tree.api")
+      if api.tree.is_visible() then
+        api.tree.reload()
+      end
     end,
   })
 end

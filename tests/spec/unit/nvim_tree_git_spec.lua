@@ -92,6 +92,65 @@ describe("config.nvim_tree_git.refresh_labels coalescing", function()
   end)
 end)
 
+-- The repo_status liveness wiring: refresh_labels drops the per-dir branch-fact
+-- cache so a focus/HEAD/gR refresh re-resolves visible repos, and a
+-- RepoStatusChanged event (fired by config.repo_status / config.nvim_tree_submodule
+-- when a resolve lands) reloads the tree so the labels repaint.
+describe("config.nvim_tree_git repo_status wiring", function()
+  local saved_tree, saved_api, saved_smart, saved_repo
+  local reloads, invalidations, module
+
+  before_each(function()
+    saved_tree = package.loaded["nvim-tree"]
+    saved_api = package.loaded["nvim-tree.api"]
+    saved_smart = package.loaded["config.telescope_smart"]
+    saved_repo = package.loaded["config.repo_status"]
+    reloads, invalidations = 0, 0
+    package.loaded["nvim-tree"] = true
+    package.loaded["nvim-tree.api"] = {
+      tree = {
+        is_visible = function()
+          return true
+        end,
+        reload = function()
+          reloads = reloads + 1
+        end,
+      },
+    }
+    package.loaded["config.telescope_smart"] = {
+      _refresh_async = function() end,
+    }
+    package.loaded["config.repo_status"] = {
+      invalidate_all = function()
+        invalidations = invalidations + 1
+      end,
+    }
+    package.loaded["config.nvim_tree_git"] = nil
+    module = require("config.nvim_tree_git")
+  end)
+
+  after_each(function()
+    package.loaded["nvim-tree"] = saved_tree
+    package.loaded["nvim-tree.api"] = saved_api
+    package.loaded["config.telescope_smart"] = saved_smart
+    package.loaded["config.repo_status"] = saved_repo
+    package.loaded["config.nvim_tree_git"] = nil
+    pcall(vim.api.nvim_del_augroup_by_name, "nvim_tree_git_refresh")
+  end)
+
+  it("invalidates the repo_status cache on each refresh", function()
+    module.refresh_labels()
+    assert.are.equal(1, invalidations)
+  end)
+
+  it("reloads a visible tree when RepoStatusChanged fires", function()
+    module.register_autocmds()
+    local before = reloads
+    vim.api.nvim_exec_autocmds("User", { pattern = "RepoStatusChanged", data = { dir = "/x" } })
+    assert.are.equal(before + 1, reloads)
+  end)
+end)
+
 -- decorator() registers a ColorScheme re-highlight autocmd. It must live in a
 -- named augroup (clear = true): a package.loaded reset plus re-require empties
 -- the module-scope Decorator memo, and an ungrouped autocmd would stack a
@@ -140,6 +199,7 @@ describe("config.nvim_tree_git.register_autocmds", function()
       review = #vim.api.nvim_get_autocmds({ event = "User", pattern = "ReviewBaseChanged" }),
       head = #vim.api.nvim_get_autocmds({ event = "User", pattern = "HeadChanged" }),
       refreshed = #vim.api.nvim_get_autocmds({ event = "User", pattern = "SmartCodesRefreshed" }),
+      reposstatus = #vim.api.nvim_get_autocmds({ event = "User", pattern = "RepoStatusChanged" }),
       focus = #vim.api.nvim_get_autocmds({ event = "FocusGained" }),
     }
   end
@@ -156,6 +216,7 @@ describe("config.nvim_tree_git.register_autocmds", function()
     assert.are.equal(baseline.review + 1, after.review)
     assert.are.equal(baseline.head + 1, after.head)
     assert.are.equal(baseline.refreshed + 1, after.refreshed)
+    assert.are.equal(baseline.reposstatus + 1, after.reposstatus)
     assert.are.equal(baseline.focus + 1, after.focus)
   end)
 end)

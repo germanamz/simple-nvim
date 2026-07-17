@@ -49,7 +49,21 @@ return {
     -- at screen column 0 (fine — view.side is left by default) and unless 'wrap'
     -- is off (nvim-tree forces that itself). The decorators are merged into this
     -- table in config() below.
-    renderer = { full_name = true },
+    renderer = {
+      full_name = true,
+      -- Superproject branch + working state on the root repo-name row. Monochrome
+      -- by necessity: root_folder_label renders as one buffer line under a single
+      -- NvimTreeRootFolder highlight (a function must return a bare string; no
+      -- per-part colour, and decorators do not run on the header line). The
+      -- coloured submodule labels below are decorators, which do. label_plain
+      -- returns "" until config.repo_status has resolved the root (cold cache),
+      -- scheduling that resolve; RepoStatusChanged then reloads the header warm.
+      root_folder_label = function(abs)
+        local name = vim.fn.fnamemodify(abs, ":t")
+        local status = require("config.repo_status").label_plain(abs)
+        return status ~= "" and (name .. "   " .. status) or name
+      end,
+    },
     -- Coalesce fs-watcher churn. A superproject's many submodule .git dirs and
     -- build outputs emit bursts of events; the 50ms default reloads too eagerly.
     filesystem_watchers = { enable = true, debounce_delay = 200 },
@@ -125,6 +139,11 @@ return {
       require("config.nvim_tree_dotfolder").decorator(),
       require("config.nvim_tree_symlink").decorator(),
       require("config.nvim_tree_ignore").decorator(),
+      -- Per-submodule branch/status labels, placed AFTER the folder name (its own
+      -- decorator because it uses icon_placement="after", vs the git decorator's
+      -- "before"). Resolves each submodule's status lazily, only when its row is
+      -- visible. Independent placement, so its order vs the trio above is moot.
+      require("config.nvim_tree_submodule").decorator(),
       "Cut",
     }
     require("nvim-tree").setup(opts)
