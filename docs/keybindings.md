@@ -70,11 +70,11 @@ Use these when you forget anything else in this doc.
 
 | Keys           | Action                                                        |
 | -------------- | ------------------------------------------------------------- |
-| `<Space>?`     | Telescope `keymaps` — fuzzy-searchable list of every binding  |
+| `<Space>?`     | Telescope `keymaps`: fuzzy-searchable list of every binding  |
 | `<Space>k?`    | Open `docs/keybindings.md` (this file) from anywhere          |
 | `<Space>K`     | which-key global popup (browse by prefix)                     |
-| `<Space>fc`    | Telescope `commands` — all `:Ex` commands                     |
-| `<Space>fh`    | Telescope `help_tags` — fuzzy across `:help`                  |
+| `<Space>fc`    | Telescope `commands`: all `:Ex` commands                     |
+| `<Space>fh`    | Telescope `help_tags`: fuzzy across `:help`                  |
 | `:map`         | Raw list of every mapping (no filter)                         |
 | `:verbose map <lhs>` | Show *where* a mapping was defined                      |
 | `:WhichKey`    | which-key for current prefix                                  |
@@ -105,7 +105,7 @@ Inside which-key: just keep typing the prefix; pause and the menu appears.
 | `b` / `B`   | previous word start                     |
 | `ge` / `gE` | previous word end                       |
 
-(`W/E/B` use whitespace-only boundaries — useful for paths, URLs.)
+(`W/E/B` use whitespace-only boundaries, useful for paths, URLs.)
 
 ### Per-line / find-char
 
@@ -138,7 +138,7 @@ Inside which-key: just keep typing the prefix; pause and the menu appears.
 
 ### Scrolloff
 
-`scrolloff = 8` and `sidescrolloff = 8` — the cursor never reaches the
+`scrolloff = 8` and `sidescrolloff = 8`: the cursor never reaches the
 last 8 lines / columns. Adjust with `:set scrolloff=0` if you want.
 
 ---
@@ -186,7 +186,7 @@ All window commands start with `<C-w>` (Ctrl-W). `splitbelow` and
 
 ## 5. Buffers
 
-`clipboard=unnamedplus` — yanks go to the system clipboard automatically.
+`clipboard=unnamedplus`: yanks go to the system clipboard automatically.
 
 | Keys / cmd                     | Action                                |
 | ------------------------------ | ------------------------------------- |
@@ -203,7 +203,7 @@ Tip: `<Space>fb` is faster than `:ls` and lets you `<C-d>` in insert mode to
 delete the buffer under the cursor. A legend floats under the picker decoding
 the indicator column: `+` modified, `%` current window, `#` alternate
 (`<C-^>`), `a` active, `h` hidden, `=` read-only. (Unlike `:ls`, the picker
-never shows `-`/`u`/`x`/`R`/`F` — telescope doesn't render those.)
+never shows `-`/`u`/`x`/`R`/`F`: telescope doesn't render those.)
 
 `<Space>e` opens nvim-tree and reveals the current file, expanding the whole
 ancestry from the project root down to it (and tracking the focused buffer as
@@ -215,7 +215,7 @@ mappings.
 
 `<Space>E` opens netrw (`:Explore`) in the current window using the tree
 listing style (`g:netrw_liststyle = 3`) with the banner hidden. The previous
-buffer stays loaded — `<C-^>` or `:b#` returns to it. Inside netrw: `<CR>` on
+buffer stays loaded. `<C-^>` or `:b#` returns to it. Inside netrw: `<CR>` on
 a folder expands/collapses it in place, `<CR>` on a file opens it, `-` goes
 up, `D` deletes, `R` renames, `%` creates a file, `d` makes a directory.
 
@@ -242,7 +242,7 @@ Tabs in Vim are *layout pages*, not browser tabs. Use sparingly.
 
 | Keys           | Action                                              |
 | -------------- | --------------------------------------------------- |
-| `m{a-z}`       | set buffer-local mark `a`–`z`                       |
+| `m{a-z}`       | set buffer-local mark `a` to `z`                       |
 | `m{A-Z}`       | set global mark (persists across files / restarts)  |
 | `` `{mark} ``  | jump to mark (exact row+col)                        |
 | `'{mark}`      | jump to start of mark's line                        |
@@ -428,7 +428,7 @@ a text object. All maps share the `gs` prefix so they don't shadow the built-in
 | `"0p`            | paste from yank register (not from delete)    |
 | `"+y` / `"+p`    | system clipboard explicitly                   |
 | `"*y` / `"*p`    | primary selection (X11)                       |
-| `"_d`            | "black hole" delete — does not pollute reg    |
+| `"_d`            | "black hole" delete: does not pollute reg    |
 | `:reg` / `:reg a`| list registers / show register `a`            |
 | (insert) `<C-r>{r}` | paste register `r` while in insert mode    |
 
@@ -459,7 +459,7 @@ All under `<Space>f` (group: "find").
 
 | Keys           | Action                                          |
 | -------------- | ----------------------------------------------- |
-| `<Space><Space>` | Smart files picker — changed-first ordering   |
+| `<Space><Space>` | Smart files picker (changed-first ordering)   |
 | `<Space>ff`    | Find files (respects `.gitignore`)              |
 | `<Space>fi`    | Find files *including* gitignored / hidden      |
 | `<Space>fg`    | Live grep (from project/git root)               |
@@ -493,13 +493,13 @@ All under `<Space>f` (group: "find").
 
 ## 14. LSP
 
-Buffer-local — these only exist in buffers with an attached LSP client.
+Buffer-local: these only exist in buffers with an attached LSP client.
 
 | Keys         | Action                                                  |
 | ------------ | ------------------------------------------------------- |
 | `gd`         | go to definition (ts_ls: source via `_typescript.goToSourceDefinition`) |
 | `gD`         | go to **declaration** (Nvim 0.11 default)               |
-| `grr`        | references (Nvim 0.11 default — opens loclist)          |
+| `grr`        | references (Nvim 0.11 default, opens loclist)          |
 | `gri`        | implementations (Nvim 0.11 default)                     |
 | `grn`        | rename symbol (Nvim 0.11 default)                       |
 | `gra`        | code action (Nvim 0.11 default)                         |
@@ -544,7 +544,7 @@ html, cssls, marksman, mdx_analyzer. Each attaches only on its `filetypes`.
 
 Gutter signs are themed nerd-font glyphs keyed by severity (error / warn / info
 / hint), with the highest severity winning a shared line. Inline virtual text
-stays off on purpose — the full message surfaces in a float when the cursor
+stays off on purpose: the full message surfaces in a float when the cursor
 rests on a diagnostic (after `updatetime`), keeping the UI quiet.
 
 ---
@@ -552,7 +552,7 @@ rests on a diagnostic (after `updatetime`), keeping the UI quiet.
 ## 16. Git: gitsigns hunks
 
 Active on every loaded buffer. Word-level inline diff is rendered with
-background highlights (no sign column — `signcolumn=false`).
+background highlights (no sign column: `signcolumn=false`).
 
 | Keys         | Action                                       |
 | ------------ | -------------------------------------------- |
@@ -621,21 +621,21 @@ with `]s` / `[s`, and `z=` lists suggestions for the word under the cursor.
 `<Space>mp` opens a read-only, **full-color** preview split on the right that
 renders the buffer through [`glow`](https://github.com/charmbracelet/glow) inside a
 terminal buffer. It reflows prose *and* keeps wide tables aligned (cells wider than
-the pane are truncated with `…`, not shattered) — so it sidesteps the wrap-vs-table
+the pane are truncated with `…`, not shattered), so it sidesteps the wrap-vs-table
 problem that plain soft-wrap can't. Every link renders as just its styled text:
 wiki-style links (`[[note]]`, `[[note|alias]]`) are rewritten so glow renders them
 (it doesn't grok them natively), and standard `[text](dest)` links have their URL
 tail stripped (glow would otherwise print the full path/URL after the text). The
-links stay usable — press `gd` on one in the preview to follow it (see below).
+links stay usable. Press `gd` on one in the preview to follow it (see below).
 It renders the **live buffer** (written to a
 private temp file, so you never have to save your document) and refreshes on save,
-when you leave insert mode, and after normal-mode edits (debounced) — not on every
+when you leave insert mode, and after normal-mode edits (debounced), not on every
 keystroke, to limit the redraw flicker from re-running glow. Scroll approximately
 syncs to the source cursor (glow reflows, so the match is by % through the
 document, not line-for-line). Toggle again to close. Requires the `glow` binary
 (`brew install glow`); without it the keymap notifies once and does nothing.
 
-`gd` follows the link under the cursor — wiki or standard — falling back to LSP
+`gd` follows the link under the cursor (wiki or standard), falling back to LSP
 go-to-definition when the cursor isn't on one. It works the same in the source
 buffer and in the `glow` preview (where the rendered text is matched back to the
 source, since glow drops link destinations). Wikilinks are project-scoped:
@@ -648,7 +648,7 @@ external URL (`http(s):`, `mailto:`, …) opens via the system handler. `<C-^>`
 returns to the previous file.
 
 The gutter shows section / paragraph numbers (`§1.2¶3` style). Headings
-H2–H6 form the dotted path; H1 is ignored. Scratchpad blockquotes
+H2 to H6 form the dotted path; H1 is ignored. Scratchpad blockquotes
 (`> Mental Note`, `> TODO`, `> Note to self`, `> Draft note`) and HTML
 comments are not numbered.
 
@@ -713,7 +713,7 @@ Other helpful Ex bits:
 ## 22. Sessions
 
 `persistence.nvim` auto-saves a session per working directory (window layout,
-open buffers, cwd). Nothing is restored automatically — pick a restore on demand.
+open buffers, cwd). Nothing is restored automatically. Pick a restore on demand.
 
 | Keys         | Action                          |
 | ------------ | ------------------------------- |
@@ -724,16 +724,16 @@ open buffers, cwd). Nothing is restored automatically — pick a restore on dema
 
 ## 23. Known conflicts
 
-### `gd` — depends on filetype
+### `gd`: depends on filetype
 
 - **LSP buffers (non-ts_ls):** `vim.lsp.buf.definition`.
 - **TypeScript buffers (ts_ls):** custom "go to source definition" that
   follows imports through, falling back to standard `definition` if the
   command returns nothing.
-- **Markdown / MDX buffers:** follows the link under the cursor — a
+- **Markdown / MDX buffers:** follows the link under the cursor: a
   `[[wikilink]]` (project-root path), or a standard `[text](dest)` link (file
   opened relative to the current file, external URL opened via the system
-  handler) — falling back to `vim.lsp.buf.definition` when the cursor isn't on a
+  handler), falling back to `vim.lsp.buf.definition` when the cursor isn't on a
   link.
 
 ### `<Esc>` in Telescope
@@ -744,8 +744,13 @@ Single press closes the picker (not "go to normal mode inside the picker").
 
 ## See also
 
-- `:help quickref` — Vim's own one-page cheatsheet.
-- `:help index` — every default mapping by mode.
-- `:help lua-guide` — Nvim Lua API.
-- `lua/plugins/*.lua` — source of truth for plugin keymaps in this config.
-- `lua/config/options.lua` — editor options & markdown autocommands.
+- [smart-files.md](smart-files.md): the `<leader><leader>` file picker in depth.
+- [dotted-chain-textobject.md](dotted-chain-textobject.md): the `ao` / `io`
+  textobject from section 10.
+- [nvim-tree-git.md](nvim-tree-git.md): the file tree's git branch and status
+  display.
+- `:help quickref`: Vim's own one-page cheatsheet.
+- `:help index`: every default mapping by mode.
+- `:help lua-guide`: Nvim Lua API.
+- `lua/plugins/*.lua`: the source of truth for plugin keymaps in this config.
+- `lua/config/options.lua`: editor options and markdown autocommands.
