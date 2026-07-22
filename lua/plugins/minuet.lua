@@ -21,6 +21,42 @@
 -- lua/config/ai.lua; this spec stays declarative. Lazy on InsertEnter (zero
 -- startup cost) and additionally on the AI keys/command so those trigger the
 -- setup that populates minuet.config before we mutate it.
+
+-- Sentinel tokens that a *base* FIM model (qwen2.5-coder:*-base) occasionally
+-- emits into a completion and that must never reach the ghost text:
+--   * Editor "cursor" sentinels — the base model echoes / hallucinates these when
+--     the surrounding buffer is marker-heavy (this very config, FIM docs, etc.).
+--     The reported symptom was a stray `<|Cursor|>` landing in accepted
+--     suggestions; reproduced against the local model — 5/5 completions carried
+--     `<|Cursor|>` with a marker in context, 0/5 once these are set as stops.
+--   * Qwen2.5-Coder structural / repo-FIM tokens — after finishing the "middle" a
+--     base model can spill `<|file_sep|>` / `<|repo_name|>` and start hallucinating
+--     the *next* file; stopping there keeps that garbage out of the buffer.
+-- minuet sends no `stop` list by default and the Ollama Modelfile for the base
+-- tag defines none, so without this the tokens pass straight through. Ollama's
+-- /v1/completions honors `stop` server-side (the matched sequence is not emitted
+-- and generation halts), so this behaves identically on the streamed and
+-- non-streamed paths. These tokens never occur in ordinary code, so real
+-- suggestions are untouched — the one exception is editing a file that literally
+-- discusses FIM tokens (this config, minuet's own source, FIM docs), where a
+-- legitimate completion of e.g. `<|fim_suffix|>` is cut short rather than garbled.
+-- That narrow trade keeps the sentinels out of every other buffer; matching is a
+-- case-sensitive literal substring, so add a variant here if a new casing shows.
+local FIM_STOP = {
+  "<|Cursor|>",
+  "<|cursor|>",
+  "<|user_cursor_is_here|>",
+  "<CURSOR>",
+  "<cursor>",
+  "<|fim_prefix|>",
+  "<|fim_suffix|>",
+  "<|fim_middle|>",
+  "<|fim_pad|>",
+  "<|repo_name|>",
+  "<|file_sep|>",
+  "<|endoftext|>",
+}
+
 return {
   "milanglacier/minuet-ai.nvim",
   dependencies = { "nvim-lua/plenary.nvim" },
@@ -64,6 +100,10 @@ return {
             -- (Report A): minuet merges `optional` verbatim into the request
             -- body, so any Ollama-accepted param can ride along.
             top_p = 0.9,
+            -- Halt (and drop) editor/repo sentinel tokens the base model spills
+            -- into FIM output — e.g. the stray `<|Cursor|>` that was landing in
+            -- suggestions. See FIM_STOP above for the full rationale.
+            stop = FIM_STOP,
           },
         },
       },
