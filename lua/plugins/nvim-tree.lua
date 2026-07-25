@@ -147,16 +147,18 @@ return {
       "Cut",
     }
     require("nvim-tree").setup(opts)
-    -- Subscribe to nvim-tree's rename/move/delete events and forward them to
-    -- the LSP (workspace/willRenameFiles). Deferred to here — not the plugin's
-    -- own config — so it only runs once nvim-tree is loaded, keeping nvim-tree
-    -- lazy. The matching capabilities are advertised at startup in lsp.lua.
-    require("lsp-file-operations").setup()
+    local api = require("nvim-tree.api")
+    -- Forward the tree's delete/create/rename events to the LSP — manual
+    -- didChangeWatchedFiles (watching is off in lsp.lua, and gopls has no
+    -- other way to hear about them) plus willRenameFiles import rewriting for
+    -- ts_ls. Registered here so nvim-tree stays lazy; the matching
+    -- capabilities are advertised at startup in lsp.lua. See
+    -- docs/lsp-fs-sync.md for the staleness storms this prevents.
+    require("config.lsp_fs_sync").register(api.events)
     -- Pin a one-line hint to the top of the tree window. nvim-tree sets the
     -- buffer's filetype in a scratch window before moving it to the side
     -- window, so a FileType hook targets the wrong window — use TreeOpen,
     -- which fires once the real window exists.
-    local api = require("nvim-tree.api")
     api.events.subscribe(api.events.Event.TreeOpen, function()
       local win = require("nvim-tree.view").get_winnr()
       if win and vim.api.nvim_win_is_valid(win) then

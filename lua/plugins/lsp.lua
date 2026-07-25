@@ -226,12 +226,14 @@ return {
       -- additionalTextEdits for auto-imports, documentation resolve) to every
       -- server. Listed as a dependency above so blink is loaded by now.
       --
-      -- Layered on top: nvim-lsp-file-operations' capabilities, so every
-      -- server is told it supports workspace/willRenameFiles from client init.
-      -- This is just a static table (no nvim-tree load); the event subscription
-      -- that actually fires the requests lives in nvim-tree's config.
+      -- Layered on top: config.lsp_fs_sync's capabilities, so every server is
+      -- told from client init which workspace file operations we send
+      -- (willRename/didRename/didCreate — ts_ls only registers its rename
+      -- support when the client advertises it). This is just a static table
+      -- (no nvim-tree load); the event subscription that actually fires the
+      -- requests lives in nvim-tree's config.
       local blink = require("blink.cmp")
-      local file_ops_caps = require("lsp-file-operations").default_capabilities()
+      local file_ops_caps = require("config.lsp_fs_sync").capabilities()
       -- Disable workspace/didChangeWatchedFiles for every server. With no
       -- watchman/fswatch on this box, Neovim services those registrations with a
       -- recursive libuv FSEvents walk rooted at each server's workspace — in a

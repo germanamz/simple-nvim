@@ -1,6 +1,6 @@
 local nvim_env = require("tests.helpers.nvim_env")
 
-describe("smoke: lsp file operations", function()
+describe("smoke: lsp fs sync", function()
   local root
 
   before_each(function()
@@ -11,13 +11,49 @@ describe("smoke: lsp file operations", function()
     nvim_env.teardown(root)
   end)
 
-  it("nvim-lsp-file-operations spec is registered", function()
-    local plugins = require("lazy.core.config").plugins
-    local spec = plugins["nvim-lsp-file-operations"]
-    assert.is_not_nil(spec, "nvim-lsp-file-operations spec not registered")
-    assert.is_false(
-      require("lazy.core.plugin").has_errors(spec),
-      "nvim-lsp-file-operations reported load errors"
+  it("the nvim-lsp-file-operations plugin is gone", function()
+    -- Replaced by config.lsp_fs_sync (docs/lsp-fs-sync.md): the plugin used
+    -- deprecated APIs, blocked the UI up to 10s per client, and never covered
+    -- gopls. Guard against it sneaking back in.
+    assert.is_nil(require("lazy.core.config").plugins["nvim-lsp-file-operations"])
+  end)
+
+  it("loading nvim-tree wires the tree's fs events through to the LSP", function()
+    assert.is_nil(package.loaded["config.lsp_fs_sync"])
+    require("lazy").load({ plugins = { "nvim-tree.lua" } })
+
+    -- Prove the subscription end-to-end, not just that the module was
+    -- required: fire the real nvim-tree event dispatcher and assert a fake
+    -- client hears the didChangeWatchedFiles delete.
+    local recorded = {}
+    local fake = {
+      id = 1,
+      root_dir = "/",
+      server_capabilities = {},
+      notify = function(_, method, params)
+        table.insert(recorded, { method = method, params = params })
+        return true
+      end,
+    }
+    local orig_get_clients = vim.lsp.get_clients
+    vim.lsp.get_clients = function(filter)
+      if filter and filter.bufnr then
+        return {}
+      end
+      return { fake }
+    end
+
+    local ok, err = pcall(function()
+      require("nvim-tree.events")._dispatch_file_removed("/ws/server/gone.go")
+    end)
+
+    vim.lsp.get_clients = orig_get_clients
+    assert.is_true(ok, "event dispatch errored: " .. tostring(err))
+    assert.are.equal(1, #recorded)
+    assert.are.equal("workspace/didChangeWatchedFiles", recorded[1].method)
+    assert.are.same(
+      { changes = { { uri = vim.uri_from_fname("/ws/server/gone.go"), type = 3 } } },
+      recorded[1].params
     )
   end)
 
@@ -29,24 +65,22 @@ describe("smoke: lsp file operations", function()
     end)
 
     -- willRename is what makes ts_ls react to an nvim-tree rename (rewrite
-    -- imports, drop the stale path) instead of leaving the project in the
-    -- "Already included file name ... only in casing" state. Advertised from a
-    -- static table when the stack loads, so it doesn't require nvim-tree.
-    local function will_rename(server)
-      local c = vim.lsp.config[server]
-      return c
-        and c.capabilities
-        and c.capabilities.workspace
-        and c.capabilities.workspace.fileOperations
-        and c.capabilities.workspace.fileOperations.willRename
-    end
-
+    -- imports, drop the stale path). The module only advertises operations it
+    -- actually sends — the old plugin's blanket willCreate/willDelete must be
+    -- gone, so servers don't wait on requests that will never come.
     for _, server in ipairs({ "lua_ls", "ts_ls", "pyright", "gopls" }) do
-      it("advertises file-operation capabilities to " .. server, function()
-        assert.is_true(
-          will_rename(server) == true,
-          "file-operations capabilities not merged into " .. server
-        )
+      it("advertises exactly the supported file operations to " .. server, function()
+        local caps = vim.lsp.config[server]
+          and vim.lsp.config[server].capabilities
+          and vim.lsp.config[server].capabilities.workspace
+          and vim.lsp.config[server].capabilities.workspace.fileOperations
+        assert.is_not_nil(caps, "file-operations capabilities not merged into " .. server)
+        assert.is_true(caps.willRename)
+        assert.is_true(caps.didRename)
+        assert.is_true(caps.didCreate)
+        assert.is_nil(caps.willCreate)
+        assert.is_nil(caps.willDelete)
+        assert.is_nil(caps.didDelete)
       end)
     end
   end)
