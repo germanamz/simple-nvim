@@ -121,6 +121,7 @@ return {
     },
     opts = function()
       local actions = require("telescope.actions")
+      local preview_title = require("config.telescope_preview_title")
       -- Opening a file from a picker dismisses nvim-tree first, so the file
       -- lands in a full window instead of the 35-col sidebar (and the tree acts
       -- as an on-demand browser, matching quit_on_open for files opened from the
@@ -155,8 +156,17 @@ return {
           -- Filename first (dir dimmed after it) so files are easy to scan in
           -- deep trees; truncate would bury the name behind a long path prefix.
           path_display = { "filename_first" },
-          -- Show the previewed entry's filename in the preview window title.
+          -- Show the previewed entry's path in the preview window title, and
+          -- trim it from the START so the filename always survives: plenary's
+          -- border truncates an over-long title from the right, which would
+          -- leave only parents (".../handlers/create-i…"). The wrapper applies
+          -- to the three previewers whose dynamic title IS a path — file
+          -- (find_files, git_files), grep (live_grep, grep_string) and qflist
+          -- (diagnostics, LSP lists); every other title is left alone.
           dynamic_preview_title = true,
+          file_previewer = preview_title.wrapper("vim_buffer_cat"),
+          grep_previewer = preview_title.wrapper("vim_buffer_vimgrep"),
+          qflist_previewer = preview_title.wrapper("vim_buffer_qflist"),
           sorting_strategy = "ascending",
           layout_config = {
             horizontal = { prompt_position = "top", preview_width = 0.55 },
