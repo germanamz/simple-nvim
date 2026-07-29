@@ -31,7 +31,7 @@ Leader = `<Space>` · Local leader = `\`
 17. [Git: review base](#17-git-review-base)
 18. [Markdown / MDX](#18-markdown--mdx)
 19. [Formatting](#19-formatting)
-20. [Treesitter context](#20-treesitter-context)
+20. [Sticky context](#20-sticky-context)
 21. [Command-line tricks](#21-command-line-tricks)
 22. [Sessions](#22-sessions)
 23. [Known conflicts](#23-known-conflicts)
@@ -672,13 +672,17 @@ and `gq{motion}` remain the on-demand paths.
 
 ---
 
-## 20. Treesitter context
+## 20. Sticky context
 
-Sticky scope headers at the top of the window (function / class / heading).
+Headers pinned to the top of a window so you keep the enclosing context while
+scrolling: the function / class / heading in a code buffer, and the ancestor
+folders in nvim-tree. Both pin only what has scrolled out of view, so the header
+disappears when you can already see where you are.
 
 | Keys         | Action                       |
 | ------------ | ---------------------------- |
 | `<Space>ut`  | toggle treesitter context    |
+| `<Space>uT`  | toggle tree sticky folders   |
 
 ---
 

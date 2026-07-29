@@ -12,6 +12,16 @@ return {
       "<cmd>NvimTreeFindFileToggle<cr>",
       desc = "File tree (reveal current file)",
     },
+    -- Declared here rather than in config() so the key exists (and shows up in
+    -- which-key's "toggle" group) before the tree has ever been opened, matching
+    -- <leader>ut for treesitter-context.
+    {
+      "<leader>uT",
+      function()
+        require("config.nvim_tree_context").toggle()
+      end,
+      desc = "Toggle tree sticky folders",
+    },
   },
   -- Stay lazy for `nvim file.txt`, but when nvim is launched on a directory
   -- force the plugin to load during startup. setup() must run before the
@@ -155,6 +165,12 @@ return {
     -- capabilities are advertised at startup in lsp.lua. See
     -- docs/lsp-fs-sync.md for the staleness storms this prevents.
     require("config.lsp_fs_sync").register(api.events)
+    -- Sticky ancestor folders: once a folder containing the cursor row scrolls
+    -- off the top, it stays pinned in a float over the tree, the way
+    -- treesitter-context pins enclosing functions. Registered here (not in
+    -- opts) so the module can take api.events without requiring the plugin at
+    -- startup. Toggle with <leader>uT, declared in `keys` above.
+    require("config.nvim_tree_context").register(api.events)
     -- Pin a one-line hint to the top of the tree window. nvim-tree sets the
     -- buffer's filetype in a scratch window before moving it to the side
     -- window, so a FileType hook targets the wrong window — use TreeOpen,
