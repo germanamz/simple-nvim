@@ -17,6 +17,9 @@ beyond the code.
   mini.ai textobject that selects a whole dotted identifier chain.
 - **[leak-diagnostics.md](leak-diagnostics.md).** The capture playbook for the
   2026-07 CPU and memory runaway, and the defects it turned up.
+- **[lsp-typescript-version.md](lsp-typescript-version.md).** Why ts_ls ran
+  mason's bundled TypeScript instead of the project's in pnpm monorepos, and the
+  buffer-relative resolution that fixes it.
 
 ## The git-at-scale throughline
 

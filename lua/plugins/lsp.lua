@@ -7,7 +7,16 @@
 local ft_util = require("util.ft")
 
 local servers = {
-  ts_ls = { filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" } },
+  -- disableAutomaticTypingAcquisition: tsserver otherwise forks a fourth node
+  -- process (typingsInstaller.js) per client to fetch @types for untyped JS
+  -- dependencies. Measured ~67 MiB of a ~720 MiB client, and every project here
+  -- declares its @types explicitly, so ATA only buys completions for untyped JS
+  -- deps — which is what it forfeits. Matters most because clients are never
+  -- reaped (docs/lsp-typescript-version.md): the cost is per live root.
+  ts_ls = {
+    filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" },
+    init_options = { hostInfo = "neovim", disableAutomaticTypingAcquisition = true },
+  },
   pyright = { filetypes = { "python" } },
   gopls = { filetypes = { "go", "gomod" } },
   rust_analyzer = { filetypes = { "rust" } },
@@ -150,6 +159,13 @@ vim.api.nvim_create_autocmd("LspAttach", {
       map("gd", function()
         ts_goto_source_definition(client, args.buf)
       end, "Goto source definition (ts_ls)")
+      -- tsserver hosts ONE TypeScript per process and Neovim starts one client
+      -- per root_dir, so in a monorepo whose packages pin different versions this
+      -- buffer may be checked by a compiler its own package never chose. That
+      -- produced both a false error and a swallowed real one in testing, so say
+      -- so once rather than letting the diagnostics quietly disagree with the
+      -- package's own build. See lua/config/lsp_tsdk.lua.
+      require("config.lsp_tsdk").warn_mismatch(args.buf, client)
     elseif ft_util.is_markdown(ft) then
       -- Smart gd: follow a wikilink if the cursor is on one, else LSP definition.
       -- Re-asserted here so marksman's attach doesn't overwrite the FileType map.
@@ -234,6 +250,30 @@ return {
       -- requests lives in nvim-tree's config.
       local blink = require("blink.cmp")
       local file_ops_caps = require("config.lsp_fs_sync").capabilities()
+
+      -- Point ts_ls at the *project's* TypeScript. Left alone it walks upward
+      -- from root_dir looking for node_modules/typescript — but lspconfig roots
+      -- it at the nearest lockfile (the pnpm workspace root) while pnpm installs
+      -- typescript in the leaf package below that root, so the search finds
+      -- nothing and ts_ls falls back to mason's bundled major version. See
+      -- lua/config/lsp_tsdk.lua. The resolver is wrapped, not replaced, so
+      -- lspconfig keeps owning root detection (including its deno exclusion);
+      -- we only observe the (bufnr, dir) pair it settles on.
+      --
+      -- config.lsp_root sits INSIDE the tsdk wrapper on purpose: it clamps the
+      -- root back into the repo holding the buffer (a stray lockfile above a
+      -- superproject otherwise roots one client over every lockfile-less
+      -- submodule), and tsdk must memoize against the CLAMPED dir because
+      -- before_init looks the memo up by config.root_dir. Clamping outside the
+      -- wrapper measured worse than not clamping at all.
+      local tsdk = require("config.lsp_tsdk")
+      local lsp_root = require("config.lsp_root")
+      local base_root_dir = vim.lsp.config.ts_ls and vim.lsp.config.ts_ls.root_dir
+      if type(base_root_dir) == "function" then
+        servers.ts_ls.root_dir = tsdk.wrap_root_dir(lsp_root.bound(base_root_dir))
+        servers.ts_ls.before_init = tsdk.before_init
+      end
+
       -- Disable workspace/didChangeWatchedFiles for every server. With no
       -- watchman/fswatch on this box, Neovim services those registrations with a
       -- recursive libuv FSEvents walk rooted at each server's workspace — in a
