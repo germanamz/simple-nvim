@@ -173,6 +173,29 @@ vim.keymap.set(
   { desc = "Delete all saved buffers" }
 )
 
+-- Stop language servers left serving no buffer. Neovim never reaps them, so a
+-- session that visits several repos accumulates one client (and its node
+-- processes, ~0.7 GiB each for ts_ls) per root. Manual on purpose — see
+-- lua/config/lsp_reap.lua for why an automatic reaper is not safe here.
+vim.keymap.set("n", "<leader>lk", function()
+  require("config.lsp_reap").sweep_and_notify()
+end, { desc = "Stop idle LSP servers" })
+
+vim.api.nvim_create_user_command("LspReapIdle", function()
+  require("config.lsp_reap").sweep_and_notify()
+end, { desc = "Stop LSP clients with no attached buffers" })
+
+-- Picker over the active clients: <C-k> stops the one under the cursor, <CR>
+-- restarts it. The surgical counterpart to <leader>lk's all-at-once sweep, and
+-- the only way to restart a client rooted somewhere other than this buffer.
+vim.keymap.set("n", "<leader>ll", function()
+  require("config.lsp_picker").open()
+end, { desc = "List LSP servers" })
+
+vim.api.nvim_create_user_command("LspList", function()
+  require("config.lsp_picker").open()
+end, { desc = "Pick an LSP client to stop or restart" })
+
 -- Quit all windows, discarding unsaved changes
 vim.keymap.set("n", "<leader>qa", "<cmd>qa!<cr>", { desc = "Quit all (force)" })
 

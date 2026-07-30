@@ -509,9 +509,30 @@ Buffer-local: these only exist in buffers with an attached LSP client.
 | `]d` / `[d`  | next / previous **diagnostic** (Nvim 0.11 default)      |
 | `<C-w>d`     | show diagnostic float (Nvim 0.11 default)               |
 | `<Space>uh`  | Toggle inlay hints (off; only when server supports them)|
+| `<Space>lr`  | restart the LSP client(s) on this buffer (also re-resolves ts_ls's TypeScript from this package) |
+
+Global (not buffer-local):
+
+| Keys         | Action                                                  |
+| ------------ | ------------------------------------------------------- |
+| `<Space>ll`  | picker over active LSP clients (`:LspList`)              |
+| `<Space>lk`  | stop LSP servers left serving no buffer (`:LspReapIdle`) |
+
+In the `<Space>ll` picker: `j`/`k` move, `<CR>` restarts the client under the
+cursor (re-attaching its buffers), `<C-k>` stops it after a confirm, `<esc>`
+closes. `<C-k>` rather than bare `k` because the picker opens in normal mode,
+where `k` moves the selection. It's the surgical counterpart to `<Space>lk`, and
+the only way to restart a client rooted somewhere other than the current buffer
+(`<Space>lr` only reaches this buffer's clients).
 
 Statusline shows `⇄N` when the cursor is on a symbol with `N` references in
 the current buffer.
+
+Neovim never reaps LSP clients: close every buffer of a repo and its server keeps
+running (~0.7 GiB and 3 node processes for a warm ts_ls). `<Space>lk` reclaims
+them on demand, and `<Space>bad` sweeps automatically since it closes everything
+anyway. The sweep is deliberately manual — see
+[lsp-typescript-version.md](lsp-typescript-version.md).
 
 Inlay hints are off by default; `<Space>uh` toggles them per buffer and is only
 mapped when the attached server advertises `textDocument/inlayHint`.
@@ -528,6 +549,8 @@ html, cssls, marksman, mdx_analyzer. Each attaches only on its `filetypes`.
 | `:LspInfo`         | which clients are attached & their state |
 | `:LspLog`          | tail the LSP log                       |
 | `:LspRestart`      | restart attached clients               |
+| `:LspReapIdle`     | stop clients with no attached buffers  |
+| `:LspList`         | pick a client to stop or restart       |
 | `:Mason`           | manage server binaries                 |
 | `:checkhealth lsp` | diagnose attach problems               |
 

@@ -107,6 +107,12 @@ function M.delete_all_saved()
   if #vim.tbl_filter(M._is_real, vim.api.nvim_list_bufs()) == 0 then
     show_tree_only()
   end
+
+  -- Closing every buffer leaves every LSP client bufferless, and Neovim never
+  -- reaps them (measured: 3 clients / 12 node processes still alive after this
+  -- map). This is the config's explicit "clean up my session" gesture, so
+  -- reclaim them here rather than leaving the memory held until quit.
+  require("config.lsp_reap").sweep()
 end
 
 return M

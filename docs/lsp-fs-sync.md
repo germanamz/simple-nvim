@@ -118,6 +118,22 @@ need `<leader>lr` — that's the documented watcher-off tradeoff; nvim-tree
 copy-paste emits no events to hook; importer buffers edited by willRename
 stay unsaved-dirty (VS Code parity).
 
+### The rewrite depends on a client being alive, not on it having buffers
+
+`on_will_rename` asks every client whose `root_dir` covers the path and never
+requires that client to have attached buffers — so a client whose buffers are all
+closed still rewrites importers repo-wide, and no covering client means the rename
+silently leaves every importer pointing at the old path. Measured directly: the
+importer was rewritten with a bufferless-but-alive client, and untouched once that
+client was stopped, with `:messages` empty.
+
+That is why `on_will_rename` now `notify_once`es when a `ts/tsx/js/jsx` rename
+found no server advertising `willRename`, and why the idle-client sweep
+(`config.lsp_reap`) is manual rather than an automatic reaper. Residue: the guard
+detects "nobody to ask", not "somebody answered nothing" — with ts_ls split per
+package, a surviving workspace-rooted client can cover the path and return no
+edits. See docs/lsp-typescript-version.md.
+
 ## Implemented (lua/config/lsp_fs_sync.lua) + review hardening
 
 Shipped as designed, plus three fixes out of an adversarial review:

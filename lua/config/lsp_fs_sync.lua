@@ -149,12 +149,14 @@ function M.on_will_rename(old, new)
   -- destination's server too (a willRename server rooted there wants to
   -- rewrite its importers).
   local seen = {}
+  local asked = false
   for _, path in ipairs({ old, new }) do
     for _, client in ipairs(watched_clients(path)) do
       if not seen[client.id] then
         seen[client.id] = true
         local op = file_op(client, "willRename")
         if op and filters_match(op.filters, old, is_dir) then
+          asked = true
           local ok, resp = pcall(
             client.request_sync,
             client,
@@ -168,6 +170,19 @@ function M.on_will_rename(old, new)
         end
       end
     end
+  end
+
+  -- Renaming a JS/TS file with no server to ask means importers keep pointing at
+  -- the old path, silently. The rewrite already depends on a client happening to
+  -- be alive and covering the path — it does not need attached buffers, so a
+  -- server for a repo whose buffers are all closed still does the work, and no
+  -- server at all does none of it. Say so rather than letting the rename look
+  -- complete. See docs/lsp-fs-sync.md.
+  if not asked and not is_dir and vim.fn.fnamemodify(old, ":e"):match("^[mc]?[jt]sx?$") then
+    vim.notify_once(
+      "renamed without an LSP server to rewrite imports; importers may still point at the old path (<leader>lr in the project, then redo the rename)",
+      vim.log.levels.WARN
+    )
   end
 
   -- Detach clients from buffers at/under the old path while their names still
