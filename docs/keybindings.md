@@ -45,6 +45,7 @@ Leader = `<Space>` · Local leader = `\`
 | `<Space><Space>`  | Files picker (changed-first ordering)                 |
 | `<Space>ff`       | Find files                                            |
 | `<Space>fg`       | Live grep (from project/git root)                     |
+| `<Space>fG`       | Live grep in one folder (prompts, pre-filled)         |
 | `<Space>fb`       | Buffer list                                           |
 | `<Space>f/`       | Fuzzy find inside current buffer                      |
 | `<Space>?`        | Telescope keymaps (searchable list of *everything*)   |
@@ -287,6 +288,7 @@ uppercase = case-sensitive. `incsearch` + `hlsearch` are on.
 | `<Esc>`          | clear search highlight + pattern (normal mode) |
 | `<Space>fs`      | Telescope grep-string of word under cursor   |
 | `<Space>fg`      | Telescope live grep across project           |
+| `<Space>fG`      | Telescope live grep in one folder            |
 | `<Space>f/`      | Fuzzy find within current buffer             |
 
 ### Replace
@@ -463,6 +465,7 @@ All under `<Space>f` (group: "find").
 | `<Space>ff`    | Find files (respects `.gitignore`)              |
 | `<Space>fi`    | Find files *including* gitignored / hidden      |
 | `<Space>fg`    | Live grep (from project/git root)               |
+| `<Space>fG`    | Live grep in one folder (see below)             |
 | `<Space>fs`    | Grep word under cursor (from project/git root)  |
 | `<Space>fb`    | Buffers                                         |
 | `<Space>fr`    | Recent files (`oldfiles`)                       |
@@ -474,6 +477,22 @@ All under `<Space>f` (group: "find").
 | `<Space>?`     | Keymaps                                         |
 | `<Space>fc`    | Commands                                        |
 | `<Space>f/`    | Fuzzy find inside current buffer                |
+
+### Grep in one folder (`<Space>fG`)
+
+`<Space>fg` always searches the whole project. `<Space>fG` is the same picker
+narrowed to one directory: it asks for the folder first, pre-filled with
+
+- the node under the cursor when pressed **in nvim-tree** (a file node seeds its
+  parent folder), or
+- the current buffer's own folder anywhere else (the cwd for an unnamed buffer).
+
+So the common case is one `<CR>`. The path is editable: backspace a component to
+widen, `<Tab>` completes directories, or type somewhere else entirely (`~` and
+`$VAR` expand, relative paths resolve against the cwd). The picker title carries
+the scope — `Live Grep (lua/util)` — so a scoped search never looks like a
+project-wide one that found nothing. Hidden files are searched and `.git` pruned,
+exactly as in `<Space>fg`.
 
 ### Inside the picker (insert mode)
 

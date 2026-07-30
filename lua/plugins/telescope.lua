@@ -1,8 +1,9 @@
 -- Grep pickers search from the repo toplevel (cwd when outside a repo) so
 -- results always cover the whole project, even if the cwd has drifted from
--- where nvim was launched.
+-- where nvim was launched. config.telescope_grep owns that scope (and the
+-- folder-scoped variant behind <leader>fG).
 local function grep_root()
-  return require("util.git").root() or vim.fn.getcwd()
+  return require("config.telescope_grep").root()
 end
 
 return {
@@ -36,6 +37,19 @@ return {
           require("telescope.builtin").live_grep({ cwd = grep_root() })
         end,
         desc = "Live grep (project root)",
+      },
+      {
+        "<leader>fG",
+        function()
+          -- Same picker as <leader>fg, narrowed to one directory: prompts for a
+          -- folder with the nvim-tree node under the cursor (or the current
+          -- buffer's own folder) pre-filled. One global mapping covers the tree
+          -- too — nvim-tree maps no leader keys buffer-locally, so this is not
+          -- shadowed there, and config.telescope_grep.seed detects the tree
+          -- itself rather than needing a second binding in on_attach.
+          require("config.telescope_grep").prompt()
+        end,
+        desc = "Live grep (pick folder)",
       },
       {
         "<leader>fb",

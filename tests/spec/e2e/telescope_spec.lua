@@ -166,6 +166,78 @@ describe("e2e: telescope", function()
     end)
   end)
 
+  describe("<leader>fG (live_grep in one folder)", function()
+    -- The whole point of the folder-scoped variant is that ripgrep runs BELOW
+    -- the answered directory, so this drives the real picker end to end: two
+    -- files hold the same needle, one inside the scope and one outside, and only
+    -- the inside one may come back. Asserting the title alone would pass even if
+    -- `cwd` were being dropped on the floor.
+    it("scopes results to the answered folder and names it in the title", function()
+      local repo = git_fixture.repo({
+        commits = {
+          {
+            files = {
+              ["pkg/inside.lua"] = "-- needle lives here\n",
+              ["other/outside.lua"] = "-- needle lives here too\n",
+            },
+            message = "init",
+          },
+        },
+      })
+      local canonical = vim.uv.fs_realpath(repo) or repo
+      vim.fn.chdir(canonical)
+
+      -- Headless can't type into the input, so answer it directly. Restored
+      -- before any assertion can fail, so a broken spec never leaves the shared
+      -- session with a stubbed vim.ui.input.
+      local real_input = vim.ui.input
+      vim.ui.input = function(_, on_confirm)
+        on_confirm(canonical .. "/pkg")
+      end
+      local ok, err = pcall(function()
+        press("<Space>fG")
+        wait.wait_for_buffer({ filetype = "TelescopePrompt", timeout = 3000 })
+      end)
+      vim.ui.input = real_input
+      assert(ok, tostring(err))
+
+      local prompt_buf = assert(current_prompt_buf(), "no telescope prompt buffer")
+      local picker = require("telescope.actions.state").get_current_picker(prompt_buf)
+      assert.is_not_nil(picker, "no current picker")
+      assert.are.equal("Live Grep (pkg)", picker.prompt_title)
+
+      -- set_prompt, not feedkeys: a headless prompt buffer can't be typed into.
+      picker:set_prompt("needle")
+
+      local function non_empty_lines()
+        local out = {}
+        for _, line in ipairs(vim.api.nvim_buf_get_lines(picker.results_bufnr, 0, -1, false)) do
+          if line ~= "" then
+            table.insert(out, line)
+          end
+        end
+        return out
+      end
+
+      wait.wait_for(function()
+        return #non_empty_lines() >= 1
+      end, 5000, "grep results did not populate")
+
+      local joined = table.concat(non_empty_lines(), "\n")
+      assert.is_truthy(
+        joined:find("inside.lua", 1, true),
+        "expected the in-scope match, got: " .. joined
+      )
+      assert.is_nil(
+        joined:find("outside.lua", 1, true),
+        "match outside the scoped folder leaked in: " .. joined
+      )
+
+      close_picker()
+      assert.is_false(is_telescope_open())
+    end)
+  end)
+
   describe("<leader><space> (smart_files)", function()
     it("prefixes each file with its git-status code (worktree + vs base)", function()
       local repo = git_fixture.repo({
