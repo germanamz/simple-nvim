@@ -145,7 +145,16 @@ describe("e2e: format on save (conform.nvim)", function()
   local function write_buffer(path, contents)
     local bufnr = vim.api.nvim_create_buf(true, false)
     vim.api.nvim_buf_set_name(bufnr, path)
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(contents, "\n", { plain = true }))
+    local lines = vim.split(contents, "\n", { plain = true })
+    -- A trailing "\n" in `contents` makes vim.split emit a final empty
+    -- element. That is not how Vim represents a file's last line — a single
+    -- trailing newline is the buffer's 'eol' flag, not an extra blank line —
+    -- so left in place, :write below would append a second newline and the
+    -- byte-identity assertion in the first case below would always fail.
+    if lines[#lines] == "" then
+      table.remove(lines, #lines)
+    end
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
     vim.api.nvim_buf_call(bufnr, function()
       vim.bo.filetype = "typescript"
       vim.cmd("write")
@@ -160,6 +169,9 @@ describe("e2e: format on save (conform.nvim)", function()
     end
     require("config.js_toolchain")._clear()
 
+    -- This is the core regression case: it fails if the JS/TS by_ft entries
+    -- ever regress to an unconditional prettier chain (verified — see the
+    -- task report's discrimination check).
     local source = "import { a } from './a';\n"
     local path = root .. "/unconfigured.ts"
     local bufnr = write_buffer(path, source)
@@ -169,7 +181,7 @@ describe("e2e: format on save (conform.nvim)", function()
     end, 5000, "file was never written")
 
     local disk = assert(io.open(path, "r")):read("*a")
-    assert.is_truthy(disk:find("from './a';", 1, true), "single quotes were rewritten: " .. disk)
+    assert.are.equal(source, disk, "buffer was not byte-identical after save")
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
 
@@ -187,15 +199,30 @@ describe("e2e: format on save (conform.nvim)", function()
     local path = root .. "/configured.ts"
     local bufnr = write_buffer(path, 'import { a }   from "./a";\n')
 
-    wait.wait_for(function()
-      local disk = io.open(path, "r")
-      if not disk then
-        return false
-      end
-      local body = disk:read("*a")
-      disk:close()
-      return body:find("from './a';", 1, true) ~= nil
-    end, 5000, "prettier did not apply the project's singleQuote setting")
+    -- This case guards the opposite direction from the one above: detection
+    -- must not over-correct into leaving a genuinely-configured project
+    -- unformatted, or resolving the wrong slot. It cannot by itself prove
+    -- the fix from Task 4 — it also passes under the old unconditional
+    -- prettier chain — its value is as a discriminator against the
+    -- empty-chain / wrong-slot failure mode.
+    --
+    -- prettierd's first invocation per project cold-starts its daemon and
+    -- can exceed conform's 1000ms format_on_save budget (the same eslint_d
+    -- hazard from Task 6), so the :write inside write_buffer above may have
+    -- landed unformatted. Force an on-demand format with a generous timeout
+    -- (mirrors <leader>F's budget) instead of depending on that first save
+    -- having completed formatting in time, then flush the buffer back to
+    -- disk.
+    require("conform").format({ async = false, timeout_ms = 10000, bufnr = bufnr })
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("write")
+    end)
+
+    local disk = assert(io.open(path, "r")):read("*a")
+    assert.is_truthy(
+      disk:find("from './a';", 1, true),
+      "prettier did not apply the project's singleQuote setting: " .. disk
+    )
 
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)

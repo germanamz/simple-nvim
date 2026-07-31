@@ -73,12 +73,14 @@ language server's own root resolution accepts, because the server — not
 conform — decides whether it starts. They diverge in both directions: conform's
 biome formatter accepts `.biome.json`, which `nvim-lspconfig`'s biome resolver
 does not, so a repo using only `.biome.json` gets biome formatting but eslint
-diagnostics; and the oxlint linter row accepts far more than `.oxlintrc.json`
-(matching `nvim-lspconfig`'s own broader check), because a set narrower than
-the server's own rules would suppress `eslint_d` while no server actually
-starts — the exact double-gap this design exists to avoid. A marker set
-narrower than the tool's own rules means declining to run a tool the project
-considers configured; a set wider than the server's own rules means silencing
+diagnostics — and only if that repo also configures eslint; a repo with
+neither resolves the linter slot to `nil` and nothing attaches. The oxlint
+linter row, the other direction, accepts far more than `.oxlintrc.json`
+(matching `nvim-lspconfig`'s own broader check), because a set wider than the
+server's own rules would suppress `eslint_d` while no server actually starts —
+the exact double-gap this design exists to avoid. A marker set narrower than
+the tool's own rules means declining to run a tool the project considers
+configured; a set wider than the server's own rules means silencing
 `eslint_d` on the assumption a server will cover the file when it never
 attaches.
 
@@ -94,12 +96,14 @@ what those keys genuinely are — top-level configuration conventions — and
 it's how conform's own `prettierd.lua` reads `package.json`.
 
 The linter's biome and oxlint rows instead **scan the raw text line by line**
-for a Lua pattern, because that is literally what `nvim-lspconfig` does:
-`lua/lspconfig/util.lua:84-93` iterates `file:lines()` and calls
-`line:find(pattern)` on every line, unparsed. That's why the biome probe
-looks for the bare string `"biomejs"` — it matches the **devDependencies**
-line `"@biomejs/biome": "^2.5.5",`, not a top-level key, because a real
-project's `package.json` essentially never has a top-level `"biomejs"` key.
+for a Lua pattern, because that is literally what `nvim-lspconfig` does: its
+`root_markers_with_field` function (`lua/lspconfig/util.lua`, currently lines
+61-98 — named here too, since exact line numbers drift with plugin updates)
+iterates `file:lines()` and calls `line:find(pattern)` on every line,
+unparsed. That's why the biome probe looks for the bare string `"biomejs"` —
+it matches the **devDependencies** line `"@biomejs/biome": "^2.5.5",`, not a
+top-level key, because a real project's `package.json` essentially never has
+a top-level `"biomejs"` key.
 
 If the linter rows used key lookup instead, a project that merely depends on
 `@biomejs/biome` without a `biome.json` would resolve `linter = "eslint"`,
@@ -139,15 +143,17 @@ keep walking into a superproject that knows nothing about their toolchain.
 ## When nothing is detected
 
 An unresolved formatter slot returns an **empty** conform chain, not a
-fallback to some default tool. Paired with that, the buffer's `lsp_format`
-option is forced to `"never"` for that save, specifically per-filetype rather
+fallback to some default tool. The buffer's `lsp_format` option is forced to
+`"never"` on **every** JS/TS chain this dispatch returns — resolved or
+empty — not just the unresolved case, and specifically per-filetype rather
 than relying on this config's global default. That's necessary because the
 global default (`lsp_format = "fallback"`, set once in `lua/plugins/conform.lua`)
 is itself load-bearing elsewhere — it's what lets Lua fall through to `lua_ls`
 when `stylua` isn't installed. Without the per-filetype override, an
-unconfigured JS/TS project wouldn't stay untouched; it would silently fall
-through to `ts_ls`'s own formatter, reformatting with tsserver's defaults
-instead of prettier's — the same unwanted-default problem one layer down.
+unconfigured JS/TS project (or one whose resolved formatter binary simply
+isn't installed) wouldn't stay untouched; it would silently fall through to
+`ts_ls`'s own formatter, reformatting with tsserver's defaults instead of
+prettier's — the same unwanted-default problem one layer down.
 
 An unresolved linter slot is simpler: biome and oxlint's language servers
 never start (their wrapped `root_dir` declines to call `on_dir`), and the
@@ -251,7 +257,12 @@ The fastest check is asking detection directly:
 ```
 
 That prints the resolved `formatter`, `linter`, and the directory (`root`)
-where detection stopped — the most direct way to answer "why is this buffer
+where the **first** marker was found — not necessarily where the walk
+stopped. `resolve()` sets `root` the first time either slot gets a hit and
+never moves it after, even though the walk keeps climbing past that point for
+whichever slot is still unfilled. It matters because `js_tool_version`'s pin
+check reads `package.json` from this same `root`, not from wherever the walk
+eventually stopped. Still the most direct way to answer "why is this buffer
 being formatted/linted this way" without inferring it from side effects.
 
 Beyond that:
