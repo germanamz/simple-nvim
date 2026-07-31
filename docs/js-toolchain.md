@@ -187,17 +187,28 @@ diagnostic list, indistinguishable from a clean file.
 The one rule that shaped every decision in this design: gate a tool's
 participation on whether the **project configures it**, never on whether that
 tool would actually handle a given file. It reads like an implementation
-detail, but it was reached the hard way — biome's filetype list in
-`lua/plugins/lsp.lua` (js/jsx/ts/tsx plus json/jsonc/css/graphql) overlaps
-`jsonls`, `cssls` and the `graphql` server, which sounded like an argument for
-standing those servers down whenever biome owns a project. That was rejected
-after verifying, against real biome 2.5.5, that a `biome.json` can disable a
-language independently of whether biome is otherwise "the project's
-formatter/linter" — both `{"css":{"linter":{"enabled":false}}}` and
-`{"files":{"includes":["**","!**/*.css"]}}` make biome skip `.css` files
+detail, but it was reached the hard way. biome's own default filetype list
+covers `json`, `jsonc`, `css` and `graphql` on top of js/jsx/ts/tsx, which
+overlaps `jsonls`, `cssls` and the `graphql` server — and that sounded like an
+argument for standing those three servers down whenever biome owns a project.
+That was rejected after verifying, against real biome 2.5.5, that a
+`biome.json` can disable a language independently of whether biome is otherwise
+"the project's formatter/linter" — both `{"css":{"linter":{"enabled":false}}}`
+and `{"files":{"includes":["**","!**/*.css"]}}` make biome skip `.css` files
 entirely, with no error. Standing `cssls` down "because biome owns this
 project" would leave those files with **no linter at all** — a silent
 coverage hole, worse than the duplicate diagnostics it would have prevented.
+
+The overlap was instead removed from the other side: biome's `filetypes` in
+`lua/plugins/lsp.lua` is narrowed to js/jsx/ts/tsx, the same way the `graphql`
+server there is narrowed off tsx/jsx. That is a **static** per-server list, not
+a conditional stand-down — `jsonls` and `cssls` still attach unconditionally,
+so no file loses a linter under any project configuration. What it does cost is
+biome's own JSON/CSS rules in the editor for a biome repo; those still run in
+that repo's CI. Narrowing which filetypes a server ever claims and suppressing
+a server based on what another tool is doing look similar and are not: only the
+second can open a coverage hole, and only the second is what this section
+rejects.
 
 The general shape held up under test against every relevant tool: `prettierd`
 on a `.prettierignore`d file returns the input unchanged; `eslint_d` on a
@@ -264,7 +275,9 @@ Only the four JS/TS filetypes (`javascript`, `javascriptreact`, `typescript`,
 That means a repo that adopts biome gets its `.ts` files formatted by biome
 while its `.json` and `.css` files keep formatting with prettier — which can
 produce a diff biome's own CI rejects, since biome and prettier don't always
-agree on formatting the same JSON.
+agree on formatting the same JSON. Biome's language server is narrowed to the
+same four filetypes (see the section above), so it does not lint those files
+either; `jsonls` and `cssls` do.
 
 This is accepted, not fixed, because fixing it properly needs a per-tool
 filetype-capability table (which filetypes does *this* biome / dprint / oxfmt

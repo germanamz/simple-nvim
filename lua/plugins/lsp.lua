@@ -87,17 +87,27 @@ local servers = {
   -- (lspconfig/lsp/biome.lua, lspconfig/lsp/oxlint.lua). What they do NOT do is
   -- respect our repo boundary or our linter priority, so their root_dir is
   -- wrapped below.
+  --
+  -- biome ships a much wider default filetype list (json/jsonc/css/graphql on
+  -- top of the four below) and it is narrowed here for the same reason the
+  -- graphql row above is narrowed off tsx/jsx: those filetypes already have a
+  -- server. json/jsonc are jsonls' (:38), css is cssls' (:52), graphql is the
+  -- graphql server's (:60) — so a biome repo got two servers and duplicate
+  -- diagnostics on every file of those kinds. It bought nothing either, because
+  -- biome would only have contributed DIAGNOSTICS there: formatting for
+  -- json/jsonc/css stays on unconditional prettier (config.formatters). The
+  -- cost is real but small and bounded: in a biome repo you no longer see
+  -- biome's own JSON/CSS rules in the editor, though they still fire in that
+  -- repo's CI.
+  --
+  -- This is a STATIC per-server filetype list, NOT the conditional "stand tool
+  -- Y down because tool X owns this project" that docs/js-toolchain.md
+  -- deliberately rejects — jsonls and cssls stay attached unconditionally, so
+  -- no file anywhere loses its linter. Narrowing which filetypes a server ever
+  -- claims and suppressing a server based on what another tool is doing are
+  -- different things; only the second one can open a coverage hole.
   biome = {
-    filetypes = {
-      "javascript",
-      "javascriptreact",
-      "typescript",
-      "typescriptreact",
-      "json",
-      "jsonc",
-      "css",
-      "graphql",
-    },
+    filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
   },
   oxlint = {
     filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
