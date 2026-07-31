@@ -53,18 +53,12 @@ local function buf_dir(bufnr)
 end
 
 --- Does `dir` look like the root of a TypeScript project?
+--- Thin wrapper over util.project so js_toolchain's boundary rule and this one
+--- share a single implementation.
 ---@param dir string|nil
 ---@return boolean
 function M.is_ts_project(dir)
-  if not dir then
-    return false
-  end
-  for _, marker in ipairs({ "tsconfig.json", "jsconfig.json" }) do
-    if vim.uv.fs_stat(vim.fs.joinpath(dir, marker)) then
-      return true
-    end
-  end
-  return false
+  return require("util.project").is_root(dir, { "tsconfig.json", "jsconfig.json" })
 end
 
 --- Pull `dir` down to `boundary` when the buffer's repo sits strictly below the
