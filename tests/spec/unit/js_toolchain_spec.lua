@@ -11,6 +11,11 @@ describe("config.js_toolchain.resolve", function()
     toolchain._clear()
     root = vim.fn.tempname()
     vim.fn.mkdir(root, "p")
+    -- Seals the walk at `root` (a .git directory is an unconditional boundary,
+    -- checked after markers). Without this, "nothing configured" cases climb
+    -- past the fixture into the real filesystem, where a stray ancestor
+    -- .prettierrc or package.json would flip the result.
+    vim.fn.mkdir(root .. "/.git", "p")
   end)
 
   after_each(function()
@@ -153,10 +158,41 @@ describe("config.js_toolchain.resolve", function()
     assert.are.equal(vim.fn.resolve(root) .. "/packages/ui", resolve("packages/ui/src/a.ts").root)
   end)
 
+  -- The single-marker case above cannot distinguish `result.root = result.root
+  -- or cur` from plain last-wins assignment, or from "root is always the
+  -- formatter's directory" — the formatter marker below is nearer than the
+  -- linter marker, at a different directory, so only "first hit wins" reports
+  -- packages/ui.
+  it("reports the nearer directory as root when the formatter matches first", function()
+    write("eslint.config.mjs", "export default [];\n")
+    write("packages/ui/.prettierrc", "{}\n")
+    write("packages/ui/src/a.ts", "")
+    local r = resolve("packages/ui/src/a.ts")
+    assert.are.equal("prettier", r.formatter)
+    assert.are.equal("eslint", r.linter)
+    assert.are.equal(vim.fn.resolve(root) .. "/packages/ui", r.root)
+  end)
+
+  -- Mirror of the above with the slots swapped: the linter marker is nearer,
+  -- the formatter marker further up. Root still tracks the nearer hit, not
+  -- whichever slot happens to be the formatter.
+  it("reports the nearer directory as root when the linter matches first", function()
+    write("dprint.json", "{}\n")
+    write("packages/ui/.oxlintrc.json", "{}\n")
+    write("packages/ui/src/a.ts", "")
+    local r = resolve("packages/ui/src/a.ts")
+    assert.are.equal("dprint", r.formatter)
+    assert.are.equal("oxlint", r.linter)
+    assert.are.equal(vim.fn.resolve(root) .. "/packages/ui", r.root)
+  end)
+
   it("degrades to not-detected on a malformed package.json", function()
     write("package.json", "{ this is not json\n")
     write("src/a.ts", "")
-    local ok, r = pcall(toolchain.resolve, buf_at("src/a.ts"))
+    local r
+    local ok = pcall(function()
+      r = resolve("src/a.ts")
+    end)
     assert.is_true(ok)
     assert.is_nil(r.formatter)
   end)
@@ -186,6 +222,11 @@ describe("config.js_toolchain.marker_basenames", function()
     assert.is_true(set[".prettierrc"])
     assert.is_true(set["eslint.config.mjs"])
     assert.is_true(set[".oxlintrc.jsonc"])
+    -- The oxlint LINTER rule's vite_lint branch adds this basename outside the
+    -- rule's own `files` list; deleting that branch would pass every other
+    -- assertion here while silently breaking Task 3's BufWritePost pattern for
+    -- a Vite+ lint config.
+    assert.is_true(set["vite.config.ts"])
   end)
 
   it("has no duplicates", function()

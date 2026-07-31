@@ -27,6 +27,25 @@
 -- .oxlintrc.json (lspconfig/lsp/oxlint.lua). A set narrower than the tool's own
 -- rules means declining to run a tool the project considers configured; a set
 -- wider than the server's means suppressing eslint_d while no server starts.
+--
+-- Two package.json probe styles, not one
+-- ---------------------------------------
+-- pkg_keys does a top-level key lookup on the decoded JSON; pkg_patterns scans
+-- the raw text line by line for a Lua pattern. These are not interchangeable,
+-- and which one a rule uses is dictated by the tool it mirrors, not by taste.
+-- conform's prettierd.lua and the eslintConfig convention read package.json as
+-- structured data, so the FORMATTER prettier/eslint rows use pkg_keys. The
+-- LINTER biome/oxlint rows use pkg_patterns because that is what
+-- nvim-lspconfig/lua/lspconfig/util.lua's root_markers_with_field literally
+-- does: open the file and call line:find(pattern) on every line, unparsed. So
+-- lspconfig's "biomejs" probe matches the devDependencies line
+-- `"@biomejs/biome": "^2.5.5",` — a dependency, not a top-level key, which a
+-- real project's package.json essentially never has. A key-lookup here would
+-- resolve linter "eslint" for a biome project that only has the dependency,
+-- the biome server would still attach on its own root logic, and Task 6 would
+-- fire eslint_d on top: duplicate diagnostics from two linters, the exact
+-- failure these asymmetric tables exist to prevent. Do not collapse the two
+-- probes into one "cleaner" helper — they answer different questions.
 local M = {}
 
 local PRETTIER_FILES = {
@@ -76,12 +95,16 @@ local FORMATTER = {
   { tool = "eslint", files = ESLINT_FILES, pkg_keys = { "eslintConfig" } },
 }
 
+-- biome and oxlint use pkg_patterns (raw line scan), not pkg_keys — see "Two
+-- package.json probe styles" above. "vite%-plus" is a Lua pattern escaping the
+-- hyphen (a bare "-" after a literal char means "0 or more, lazy" in Lua
+-- patterns and would silently fail to match); keep it escaped.
 local LINTER = {
-  { tool = "biome", files = { "biome.json", "biome.jsonc" }, pkg_keys = { "biomejs" } },
+  { tool = "biome", files = { "biome.json", "biome.jsonc" }, pkg_patterns = { "biomejs" } },
   {
     tool = "oxlint",
     files = { ".oxlintrc.json", ".oxlintrc.jsonc", "oxlint.config.ts" },
-    pkg_keys = { "oxlint", "vite-plus" },
+    pkg_patterns = { "oxlint", "vite%-plus" },
     vite_lint = true,
   },
   { tool = "eslint", files = ESLINT_FILES, pkg_keys = { "eslintConfig" } },
@@ -122,22 +145,58 @@ local function read_file(path)
   return raw
 end
 
---- Does `dir`'s package.json carry any of `keys` at the top level?
+--- `dir`'s package.json, read and decoded at most once per directory per walk.
+--- `raw` is the whole-file text (nil if absent or unreadable); `data` is the
+--- decoded table (nil if raw is nil, unparsable, or not a table). Rules that
+--- gate on package.json — up to five of them per directory across both
+--- tables — share this instead of each re-opening and re-decoding the file.
 ---@param dir string
----@param keys string[]
----@return boolean
-local function pkg_has_key(dir, keys)
+---@return { raw: string|nil, data: table|nil }
+local function read_pkg(dir)
   local raw = read_file(vim.fs.joinpath(dir, "package.json"))
   if not raw then
-    return false
+    return { raw = nil, data = nil }
   end
   local ok, data = pcall(vim.json.decode, raw)
-  if not ok or type(data) ~= "table" then
+  return { raw = raw, data = (ok and type(data) == "table") and data or nil }
+end
+
+--- Does `pkg`'s decoded package.json carry any of `keys` at the top level?
+--- Structured lookup — for rules that mirror a tool reading package.json as
+--- data (conform's prettierd.lua, the eslintConfig convention).
+---@param pkg { raw: string|nil, data: table|nil }
+---@param keys string[]
+---@return boolean
+local function pkg_has_key(pkg, keys)
+  if not pkg.data then
     return false
   end
   for _, key in ipairs(keys) do
-    if data[key] ~= nil then
+    if pkg.data[key] ~= nil then
       return true
+    end
+  end
+  return false
+end
+
+--- Does any line of `pkg`'s raw package.json text match any of `patterns`?
+--- Unparsed line scan, matching nvim-lspconfig/lua/lspconfig/util.lua's
+--- root_markers_with_field in its default 'any' match mode: open the file,
+--- call line:find(pattern) on every line, stop at the first hit. Used for
+--- rules that mirror a language server deciding its own attachment this way
+--- (the LINTER biome/oxlint rows) — see "Two package.json probe styles" above.
+---@param pkg { raw: string|nil, data: table|nil }
+---@param patterns string[]
+---@return boolean
+local function pkg_matches_pattern(pkg, patterns)
+  if not pkg.raw then
+    return false
+  end
+  for line in pkg.raw:gmatch("[^\r\n]+") do
+    for _, pat in ipairs(patterns) do
+      if line:find(pat) then
+        return true
+      end
     end
   end
   return false
@@ -155,19 +214,26 @@ local function vite_lints(dir)
   return raw:find("vite-plus", 1, true) ~= nil and raw:find("lint:", 1, true) ~= nil
 end
 
---- Does `rule` match at `dir`, given that directory's entry names?
+--- Does `rule` match at `dir`, given that directory's entry names and its
+--- (already read, possibly nil) package.json context?
 ---@param dir string
 ---@param names table<string, string>
 ---@param rule table
+---@param pkg { raw: string|nil, data: table|nil }|nil
 ---@return boolean
-local function matches(dir, names, rule)
+local function matches(dir, names, rule, pkg)
   for _, file in ipairs(rule.files) do
     if names[file] then
       return true
     end
   end
-  if rule.pkg_keys and names["package.json"] and pkg_has_key(dir, rule.pkg_keys) then
-    return true
+  if pkg then
+    if rule.pkg_keys and pkg_has_key(pkg, rule.pkg_keys) then
+      return true
+    end
+    if rule.pkg_patterns and pkg_matches_pattern(pkg, rule.pkg_patterns) then
+      return true
+    end
   end
   if rule.vite_lint and names["vite.config.ts"] and vite_lints(dir) then
     return true
@@ -259,9 +325,10 @@ function M.resolve(bufnr)
   while cur do
     local names = entries(cur)
     if names then
+      local pkg = names["package.json"] and read_pkg(cur) or nil
       if not result.formatter then
         for _, rule in ipairs(FORMATTER) do
-          if matches(cur, names, rule) then
+          if matches(cur, names, rule, pkg) then
             result.formatter = rule.tool
             result.root = result.root or cur
             break
@@ -270,7 +337,7 @@ function M.resolve(bufnr)
       end
       if not result.linter then
         for _, rule in ipairs(LINTER) do
-          if matches(cur, names, rule) then
+          if matches(cur, names, rule, pkg) then
             result.linter = rule.tool
             result.root = result.root or cur
             break
