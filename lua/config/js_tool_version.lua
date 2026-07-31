@@ -16,6 +16,22 @@ local M = {}
 ---@type fun(msg: string, level: integer)|nil
 M._notify = nil
 
+-- Slot name (config.js_toolchain's `formatter` value) -> the npm package.json
+-- key to look up its pin under. prettier's and eslint's CLI name IS their
+-- package name, so those two entries look like a no-op; biome's is NOT — its
+-- npm package is scoped "@biomejs/biome" (js_toolchain.lua:41-42 hits this
+-- same scoping in its own LINTER pkg_patterns probe, for the same reason).
+-- A slot ABSENT from this map gets NO version check at all, silently: dprint
+-- and oxfmt's npm package names were not verified here and are deliberately
+-- left out rather than guessed — a wrong name would look up a key that never
+-- matches and the check would be permanently, silently dead. Add a tool here
+-- to turn its version check on.
+local PACKAGES = {
+  prettier = "prettier",
+  eslint = "eslint",
+  biome = "@biomejs/biome",
+}
+
 --- Roots already warned about, keyed by root + tool + both versions, so this
 --- fires once per session rather than once per save.
 local warned = {}
@@ -69,16 +85,113 @@ function M.pinned(root, tool)
   return nil
 end
 
---- Warn once if `running` and the project's pin disagree on the major version.
+-- Ordered fallback commands per probe tool. prettier mirrors conform's own
+-- chain (lua/config/formatters.lua's `prettier = { "prettierd", "prettier",
+-- stop_after_first = true }`): if prettierd is not installed, conform silently
+-- drops to standalone prettier, and the probe must follow that fallback or it
+-- caches a permanent `false` from prettierd's ENOENT — and never warns again
+-- for a project that IS being reformatted, just by plain prettier instead of
+-- the daemon. Tools absent here (including generic `--version` ones) get a
+-- single-candidate list built in M.running.
+local PROBE_CMDS = {
+  prettier = {
+    { "prettierd", "--debug-info", "probe.js" },
+    { "prettier", "--version" },
+  },
+  eslint = { { "eslint_d", "status" } },
+}
+
+-- Both prettierd and eslint_d are wrapper daemons: their own --version prints
+-- the DAEMON's version, not the library resolved for the project, so a naive
+-- "first semver in the output" match reports the wrong number for both.
+--   * prettierd --debug-info <file> (a file argument is required or it exits 1
+--     with nothing on stdout) prints "prettierd X.X.X" ahead of the line that
+--     actually matters, "prettier version: X.X.X" — the LIBRARY it resolved,
+--     preferring one next to the file over its own bundled copy. Plain
+--     `prettier --version` (the fallback above) has no such label, just the
+--     bare number, so only fall through to a bare match when the label is
+--     absent — never let the bare match win over the labeled one.
+--   * eslint_d --version always prints its OWN version plus a static "bundled
+--     eslint" number, neither of which is project-specific. `eslint_d status`
+--     instead resolves and reports "local eslint vX.X.X" for `cwd`, falling
+--     back to "bundled eslint vX.X.X" only when the project has none — the
+--     number a project's own `eslint` pin should be compared against.
+local EXTRACTORS = {
+  prettier = function(stdout)
+    return stdout:match("prettier version:%s*(%d+%.%d+%.%d+)") or stdout:match("(%d+%.%d+%.%d+)")
+  end,
+  eslint = function(stdout)
+    return stdout:match("(%d+%.%d+%.%d+)")
+  end,
+}
+
+--- Extracts the semver `stdout` reports for `tool`'s probe. A seam (not just
+--- an internal local) so specs can pin the discrimination directly against
+--- captured output, without spawning a real prettierd/eslint_d — the bug this
+--- exists to catch (reporting a wrapper daemon's own version instead of the
+--- library it resolved) is entirely in string parsing, not in process I/O.
+---@param tool string
+---@param stdout string
+---@return string|nil
+function M._extract(tool, stdout)
+  local fn = EXTRACTORS[tool] or function(out)
+    return out:match("(%d+%.%d+%.%d+)")
+  end
+  return fn(stdout)
+end
+
+--- The version of `tool` that will actually execute for a buffer in `root`.
+---@param tool string
+---@param root string|nil
+---@return string|nil
+function M.running(tool, root)
+  local key = (root or "?") .. "\0" .. tool
+  local hit = probed[key]
+  if hit ~= nil then
+    return hit or nil
+  end
+
+  local found = nil
+  for _, cmd in ipairs(PROBE_CMDS[tool] or { { tool, "--version" } }) do
+    local ok, out = pcall(function()
+      return vim.system(cmd, { cwd = root, text = true }):wait(2000)
+    end)
+    if ok and out.code == 0 and out.stdout then
+      found = M._extract(tool, out.stdout)
+    end
+    if found then
+      break
+    end
+  end
+
+  probed[key] = found or false
+  return found or nil
+end
+
+--- Warn once if the project pins `tool` at a MAJOR version different from the
+--- one actually resolved for `bufnr`'s project.
+---
+--- Ordered deliberately: `M.pinned` first (a cheap file read) — the common
+--- case is an unpinned project, where nothing could ever warn — and only when
+--- a pin exists does this reach `M.running`, which spawns the (memoized, but
+--- still real on a cache miss) probe subprocess. A tool with no entry in
+--- PACKAGES returns before either.
 ---@param bufnr integer
 ---@param tool string
----@param running string|nil version actually executing, nil when unknown
-function M.warn(bufnr, tool, running)
-  if not running then
+function M.warn(bufnr, tool)
+  local pkg = PACKAGES[tool]
+  if not pkg then
     return
   end
   local root = require("config.js_toolchain").resolve(bufnr).root
-  local pin = M.pinned(root, tool)
+  local pin = M.pinned(root, pkg)
+  if not pin then
+    return
+  end
+  local running = M.running(tool, root)
+  if not running then
+    return
+  end
   local want, got = M.major(pin), M.major(running)
   if not want or not got or want == got then
     return
@@ -100,61 +213,6 @@ function M.warn(bufnr, tool, running)
   )
   local notify = M._notify or vim.notify
   notify(msg, vim.log.levels.WARN)
-end
-
--- Both prettierd and eslint_d are wrapper daemons: their own --version prints
--- the DAEMON's version, not the library resolved for the project, so a naive
--- "first semver in the output" match reports the wrong number for both.
---   * prettierd --debug-info <file> (a file argument is required or it exits 1
---     with nothing on stdout) prints "prettierd X.X.X" ahead of the line that
---     actually matters, "prettier version: X.X.X" — the LIBRARY it resolved,
---     preferring one next to the file over its own bundled copy.
---   * eslint_d --version always prints its OWN version plus a static "bundled
---     eslint" number, neither of which is project-specific. `eslint_d status`
---     instead resolves and reports "local eslint vX.X.X" for `cwd`, falling
---     back to "bundled eslint vX.X.X" only when the project has none — the
---     number a project's own `eslint` pin should be compared against.
-local PROBES = {
-  prettier = {
-    cmd = { "prettierd", "--debug-info", "probe.js" },
-    extract = function(out)
-      return out:match("prettier version:%s*(%d+%.%d+%.%d+)")
-    end,
-  },
-  eslint = {
-    cmd = { "eslint_d", "status" },
-    extract = function(out)
-      return out:match("(%d+%.%d+%.%d+)")
-    end,
-  },
-}
-
---- The version of `tool` that will actually execute for a buffer in `root`.
----@param tool string
----@param root string|nil
----@return string|nil
-function M.running(tool, root)
-  local key = (root or "?") .. "\0" .. tool
-  local hit = probed[key]
-  if hit ~= nil then
-    return hit or nil
-  end
-
-  local probe = PROBES[tool]
-    or {
-      cmd = { tool, "--version" },
-      extract = function(out)
-        return out:match("(%d+%.%d+%.%d+)")
-      end,
-    }
-
-  local ok, out = pcall(function()
-    return vim.system(probe.cmd, { cwd = root, text = true }):wait(2000)
-  end)
-  local found = ok and out.code == 0 and out.stdout and probe.extract(out.stdout)
-
-  probed[key] = found or false
-  return found or nil
 end
 
 return M
