@@ -13,6 +13,11 @@ describe("config.js_toolchain.gate_root_dir", function()
     toolchain._clear()
     root = vim.fn.tempname()
     vim.fn.mkdir(root .. "/src", "p")
+    -- Seals the detection walk at `root` (a .git directory is an unconditional
+    -- boundary, checked after markers). Without it the "nothing is configured"
+    -- case climbs past the fixture into the real filesystem, where a stray
+    -- ancestor config would attach a server the test expects to stay down.
+    vim.fn.mkdir(root .. "/.git", "p")
   end)
 
   after_each(function()

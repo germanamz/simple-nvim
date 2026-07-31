@@ -116,16 +116,59 @@ describe("config.js_toolchain.resolve", function()
     assert.are.equal("oxlint", resolve("src/a.ts").linter)
   end)
 
-  it("recognises an oxlint key in package.json for the linter slot", function()
+  it("matches an oxlint mention anywhere in package.json's text", function()
     write("package.json", '{"name":"x","oxlint":{}}\n')
     write("src/a.ts", "")
     assert.are.equal("oxlint", resolve("src/a.ts").linter)
   end)
 
-  it("recognises a biomejs key in package.json for the linter slot", function()
+  it("matches a biomejs mention anywhere in package.json's text", function()
     write("package.json", '{"name":"x","biomejs":{}}\n')
     write("src/a.ts", "")
     assert.are.equal("biome", resolve("src/a.ts").linter)
+  end)
+
+  -- The two cases above are satisfied by a top-level key lookup as well as by
+  -- the raw text scan these rows actually use, so on their own they cannot tell
+  -- the two implementations apart — and a real project's package.json has
+  -- neither key. The dependency line is the shape that matters, and it is the
+  -- shape lspconfig's own root_markers_with_field matches: reverting either row
+  -- to pkg_keys fails only here.
+  it("matches @biomejs/biome in devDependencies, not just a top-level key", function()
+    write("package.json", '{"name":"x","devDependencies":{"@biomejs/biome":"^2.5.5"}}\n')
+    write("src/a.ts", "")
+    assert.are.equal("biome", resolve("src/a.ts").linter)
+  end)
+
+  it("matches oxlint in devDependencies, not just a top-level key", function()
+    write("package.json", '{"name":"x","devDependencies":{"oxlint":"^1.75.0"}}\n')
+    write("src/a.ts", "")
+    assert.are.equal("oxlint", resolve("src/a.ts").linter)
+  end)
+
+  -- The oxlint row's vite_lint branch, which mirrors lspconfig/lsp/oxlint.lua:
+  -- a vite.config.ts naming both vite-plus and a lint field IS an oxlint
+  -- config. Without an eslint config alongside, deleting the branch would show
+  -- up as nil rather than as the wrong tool; with one, it shows up as the
+  -- duplicate-diagnostics failure the branch exists to prevent.
+  it("resolves oxlint from a Vite+ config that opts into linting", function()
+    write(
+      "vite.config.ts",
+      "import { defineConfig } from 'vite-plus';\nexport default defineConfig({ lint: {} });\n"
+    )
+    write("eslint.config.mjs", "export default [];\n")
+    write("src/a.ts", "")
+    assert.are.equal("oxlint", resolve("src/a.ts").linter)
+  end)
+
+  it("ignores a vite.config.ts that is not a Vite+ lint config", function()
+    write(
+      "vite.config.ts",
+      "import { defineConfig } from 'vite';\nexport default defineConfig({});\n"
+    )
+    write("eslint.config.mjs", "export default [];\n")
+    write("src/a.ts", "")
+    assert.are.equal("eslint", resolve("src/a.ts").linter)
   end)
 
   it("stops at a .git directory even without package.json", function()
@@ -197,16 +240,55 @@ describe("config.js_toolchain.resolve", function()
     assert.is_nil(r.formatter)
   end)
 
-  it("resolves an unnamed buffer from cwd without raising", function()
+  -- "Does not raise" alone is satisfied by a resolver that returns all-nil for
+  -- everything. The contract is that a buffer with no file resolves from the
+  -- cwd — vim.fn.getcwd(), the window-local one config.dir_cache's DirChanged
+  -- invalidation actually covers.
+  it("resolves an unnamed buffer from cwd", function()
+    write(".prettierrc", "{}\n")
+    vim.fn.mkdir(root .. "/src", "p")
+    local previous = vim.fn.getcwd()
     local bufnr = vim.api.nvim_create_buf(false, true)
-    local ok = pcall(toolchain.resolve, bufnr)
+    local ok, r = pcall(function()
+      vim.cmd.lcd({ args = { root .. "/src" }, mods = { silent = true } })
+      return toolchain.resolve(bufnr)
+    end)
+    vim.cmd.lcd({ args = { previous }, mods = { silent = true } })
     vim.api.nvim_buf_delete(bufnr, { force = true })
-    assert.is_true(ok)
+    assert.is_true(ok, tostring(r))
+    assert.are.equal("prettier", r.formatter)
   end)
 
   it("treats bufnr 0 as the current buffer", function()
-    local ok = pcall(toolchain.resolve, 0)
-    assert.is_true(ok)
+    write(".prettierrc", "{}\n")
+    write("src/a.ts", "")
+    local bufnr = buf_at("src/a.ts")
+    local r
+    vim.api.nvim_buf_call(bufnr, function()
+      r = toolchain.resolve(0)
+    end)
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    assert.are.equal("prettier", r.formatter)
+  end)
+
+  -- entries() returns nil for a directory that exists and can be traversed but
+  -- cannot be listed. That used to read as "no markers here" and the walk
+  -- climbed straight past it — to /, where a stray ~/.prettierrc governs the
+  -- buffer, which is the exact failure the boundary rule exists to prevent.
+  it("stops at a directory it cannot read rather than climbing past it", function()
+    write(".prettierrc", "{}\n")
+    write("blocked/src/a.ts", "")
+    vim.fn.setfperm(root .. "/blocked", "--x--x--x")
+    -- root ignores the mode bits entirely, so there would be nothing to assert.
+    if vim.uv.fs_scandir(root .. "/blocked") then
+      vim.fn.setfperm(root .. "/blocked", "rwxr-xr-x")
+      pending("directory permissions are not enforced for this user")
+      return
+    end
+    local ok, r = pcall(resolve, "blocked/src/a.ts")
+    vim.fn.setfperm(root .. "/blocked", "rwxr-xr-x")
+    assert.is_true(ok, tostring(r))
+    assert.is_nil(r.formatter)
   end)
 
   it("memoizes per directory until cleared", function()

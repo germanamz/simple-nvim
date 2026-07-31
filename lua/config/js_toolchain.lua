@@ -119,8 +119,8 @@ local LINTER = {
 }
 
 --- Entry names in `dir` mapped to their type ("file" / "directory" / "link").
---- nil when the directory cannot be read — the caller treats that as "no markers
---- here" and keeps walking, rather than raising inside BufWritePre.
+--- nil when the directory cannot be read — never a raise, since this runs inside
+--- BufWritePre. The caller ends the walk there (see M.resolve).
 ---@param dir string
 ---@return table<string, string>|nil
 local function entries(dir)
@@ -318,7 +318,12 @@ function M.resolve(bufnr)
     bufnr = vim.api.nvim_get_current_buf()
   end
   local name = vim.api.nvim_buf_get_name(bufnr)
-  local dir = (name ~= "" and vim.fs.dirname(name)) or vim.uv.cwd()
+  -- vim.fn.getcwd() (window/tab-local), not vim.uv.cwd() (process-wide), and for
+  -- the same reason config.formatters:27 uses it: the answer is memoized below
+  -- and invalidated by config.dir_cache on DirChanged, which fires for `:lcd` —
+  -- an event that moves the window's cwd without necessarily moving a process
+  -- cwd this resolver would then never consult.
+  local dir = (name ~= "" and vim.fs.dirname(name)) or vim.fn.getcwd()
   if not dir then
     return { formatter = nil, linter = nil, root = nil }
   end
@@ -332,29 +337,36 @@ function M.resolve(bufnr)
   local cur = dir
   while cur do
     local names = entries(cur)
-    if names then
-      local pkg = names["package.json"] and read_pkg(cur) or nil
-      if not result.formatter then
-        for _, rule in ipairs(FORMATTER) do
-          if matches(cur, names, rule, pkg) then
-            result.formatter = rule.tool
-            result.root = result.root or cur
-            break
-          end
+    -- A directory we cannot list is a boundary, not a blank level. It is
+    -- traversable (we got here from a child), but its `.git` is exactly as
+    -- invisible to us as its `.prettierrc` — so climbing past it is climbing
+    -- past a repo root we simply failed to see, all the way to /, where a stray
+    -- ~/.prettierrc silently governs the buffer. Stopping loses at worst a
+    -- config we could not have read anyway.
+    if not names then
+      break
+    end
+    local pkg = names["package.json"] and read_pkg(cur) or nil
+    if not result.formatter then
+      for _, rule in ipairs(FORMATTER) do
+        if matches(cur, names, rule, pkg) then
+          result.formatter = rule.tool
+          result.root = result.root or cur
+          break
         end
       end
-      if not result.linter then
-        for _, rule in ipairs(LINTER) do
-          if matches(cur, names, rule, pkg) then
-            result.linter = rule.tool
-            result.root = result.root or cur
-            break
-          end
+    end
+    if not result.linter then
+      for _, rule in ipairs(LINTER) do
+        if matches(cur, names, rule, pkg) then
+          result.linter = rule.tool
+          result.root = result.root or cur
+          break
         end
       end
-      if (result.formatter and result.linter) or is_boundary(cur, names) then
-        break
-      end
+    end
+    if (result.formatter and result.linter) or is_boundary(cur, names) then
+      break
     end
     local parent = vim.fs.dirname(cur)
     if not parent or parent == cur then

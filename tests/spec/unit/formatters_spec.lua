@@ -74,6 +74,12 @@ describe("config.formatters", function()
       toolchain._clear()
       root = vim.fn.tempname()
       vim.fn.mkdir(root .. "/src", "p")
+      -- Seals the detection walk at `root` (a .git directory is an
+      -- unconditional boundary, checked after markers). Without it the
+      -- "nothing is configured" case climbs past the fixture into the real
+      -- filesystem, where a stray ancestor .prettierrc flips the result and
+      -- the assertion becomes host-dependent.
+      vim.fn.mkdir(root .. "/.git", "p")
     end)
 
     after_each(function()
