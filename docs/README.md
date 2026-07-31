@@ -20,6 +20,9 @@ beyond the code.
 - **[lsp-typescript-version.md](lsp-typescript-version.md).** Why ts_ls ran
   mason's bundled TypeScript instead of the project's in pnpm monorepos, and the
   buffer-relative resolution that fixes it.
+- **[js-toolchain.md](js-toolchain.md).** How a JavaScript/TypeScript project's
+  formatter and linter are detected, why prettier no longer runs in projects that
+  never configured it, and how to diagnose which tool owns a buffer.
 
 ## The git-at-scale throughline
 

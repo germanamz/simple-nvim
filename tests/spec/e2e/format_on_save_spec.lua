@@ -132,4 +132,71 @@ describe("e2e: format on save (conform.nvim)", function()
     end)
     assert(ok, err)
   end)
+
+  -- The defect this whole feature exists to fix: a project with no prettier config
+  -- must come back byte-identical, because prettier's own default is
+  -- singleQuote:false and imposing it rewrites a single-quoted codebase.
+  --
+  -- The buffer is built through the API rather than :edit on purpose. In this
+  -- harness, editing a file with an LSP filetype after the first isolated env
+  -- errors mid-BufReadPost on an lsp.log path cached from the torn-down env, and
+  -- the error leaks into the next spec. nvim_buf_set_name + :write still runs
+  -- BufWritePre and conform, and never enters the BufReadPost chain.
+  local function write_buffer(path, contents)
+    local bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(bufnr, path)
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, vim.split(contents, "\n", { plain = true }))
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.bo.filetype = "typescript"
+      vim.cmd("write")
+    end)
+    return bufnr
+  end
+
+  it("leaves a TS buffer untouched when the project configures no formatter", function()
+    if vim.fn.executable("prettierd") ~= 1 and vim.fn.executable("prettier") ~= 1 then
+      pending("no prettier on PATH")
+      return
+    end
+    require("config.js_toolchain")._clear()
+
+    local source = "import { a } from './a';\n"
+    local path = root .. "/unconfigured.ts"
+    local bufnr = write_buffer(path, source)
+
+    wait.wait_for(function()
+      return vim.fn.filereadable(path) == 1
+    end, 5000, "file was never written")
+
+    local disk = assert(io.open(path, "r")):read("*a")
+    assert.is_truthy(disk:find("from './a';", 1, true), "single quotes were rewritten: " .. disk)
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
+  it("formats a TS buffer with prettier when the project configures it", function()
+    if vim.fn.executable("prettierd") ~= 1 and vim.fn.executable("prettier") ~= 1 then
+      pending("no prettier on PATH")
+      return
+    end
+    require("config.js_toolchain")._clear()
+
+    local rc = assert(io.open(root .. "/.prettierrc", "w"))
+    rc:write('{"singleQuote": true}\n')
+    rc:close()
+
+    local path = root .. "/configured.ts"
+    local bufnr = write_buffer(path, 'import { a }   from "./a";\n')
+
+    wait.wait_for(function()
+      local disk = io.open(path, "r")
+      if not disk then
+        return false
+      end
+      local body = disk:read("*a")
+      disk:close()
+      return body:find("from './a';", 1, true) ~= nil
+    end, 5000, "prettier did not apply the project's singleQuote setting")
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
 end)
