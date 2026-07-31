@@ -108,11 +108,11 @@ local function js_formatters(bufnr)
   chain.lsp_format = "never"
 
   -- Best-effort: config.js_tool_version.warn checks the cheap package.json pin
-  -- itself before touching the version-probe subprocess (which it also caches
-  -- per root+tool), so an unpinned project — the common case — costs nothing
-  -- here beyond a file read, not one process per project per session. pcall
-  -- because this runs inside BufWritePre, where a raise poisons the autocmd
-  -- chain.
+  -- itself before touching the version probe, which is asynchronous and cached
+  -- per root+tool — so an unpinned project (the common case) costs one file
+  -- read here, a pinned one costs one spawn per session, and neither blocks the
+  -- save. pcall because this runs inside BufWritePre, where a raise poisons the
+  -- autocmd chain.
   if slot then
     pcall(function()
       require("config.js_tool_version").warn(bufnr, slot)

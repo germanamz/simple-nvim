@@ -105,7 +105,7 @@ describe("config.js_tool_version._extract", function()
 end)
 
 describe("config.js_tool_version.warn", function()
-  local root, notices, real_running
+  local root, notices, real_running, real_pinned
 
   before_each(function()
     version._reset()
@@ -114,14 +114,21 @@ describe("config.js_tool_version.warn", function()
       notices[#notices + 1] = msg
     end
     real_running = version.running
+    real_pinned = version.pinned
     root = vim.fn.tempname()
     vim.fn.mkdir(root .. "/src", "p")
+    -- Seals config.js_toolchain's walk at `root` (a .git directory is an
+    -- unconditional boundary). Without it the unpinned cases climb past the
+    -- fixture into the real filesystem and resolve some ancestor as the root,
+    -- making what they assert depend on the host.
+    vim.fn.mkdir(root .. "/.git", "p")
     require("config.js_toolchain")._clear()
   end)
 
   after_each(function()
     version._notify = nil
     version.running = real_running
+    version.pinned = real_pinned
     version._reset()
     vim.fn.delete(root, "rf")
     require("config.js_toolchain")._clear()
@@ -221,8 +228,56 @@ describe("config.js_tool_version.warn", function()
     assert.are.equal(0, #notices)
     assert.are.equal(0, probes)
   end)
+
+  -- The whole point of the async probe: the first save of a pinned project
+  -- cannot know the running version yet, so warn must return having done
+  -- nothing but a file read, and the message must arrive from the probe's own
+  -- callback afterwards. A warn that only ever fires on its own call stack
+  -- would leave the first save silent forever.
+  it("warns from the probe's callback when the version lands after the save", function()
+    version.running = function(_, _, on_result)
+      vim.defer_fn(function()
+        on_result("3.8.3")
+      end, 0)
+      return nil
+    end
+    version.warn(pinning("^2.8.8"), "prettier")
+    assert.are.equal(0, #notices, "nothing may be reported during the save itself")
+    vim.wait(2000, function()
+      return #notices > 0
+    end)
+    assert.are.equal(1, #notices)
+    assert.is_truthy(notices[1]:find("2.8.8", 1, true))
+  end)
+
+  -- M.pinned is the only step in warn that is not memoized, and warn runs twice
+  -- per save (conform resolves the formatter list more than once). Agreement is
+  -- the common case and used to return before recording anything, so a
+  -- correctly pinned project re-read and re-decoded its package.json on every
+  -- save for the whole session.
+  it("does not re-read package.json once the verdict is known", function()
+    version.running = function()
+      return "3.8.3"
+    end
+    local reads = 0
+    version.pinned = function(...)
+      reads = reads + 1
+      return real_pinned(...)
+    end
+    local bufnr = pinning("^3.0.3") -- majors AGREE: the silent path
+    version.warn(bufnr, "prettier")
+    version.warn(bufnr, "prettier")
+    version.warn(bufnr, "prettier")
+    assert.are.equal(0, #notices)
+    assert.are.equal(1, reads)
+  end)
 end)
 
+-- The probe is asynchronous because its only caller runs inside BufWritePre: a
+-- blocking wait froze the editor there for up to two seconds per candidate
+-- command, and prettier has two. So `running` reports nil until an answer lands
+-- and caches it — including the negative, so a missing binary is probed once
+-- per session and not once per save.
 describe("config.js_tool_version.running", function()
   local real_system
 
@@ -236,15 +291,63 @@ describe("config.js_tool_version.running", function()
     version._reset()
   end)
 
+  --- Poll until `tool`'s probe for `root` has landed, then return the version.
+  local function settled(tool, root)
+    local got = version.running(tool, root)
+    vim.wait(5000, function()
+      got = version.running(tool, root)
+      return got ~= nil
+    end)
+    return got
+  end
+
+  --- A fresh directory to probe from. Every test that spawns a REAL subprocess
+  --- needs its own: _reset() drops the cache but cannot un-spawn a probe still
+  --- in flight, and that probe's callback writes its answer into whatever cache
+  --- table exists when it lands — poisoning the next test that shares its key.
+  local function fresh_root()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, "p")
+    return dir
+  end
+
   it("returns a semver for a tool that is on PATH", function()
     if vim.fn.executable("prettierd") ~= 1 then
       pending("prettierd not on PATH")
       return
     end
-    assert.is_truthy(version.running("prettier", nil):match("^%d+%.%d+%.%d+$"))
+    assert.is_truthy(settled("prettier", fresh_root()):match("^%d+%.%d+%.%d+$"))
+  end)
+
+  it("does not block its caller: the first call answers nil", function()
+    if vim.fn.executable("prettierd") ~= 1 then
+      pending("prettierd not on PATH")
+      return
+    end
+    assert.is_nil(version.running("prettier", fresh_root()))
+  end)
+
+  it("delivers a late answer to the callback the caller registered", function()
+    if vim.fn.executable("prettierd") ~= 1 then
+      pending("prettierd not on PATH")
+      return
+    end
+    local got, calls = nil, 0
+    version.running("prettier", fresh_root(), function(v)
+      calls = calls + 1
+      got = v
+    end)
+    vim.wait(5000, function()
+      return calls > 0
+    end)
+    assert.are.equal(1, calls)
+    assert.is_truthy(tostring(got):match("^%d+%.%d+%.%d+$"))
   end)
 
   it("is nil for a tool that does not exist, without raising", function()
+    -- vim.system raises ENOENT synchronously here, so this settles inline.
+    assert.is_nil(version.running("definitely-not-a-real-tool", nil))
+    vim.wait(200)
     assert.is_nil(version.running("definitely-not-a-real-tool", nil))
   end)
 
@@ -260,6 +363,23 @@ describe("config.js_tool_version.running", function()
     assert.are.equal(1, calls)
   end)
 
+  -- Distinct from the memo above: there the answer had already landed. Here the
+  -- probe is still in flight, so only a `pending` set keeps a second save from
+  -- spawning a second daemon while the first is still running.
+  it("does not spawn a second probe while the first is still in flight", function()
+    local calls, finish = 0, nil
+    vim.system = function(_, _, cb)
+      calls = calls + 1
+      finish = cb
+      return { kill = function() end }
+    end
+    assert.is_nil(version.running("prettier", "/tmp"))
+    assert.is_nil(version.running("prettier", "/tmp"))
+    assert.are.equal(1, calls)
+    finish({ code = 0, stdout = "prettier version: 3.9.0\n" })
+    assert.are.equal("3.9.0", version.running("prettier", "/tmp"))
+  end)
+
   it("_reset drops the probe cache, so a later call probes again", function()
     local calls = 0
     vim.system = function(...)
@@ -273,20 +393,14 @@ describe("config.js_tool_version.running", function()
   end)
 
   it("falls back to plain prettier when prettierd fails", function()
-    vim.system = function(cmd)
+    vim.system = function(cmd, _, cb)
       if cmd[1] == "prettierd" then
-        return {
-          wait = function()
-            return { code = 1, stdout = "" }
-          end,
-        }
+        cb({ code = 1, stdout = "" })
+      else
+        cb({ code = 0, stdout = "3.8.3\n" })
       end
-      return {
-        wait = function()
-          return { code = 0, stdout = "3.8.3\n" }
-        end,
-      }
+      return { kill = function() end }
     end
-    assert.are.equal("3.8.3", version.running("prettier", "/tmp"))
+    assert.are.equal("3.8.3", settled("prettier", "/tmp"))
   end)
 end)

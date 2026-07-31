@@ -33,8 +33,16 @@ local PACKAGES = {
 }
 
 --- Roots already warned about, keyed by root + tool + both versions, so this
---- fires once per session rather than once per save.
+--- fires once per session rather than once per save. Still load-bearing next to
+--- `settled` below: several saves can queue behind one in-flight probe, and all
+--- of their callbacks fire when it lands.
 local warned = {}
+
+--- (root, tool) pairs whose verdict is final — warned, or checked and found to
+--- agree. M.pinned is the only step here that is not memoized, so without this
+--- an AGREEING project (the good case!) re-read and re-decoded its package.json
+--- twice per save forever, since M.warn returned before recording anything.
+local settled = {}
 
 --- Probed versions, keyed by root + tool. The probe spawns a subprocess and its
 --- caller runs inside BufWritePre (twice per format, since conform resolves the
@@ -42,10 +50,17 @@ local warned = {}
 --- records a failed probe so a broken binary is not retried on every write.
 local probed = {}
 
---- Drop the warned set and the probe cache. For tests.
+--- Keys with a probe in flight, mapped to the callbacks waiting on it. A second
+--- save before the first probe lands must queue, not spawn a second daemon.
+local pending = {}
+
+--- Drop every memo above: warnings, settled verdicts, and the probe cache
+--- (including any in-flight registrations). For tests.
 function M._reset()
   warned = {}
+  settled = {}
   probed = {}
+  pending = {}
 end
 
 --- Leading major of a semver range, or nil when there isn't an obvious one.
@@ -141,31 +156,88 @@ function M._extract(tool, stdout)
 end
 
 --- The version of `tool` that will actually execute for a buffer in `root`.
+---
+--- ASYNCHRONOUS, and it has to be: the only caller runs inside BufWritePre, and
+--- a blocking `:wait(2000)` froze the editor there for up to two seconds per
+--- candidate command — four for prettier, which falls through prettierd to
+--- plain prettier. That fires on the first save in any project pinning
+--- prettier, eslint or biome, i.e. most of them. The warning is advisory, so
+--- arriving a moment after the save costs nothing; a frozen editor costs a lot.
+---
+--- Returns nil while a probe is still running. `on_result` is how a caller
+--- hears the late answer; it is never invoked for a value returned here, so a
+--- caller handles each answer exactly once.
 ---@param tool string
 ---@param root string|nil
----@return string|nil
-function M.running(tool, root)
+---@param on_result? fun(version: string|nil) called on the main loop when an
+---   in-flight probe lands
+---@return string|nil nil while unknown
+function M.running(tool, root, on_result)
   local key = (root or "?") .. "\0" .. tool
   local hit = probed[key]
   if hit ~= nil then
     return hit or nil
   end
+  if pending[key] then
+    if on_result then
+      table.insert(pending[key], on_result)
+    end
+    return nil
+  end
+  pending[key] = {}
 
-  local found = nil
-  for _, cmd in ipairs(PROBE_CMDS[tool] or { { tool, "--version" } }) do
-    local ok, out = pcall(function()
-      return vim.system(cmd, { cwd = root, text = true }):wait(2000)
+  local function finish(found)
+    probed[key] = found or false
+    local waiters = pending[key]
+    pending[key] = nil
+    if not waiters or #waiters == 0 then
+      return
+    end
+    -- vim.schedule because vim.system's callback runs in the fast event loop,
+    -- where the notify path's vim.fn.fnamemodify is not allowed — and because
+    -- when a spawn fails outright `finish` is reached synchronously, still
+    -- inside BufWritePre, which is the one place nothing here may run.
+    vim.schedule(function()
+      for _, fn in ipairs(waiters) do
+        pcall(fn, found or nil)
+      end
     end)
-    if ok and out.code == 0 and out.stdout then
-      found = M._extract(tool, out.stdout)
-    end
-    if found then
-      break
-    end
   end
 
-  probed[key] = found or false
-  return found or nil
+  local cmds = PROBE_CMDS[tool] or { { tool, "--version" } }
+  local function step(i)
+    local cmd = cmds[i]
+    if not cmd then
+      return finish(nil)
+    end
+    -- pcall: vim.system raises ENOENT synchronously for a binary that is not on
+    -- PATH, which is the ordinary case this fallback chain exists for.
+    local ok = pcall(vim.system, cmd, { cwd = root, text = true }, function(out)
+      local found = (out.code == 0 and out.stdout) and M._extract(tool, out.stdout) or nil
+      if found then
+        finish(found)
+      else
+        step(i + 1)
+      end
+    end)
+    if not ok then
+      step(i + 1)
+    end
+  end
+  step(1)
+
+  -- A probe whose every candidate failed to spawn has already settled inline;
+  -- report it now rather than making the caller wait for an answer that exists.
+  -- `on_result` is registered only past this point, so a caller never gets the
+  -- same answer both as a return value and as a callback.
+  local now = probed[key]
+  if now ~= nil then
+    return now or nil
+  end
+  if on_result then
+    table.insert(pending[key], on_result)
+  end
+  return nil
 end
 
 --- Warn once if the project pins `tool` at a MAJOR version different from the
@@ -173,9 +245,13 @@ end
 ---
 --- Ordered deliberately: `M.pinned` first (a cheap file read) — the common
 --- case is an unpinned project, where nothing could ever warn — and only when
---- a pin exists does this reach `M.running`, which spawns the (memoized, but
---- still real on a cache miss) probe subprocess. A tool with no entry in
---- PACKAGES returns before either.
+--- a pin exists does this reach `M.running`, whose probe is asynchronous. A
+--- tool with no entry in PACKAGES returns before either.
+---
+--- Runs inside BufWritePre and therefore does the minimum there: on the first
+--- save of a pinned project the running version is not known yet, so this
+--- returns having only read package.json, and `verdict` fires from the probe's
+--- callback a moment later with the message. One save late, never blocking.
 ---@param bufnr integer
 ---@param tool string
 function M.warn(bufnr, tool)
@@ -184,35 +260,49 @@ function M.warn(bufnr, tool)
     return
   end
   local root = require("config.js_toolchain").resolve(bufnr).root
+  local skey = (root or "?") .. "\0" .. tool
+  if settled[skey] then
+    return
+  end
   local pin = M.pinned(root, pkg)
   if not pin then
     return
   end
-  local running = M.running(tool, root)
-  if not running then
-    return
-  end
-  local want, got = M.major(pin), M.major(running)
-  if not want or not got or want == got then
-    return
+
+  --- Compare and (maybe) notify, from whichever side the version arrives on.
+  ---@param running string|nil
+  local function verdict(running)
+    if not running then
+      return
+    end
+    -- Recorded before the majors are compared, so AGREEMENT is remembered too:
+    -- that is the common case, and leaving it unrecorded is what made M.pinned
+    -- re-read package.json on every save of every well-pinned project.
+    settled[skey] = true
+    local key = table.concat({ root or "?", tool, running, pin }, "\0")
+    if warned[key] then
+      return
+    end
+    warned[key] = true
+
+    local want, got = M.major(pin), M.major(running)
+    if not want or not got or want == got then
+      return
+    end
+
+    local where = vim.fn.fnamemodify(root or "?", ":~:.")
+    local msg = ("%s in %s runs %s; %s pins %s. Formatting here may not match its CI — install the project's own copy to use it."):format(
+      tool,
+      vim.fs.basename(root or "?"),
+      running,
+      where,
+      pin
+    )
+    local notify = M._notify or vim.notify
+    notify(msg, vim.log.levels.WARN)
   end
 
-  local key = table.concat({ root or "?", tool, running, pin }, "\0")
-  if warned[key] then
-    return
-  end
-  warned[key] = true
-
-  local where = vim.fn.fnamemodify(root or "?", ":~:.")
-  local msg = ("%s in %s runs %s; %s pins %s. Formatting here may not match its CI — install the project's own copy to use it."):format(
-    tool,
-    vim.fs.basename(root or "?"),
-    running,
-    where,
-    pin
-  )
-  local notify = M._notify or vim.notify
-  notify(msg, vim.log.levels.WARN)
+  verdict(M.running(tool, root, verdict))
 end
 
 return M
