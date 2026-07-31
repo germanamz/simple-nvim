@@ -2,9 +2,13 @@
 -- (lua/plugins/conform.lua) reads `by_ft` to wire up on-demand formatting
 -- (`<leader>F`), format-on-save, and `gq` via formatexpr on real buffers.
 --
--- The web/markup filetypes use a { "prettierd", "prettier" } fallback chain:
--- the warm prettierd daemon formats on save without Node's per-run cold start,
--- and plain prettier remains the fallback when the daemon isn't installed.
+-- Most web/markup filetypes use an unconditional { "prettierd", "prettier" }
+-- fallback chain: the warm prettierd daemon formats on save without Node's
+-- per-run cold start, and plain prettier remains the fallback when the daemon
+-- isn't installed. The four JS/TS filetypes are the exception: instead of that
+-- fixed chain, they dispatch to whatever formatter config.js_toolchain detects
+-- the project actually configures (see js_formatters below) — prettier's own
+-- defaults disagree with a project whose style rules live in ESLint.
 
 local M = {}
 
@@ -70,11 +74,14 @@ local prettier = { "prettierd", "prettier", stop_after_first = true }
 
 -- The formatter a detected toolchain maps to. Kept separate from by_ft because
 -- the slot names come from config.js_toolchain, not from vim filetypes.
+-- prettier = prettier (not a fresh { "prettierd", "prettier" } literal): js_formatters
+-- deepcopies whatever this maps to before returning it, so aliasing the shared
+-- chain here costs nothing and keeps the two lists from drifting apart.
 local slot_to_conform = {
   biome = { "biome" },
   dprint = { "dprint" },
   oxfmt = { "oxfmt" },
-  prettier = { "prettierd", "prettier" },
+  prettier = prettier,
   eslint = { "eslint_d" },
 }
 

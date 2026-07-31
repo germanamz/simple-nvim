@@ -90,6 +90,14 @@ local ESLINT_FILES = {
 local FORMATTER = {
   { tool = "biome", files = { "biome.json", "biome.jsonc", ".biome.json", ".biome.jsonc" } },
   { tool = "dprint", files = { "dprint.json", ".dprint.json", "dprint.jsonc", ".dprint.jsonc" } },
+  -- Deliberately no vite.config.ts probe here, unlike conform's own oxfmt
+  -- builtin (conform/formatters/oxfmt.lua): that marker is broad — any
+  -- vite.config.ts — and would claim every Vite project in the tree for a
+  -- formatter it doesn't use. The LINTER oxlint row below DOES probe
+  -- vite.config.ts, but only because lspconfig's own check is narrow: it
+  -- requires both "vite-plus" AND "lint:" inside the file, not just the
+  -- file's existence (see vite_lint / vite_lints below). Do not "restore
+  -- parity" between the two rows — the asymmetry mirrors each row's own tool.
   { tool = "oxfmt", files = { ".oxfmtrc.json", ".oxfmtrc.jsonc", "oxfmt.config.ts" } },
   { tool = "prettier", files = PRETTIER_FILES, pkg_keys = { "prettier" } },
   { tool = "eslint", files = ESLINT_FILES, pkg_keys = { "eslintConfig" } },

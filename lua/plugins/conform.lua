@@ -24,7 +24,11 @@ return {
     require("conform").setup({
       -- default_format_opts merges into EVERY conform.format() call (and gq via
       -- formatexpr), so lsp_format policy lives here once — restating it at the
-      -- call sites would silently override a change made here.
+      -- call sites would silently override a change made here. The one
+      -- intentional exception is config.formatters' js_formatters: an
+      -- unconfigured JS/TS project must never fall through to ts_ls's own
+      -- formatting, so it deliberately overrides this default to
+      -- lsp_format = "never" on the chain it returns.
       formatters_by_ft = formatters.by_ft,
       default_format_opts = { lsp_format = "fallback" },
       notify_on_error = true,

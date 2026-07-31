@@ -129,6 +129,14 @@ describe("config.formatters", function()
       assert.are.equal("never", chain_for("typescript").lsp_format)
     end)
 
+    -- Same guarantee on the non-empty path: if the resolved formatter turns
+    -- out to be unavailable, conform filters it out of the chain, and without
+    -- lsp_format = "never" here too the LSP fallback would still reach ts_ls.
+    it("never lets the LSP format even when a formatter resolves", function()
+      write(".prettierrc", "{}\n")
+      assert.are.equal("never", chain_for("typescript").lsp_format)
+    end)
+
     it("stops after the first available formatter", function()
       write(".prettierrc", "{}\n")
       assert.is_true(chain_for("typescript").stop_after_first)
@@ -152,6 +160,14 @@ describe("config.formatters", function()
 
     it("stops after the first available formatter", function()
       assert.is_true(M.by_ft.markdown.stop_after_first)
+    end)
+
+    -- Guards the slot_to_conform.prettier = prettier aliasing in formatters.lua:
+    -- js_formatters deepcopies before stamping lsp_format = "never" onto its own
+    -- copy, but if that deepcopy were ever dropped, the shared table backing
+    -- every non-JS filetype below would silently pick up lsp_format too.
+    it("is untouched by the JS/TS lsp_format override", function()
+      assert.is_nil(M.by_ft.markdown.lsp_format)
     end)
   end)
 end)
