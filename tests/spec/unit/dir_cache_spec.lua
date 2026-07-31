@@ -67,6 +67,11 @@ describe("config.dir_cache", function()
     local toolchain = require("config.js_toolchain")
     local dir = vim.fn.tempname()
     vim.fn.mkdir(dir .. "/src", "p")
+    -- Seals the walk at `dir` (a .git directory is an unconditional boundary),
+    -- same as js_toolchain_spec's before_each — without it "nothing
+    -- configured" climbs past the tempdir into the real filesystem, where a
+    -- stray ancestor .prettierrc would make this test host-dependent.
+    vim.fn.mkdir(dir .. "/.git", "p")
 
     local bufnr = vim.api.nvim_create_buf(false, true)
     vim.api.nvim_buf_set_name(bufnr, dir .. "/src/a.ts")
@@ -75,6 +80,9 @@ describe("config.dir_cache", function()
     local f = assert(io.open(dir .. "/.prettierrc", "w"))
     f:write("{}\n")
     f:close()
+    -- Still nil pre-clear: proves the memoized cache (not the missing config)
+    -- is what was hiding the file.
+    assert.is_nil(toolchain.resolve(bufnr).formatter)
 
     require("config.dir_cache")._clear()
     assert.are.equal("prettier", toolchain.resolve(bufnr).formatter)

@@ -1,8 +1,11 @@
 -- Invalidates the directory-keyed resolution caches when the repo topology
--- under a directory can change. util.git's root_cache and conform's python
--- pyproject cache both memoize "dir -> answer" on the assumption that a
--- directory's repo membership is fixed for the session — true almost always,
--- but a `git submodule add/deinit` or a `git init` flips it. Two triggers:
+-- under a directory can change. util.git's root_cache, conform's python
+-- pyproject cache, config.ignore_filter's oracle cache, and
+-- config.js_toolchain's formatter/linter cache all memoize "dir -> answer" on
+-- the assumption that a directory's repo membership is fixed for the
+-- session — true almost always, but a `git submodule add/deinit` or a
+-- `git init` flips it, and for ignore_filter and js_toolchain also moves
+-- which config governs the directory. Two triggers:
 --   * DirChanged   — the cwd moved, so an unnamed buffer may resolve elsewhere.
 --   * BufWritePost on .gitmodules — a submodule was added/removed in-editor.
 -- Lazy: it only clears the caches; the next resolve re-probes. It does NOT cover
