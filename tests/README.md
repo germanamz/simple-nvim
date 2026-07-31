@@ -56,4 +56,6 @@ tests/
     └── e2e-lsp/          — slow lane: real language servers
 ```
 
-Only the `e2e-lsp/` lane still ships a `_placeholder_spec.lua`. It now holds a self-skipping real `lua_ls` end-to-end spec: it runs the assertions when `lua-language-server` is on `PATH` and otherwise marks itself pending, so the slow lane never fails just because a machine lacks the language server (see phases 3–6 of the testing plan, `docs/superpowers/plans/2026-04-26-testing/`).
+Only the `e2e-lsp/` lane still ships a `_placeholder_spec.lua`. It now holds a self-skipping real `lua_ls` end-to-end spec: it runs the assertions when `lua-language-server` is on `PATH` and otherwise marks itself pending, so the slow lane never fails just because a machine lacks the language server.
+
+`docs/superpowers/testing.md` covers the determinism pins behind `make warm`, why the suite needs the agent command sandbox disabled, and the headless-harness constraints (no insert mode in a telescope prompt, `CursorMoved` never firing, ~43-row windows) that shape how specs are written.

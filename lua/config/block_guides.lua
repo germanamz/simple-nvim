@@ -3,7 +3,7 @@
 -- ancestor chain (innermost + parents, siblings excluded) lights up brighter.
 -- Rendered via a decoration provider with ephemeral overlay extmarks, so the
 -- code never reflows and only visible lines cost anything. See
--- docs/superpowers/specs/2026-06-08-block-scope-guides-design.md.
+-- docs/superpowers/block-guides.md.
 local M = {}
 
 local cache = {} -- [buf] = { tick = <changedtick>, blocks = {...} }

@@ -24,6 +24,10 @@ beyond the code.
   formatter and linter are detected, why prettier no longer runs in projects that
   never configured it, and how to diagnose which tool owns a buffer. Also the
   full decision record: what was rejected and why, and what ships imperfect.
+- **[superpowers/](superpowers/README.md).** The engineering record: how the
+  larger pieces were designed and what actually shipped. Start with
+  [testing.md](superpowers/testing.md) before changing anything — it covers the
+  determinism pins, the four-tier suite, and the harness constraints.
 
 ## The git-at-scale throughline
 

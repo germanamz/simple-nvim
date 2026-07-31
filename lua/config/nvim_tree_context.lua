@@ -8,7 +8,7 @@
 -- labels, the grey/blue/teal ignored/dot-folder/symlink trio, the devicons, and
 -- the submodule branch/status labels all arrive with the row.
 --
--- See docs/superpowers/specs/2026-07-29-nvim-tree-sticky-folders-design.md.
+-- See docs/superpowers/nvim-tree-context.md.
 local M = {}
 
 local Overlay = require("util.overlay")
