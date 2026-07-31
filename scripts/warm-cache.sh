@@ -41,10 +41,14 @@ install_parsers() {
 }
 
 install_mason_tools() {
-  # mason-tool-installer's run_on_start fires on VimEnter; the Sync variant
-  # blocks until the install queue drains.
-  nvim --headless "+MasonToolsInstallSync" "+qa" >/dev/null 2>&1 \
-    || { err "MasonToolsInstallSync failed"; return 1; }
+  # The work is in scripts/mason-sync.lua — mason-tool-installer is lazy-loaded,
+  # so the plugin has to be pulled in before its commands exist, and headless
+  # nvim exits 0 even when a command errors. Read that file before changing this
+  # one; a bare "+MasonToolsInstallSync" here was a silent no-op for both
+  # reasons. stderr is kept (not sent to /dev/null like the steps above) so the
+  # reason for a failure reaches the caller.
+  nvim --headless -c "luafile ${REPO_ROOT}/scripts/mason-sync.lua" "+qa" >/dev/null \
+    || { err "mason tool install failed"; return 1; }
 }
 
 # --- check block -----------------------------------------------------------
