@@ -162,6 +162,26 @@ fires `try_lint`. No linter attaching is the correct outcome for a project
 that configures none — see the gating principle below for why nothing tries
 to compensate for that silence.
 
+## The first save in an eslint project may come back unformatted
+
+`eslint_d` is a daemon, and it cold-starts on its first invocation for a
+project — loading ESLint, resolving the flat config, building the rule set.
+That can take longer than conform's 1000ms format-on-save budget, so in an
+eslint-formatted project the very first save after opening it may return
+unchanged and the second one formats. This is a warm-up cost, not a broken
+detection: `:ConformInfo` will still show `eslint_d` resolved for the buffer.
+
+The linter half runs the same daemon and so shares the warm-up, with one
+extra requirement: both halves must ask it about the *same* project.
+`lua/plugins/nvim-lint.lua` therefore runs `eslint_d` with `cwd` set to the
+nearest `package.json` **above the buffer**, matching conform's own
+`eslint_d` builtin, rather than letting nvim-lint default it to the editor's
+cwd. `eslint_d` caches one ESLint instance per cwd and starts flat-config
+lookup there, so with a superproject open and the buffer inside a submodule
+the default would resolve a different project entirely — and the failure is
+invisible, since nvim-lint reports "could not find config file" as an empty
+diagnostic list, indistinguishable from a clean file.
+
 ## Gate on "configured", never on "will handle this file"
 
 The one rule that shaped every decision in this design: gate a tool's
@@ -219,6 +239,15 @@ always reports its daemon version plus a static bundled-eslint number, neither
 project-specific, so the probe uses `eslint_d status` instead, which reports
 the project's actually-resolved local eslint.
 
+The probe that reads that version is **asynchronous**, and has to be: its only
+caller runs inside `BufWritePre`, and waiting on the subprocess froze the
+editor there for up to two seconds per candidate command — four for prettier,
+which falls through `prettierd` to plain `prettier`. So the first save in a
+pinned project does nothing but read `package.json`, and the warning arrives a
+moment later from the probe's own callback. One save late; never a stall. The
+answer is then cached per root and tool for the session, so no later save pays
+anything at all.
+
 A tool only gets this check at all if it appears in `js_tool_version.lua`'s
 `PACKAGES` map (currently `prettier`, `eslint`, `biome`). `oxfmt` and `dprint`
 are deliberately absent — their npm package names were never verified against
@@ -269,9 +298,17 @@ Beyond that:
 
 - **`:ConformInfo`** shows which formatters conform resolved for the current
   buffer and which one actually ran on the last format. For an unconfigured
-  JS/TS project this should show an empty formatter list with `lsp_format`
-  disabled — if it instead shows `prettier`, the formatter slot resolved to
-  something other than expected (check for a stray ancestor config).
+  JS/TS project it lists no formatters — if it instead shows `prettier`, the
+  formatter slot resolved to something other than expected (check for a stray
+  ancestor config). Note that `:ConformInfo` never displays `lsp_format`, and
+  that under "Formatters for this buffer" it prints an `LSP: <client>` line
+  whenever a format-capable language server is attached, computed entirely
+  independently of our setting (`conform/health.lua`). So an unconfigured
+  TypeScript project shows `LSP: ts_ls` rather than `<none>` — that line is
+  informational, **not** an indication that the LSP will format on save. It
+  won't: `lsp_format = "never"` is set on every JS/TS chain this dispatch
+  returns. `<none>` appears only when there is neither a formatter nor a
+  format-capable client.
 - **`prettier --find-config-path <file>`**, run from the project, answers
   whether prettier itself believes it has a config — this is the exact
   command from the defect reproduction above, and the fastest way to confirm
@@ -292,9 +329,20 @@ walk, the boundary rule, per-directory memoization (`_clear()`), and the
 the version-mismatch warning. `lua/config/formatters.lua` wires the JS/TS
 `by_ft` entries to the formatter slot; `lua/plugins/lsp.lua` registers the
 gated `biome`/`oxlint` servers; `lua/plugins/nvim-lint.lua` runs `eslint_d` on
-`BufWritePost` when the linter slot is `eslint`; `lua/plugins/conform.lua`
-invalidates the detection cache when a marker file (or `package.json`) is
-written. Unit specs cover the pure detection and version-parsing logic; smoke
+`BufWritePost` when the linter slot is `eslint`.
+
+Cache invalidation is split across two files, and both halves matter.
+`lua/plugins/conform.lua` drops the detection cache when a marker file (or
+`package.json`) is written, so adding a config takes effect on save.
+`lua/config/dir_cache.lua` drops it on `DirChanged` and on a `.gitmodules`
+write — the cwd moving changes where an unnamed buffer resolves from, and a
+`git submodule add`/`deinit` moves the boundary that decides whether a
+directory inherits its superproject's config. That file clears four
+directory-keyed caches on the same two triggers, of which this is one; it is
+also what `<leader>gR` reaches for as the manual hatch when the topology
+changed outside the editor.
+
+Unit specs cover the pure detection and version-parsing logic; smoke
 specs cover the nvim-lint wiring; `tests/spec/e2e/format_on_save_spec.lua`
 drives a real conform save to pin the defect this feature fixes: an
 unconfigured project comes back byte-identical, and a configured one honors
