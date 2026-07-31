@@ -1,8 +1,12 @@
 -- Install/verify mason tools at the pinned versions, for scripts/warm-cache.sh.
 --
 -- Driven from a file rather than inlined into `nvim -c` because it has to do
--- three things a bare `+MasonToolsInstallSync` could not, and each needs
+-- four things a bare `+MasonToolsInstallSync` could not, and each needs
 -- explaining.
+--
+-- 0. REFUSE WHEN NOTHING IS PINNED, before loading anything — see the lockfile
+--    guard below. Skipped here in the numbering because it is a consequence of
+--    (2), not an independent goal.
 --
 -- 1. LOAD THE PLUGIN. mason-tool-installer is lazy-loaded on
 --    BufReadPre/BufNewFile (its spec in lua/plugins/lsp.lua), so in a bare
@@ -32,6 +36,25 @@
 local function fail(msg)
   io.stderr:write("mason-sync: " .. msg .. "\n")
   os.exit(1)
+end
+
+-- Checked BEFORE the plugin loads, because reaching MasonToolsUpdateSync
+-- without it hangs rather than failing. lua/plugins/lsp.lua only calls
+-- mason-tool-installer's setup() when it can read this file; absent it, the
+-- plugin keeps its default ensure_installed = {}, so check_install's total is
+-- 0, its on_close never fires, and the sync wait — `while true do
+-- vim.wait(10000, ...) end` — spins forever. That path is newly reachable
+-- because force_update = true skips the debounce early return that used to
+-- return before the loop. A silent hang is strictly worse than the silent
+-- no-op this script exists to fix, so refuse instead.
+--
+-- stdpath("config"), not the repo root warm-cache.sh computes: the plugin reads
+-- this exact path, so this is the only path that decides whether setup() ran.
+-- The two normally agree; the message names the path so it is obvious when they
+-- do not.
+local lockfile = vim.fs.joinpath(vim.fn.stdpath("config"), "mason-tool-versions.lock")
+if vim.fn.filereadable(lockfile) ~= 1 then
+  fail("no readable lockfile at " .. lockfile .. "; nothing is pinned, so there is nothing to sync")
 end
 
 local ok, err = pcall(function()

@@ -212,7 +212,15 @@ function M.running(tool, root, on_result)
     end
     -- pcall: vim.system raises ENOENT synchronously for a binary that is not on
     -- PATH, which is the ordinary case this fallback chain exists for.
-    local ok = pcall(vim.system, cmd, { cwd = root, text = true }, function(out)
+    --
+    -- timeout is the async form of the cap the old blocking `:wait(2000)` gave
+    -- us, and dropping it when this went async would have been a real leak:
+    -- prettierd and eslint_d are resident daemons, so a wedged one never exits,
+    -- `pending[key]` stays set forever (that root+tool can then never warn
+    -- again), the child is never reaped, and one closure accumulates per save.
+    -- vim.system TERMs on expiry and reports code 124, which reads here as a
+    -- failed candidate: fall through to the next command, then cache false.
+    local ok = pcall(vim.system, cmd, { cwd = root, text = true, timeout = 2000 }, function(out)
       local found = (out.code == 0 and out.stdout) and M._extract(tool, out.stdout) or nil
       if found then
         finish(found)
