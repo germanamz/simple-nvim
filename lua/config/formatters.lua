@@ -100,12 +100,24 @@ local slot_to_conform = {
 ---@param bufnr integer
 ---@return string[]
 local function js_formatters(bufnr)
-  local slot = require("config.js_toolchain").resolve(bufnr).formatter
+  local resolved = require("config.js_toolchain").resolve(bufnr)
+  local slot = resolved.formatter
   -- Copied, not shared: conform receives this table and consumers elsewhere treat
   -- the literals above as read-only.
   local chain = vim.deepcopy(slot and slot_to_conform[slot] or {})
   chain.stop_after_first = true
   chain.lsp_format = "never"
+
+  -- Best-effort and memoized (config.js_tool_version caches the probe per root),
+  -- so this costs one subprocess per project per session, not one per save. pcall
+  -- because this runs inside BufWritePre, where a raise poisons the autocmd chain.
+  if slot then
+    pcall(function()
+      local jtv = require("config.js_tool_version")
+      jtv.warn(bufnr, slot, jtv.running(slot, resolved.root))
+    end)
+  end
+
   return chain
 end
 
