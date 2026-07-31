@@ -367,6 +367,17 @@ function M.resolve(bufnr)
   return result
 end
 
+-- Memoized by base, then by tool, so re-running the plugin spec (:Lazy reload,
+-- a test clearing package.loaded) returns the same wrapper instead of
+-- layering a second gate on the first — mirrors config.lsp_root's `bounded`.
+-- Weak-keyed outer table so a base lspconfig discards can still be collected.
+-- The tool name gets a nested key rather than folding into one flat table,
+-- because the same base could in principle be gated for two different tools;
+-- each (base, tool) pair gets its own wrapper, and (as below) each wrapper is
+-- also stored under itself so re-gating an already-gated resolver for the
+-- same tool is a no-op rather than a second layer.
+local gated = setmetatable({}, { __mode = "k" })
+
 --- Wrap a language server's `root_dir` so it starts only where detection names
 --- `tool` as the linter.
 ---
@@ -379,14 +390,29 @@ end
 ---@param tool string
 ---@return fun(bufnr: integer, on_dir: fun(dir: string|nil))
 function M.gate_root_dir(base, tool)
-  return function(bufnr, on_dir)
+  local by_tool = gated[base]
+  local cached = by_tool and by_tool[tool]
+  if cached then
+    return cached
+  end
+  local fn = function(bufnr, on_dir)
     local ok, result = pcall(M.resolve, bufnr)
     if not ok or result.linter ~= tool then
       return
     end
-    -- A raising base resolver must not propagate into lspconfig's resolution.
+    -- Deliberately wraps the call to `on_dir` too, not just `base`: `base`
+    -- invokes `on_dir` synchronously (both lspconfig resolvers here do), so
+    -- there is no seam to pcall one without the other. A genuine error raised
+    -- from inside vim.lsp's own dir handling is therefore swallowed silently
+    -- here as well — accepted, not overlooked, because the alternative is a
+    -- throw propagating into lspconfig's resolution.
     pcall(base, bufnr, on_dir)
   end
+  gated[base] = gated[base] or setmetatable({}, { __mode = "k" })
+  gated[base][tool] = fn
+  gated[fn] = gated[fn] or setmetatable({}, { __mode = "k" })
+  gated[fn][tool] = fn
+  return fn
 end
 
 return M

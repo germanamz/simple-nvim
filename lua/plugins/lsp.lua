@@ -301,11 +301,15 @@ return {
       -- Gate the linter servers on our own detection, so the boundary rule and the
       -- linter priority order actually apply to them. Guarded the same way ts_ls's
       -- wiring is: if lspconfig ships no resolver for a server, leave it alone.
+      -- The server name doubles as the linter slot name for both of these (see
+      -- the LINTER table in config.js_toolchain), so a plain list is enough;
+      -- reach for a name -> tool map only if a server's slot name ever diverges
+      -- from its lspconfig name.
       local js_toolchain = require("config.js_toolchain")
-      for name, tool in pairs({ biome = "biome", oxlint = "oxlint" }) do
+      for _, name in ipairs({ "biome", "oxlint" }) do
         local base = vim.lsp.config[name] and vim.lsp.config[name].root_dir
         if type(base) == "function" then
-          servers[name].root_dir = js_toolchain.gate_root_dir(base, tool)
+          servers[name].root_dir = js_toolchain.gate_root_dir(base, name)
         end
       end
 

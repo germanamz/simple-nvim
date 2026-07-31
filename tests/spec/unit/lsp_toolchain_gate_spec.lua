@@ -88,4 +88,24 @@ describe("config.js_toolchain.gate_root_dir", function()
     assert.is_true(ok)
     assert.is_false(called)
   end)
+
+  -- Mirrors tests/spec/unit/lsp_root_spec.lua's "is idempotent" case for
+  -- config.lsp_root.bound: gate_root_dir returns a fresh closure per call, so
+  -- without memoization a :Lazy reload (or a test clearing package.loaded)
+  -- would wrap an already-gated resolver and run resolve()/base a second time
+  -- per root resolution.
+  it("is idempotent, so re-running the plugin spec cannot stack a second gate", function()
+    write("biome.json", "{}\n")
+    local calls, fn = base(root)
+    local once = toolchain.gate_root_dir(fn, "biome")
+    assert.are.equal(once, toolchain.gate_root_dir(fn, "biome"))
+    assert.are.equal(once, toolchain.gate_root_dir(once, "biome"))
+
+    local got
+    once(buf(), function(dir)
+      got = dir
+    end)
+    assert.are.equal(1, calls.n)
+    assert.are.equal(root, got)
+  end)
 end)
