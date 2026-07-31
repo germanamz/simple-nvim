@@ -149,6 +149,23 @@ describe("config.formatters", function()
       toolchain._clear()
       assert.are.equal(1, #chain_for("typescript"))
     end)
+
+    -- slot_to_conform.prettier aliases the SAME table object as the shared
+    -- `prettier` local that markdown/json/css/etc. use below — js_formatters'
+    -- vim.deepcopy is what keeps mutating the returned chain from mutating that
+    -- shared table too. The trigger (resolving the prettier slot) and the
+    -- assertion (inspecting the shared table) must live in ONE test: the outer
+    -- before_each reloads config.formatters fresh before every `it()`, so a
+    -- poisoned literal from one test is invisible to any other — do not split
+    -- this back into two tests.
+    it("never poisons the shared prettier literal that markdown etc. share", function()
+      write(".prettierrc", "{}\n")
+      chain_for("typescript") -- resolves the prettier slot; would mutate
+      -- slot_to_conform.prettier (== the shared `prettier` local) in place if
+      -- js_formatters' deepcopy were ever dropped
+      assert.is_nil(M.by_ft.markdown.lsp_format)
+      assert.are.equal(2, #M.by_ft.markdown)
+    end)
   end)
 
   describe("non-JS web entries", function()
@@ -160,14 +177,6 @@ describe("config.formatters", function()
 
     it("stops after the first available formatter", function()
       assert.is_true(M.by_ft.markdown.stop_after_first)
-    end)
-
-    -- Guards the slot_to_conform.prettier = prettier aliasing in formatters.lua:
-    -- js_formatters deepcopies before stamping lsp_format = "never" onto its own
-    -- copy, but if that deepcopy were ever dropped, the shared table backing
-    -- every non-JS filetype below would silently pick up lsp_format too.
-    it("is untouched by the JS/TS lsp_format override", function()
-      assert.is_nil(M.by_ft.markdown.lsp_format)
     end)
   end)
 end)
