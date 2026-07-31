@@ -56,16 +56,51 @@ function M._clear_python_cache()
   python_cache = {}
 end
 
--- prettierd-first: conform runs the first available formatter in the chain.
--- prettierd is a resident daemon that keeps the prettier engine warm, so on
--- save it answers in single-digit ms instead of paying Node's cold start
--- every time (plain `prettier` re-spawns node + reloads the config per run,
--- which is what stalls format-on-save). Plain `prettier` stays as the
--- fallback for machines where the daemon isn't installed. One table shared by
--- every web/markup filetype below — reordering the chain is a one-line change
--- (consumers treat the entries as read-only; give a filetype its own literal
--- if it ever needs per-entry opts).
-local prettier = { "prettierd", "prettier" }
+-- prettierd-first: prettierd is a resident daemon that keeps the prettier engine
+-- warm, so on save it answers in single-digit ms instead of paying Node's cold
+-- start every time. Plain `prettier` stays as the fallback for machines where the
+-- daemon isn't installed.
+--
+-- stop_after_first is required, not decorative: conform runs EVERY formatter in a
+-- list by default (conform/init.lua:424), so without it both prettierd and
+-- prettier run on every save — two full formatter passes against the 1000ms
+-- format-on-save budget. The nested-{} syntax that used to mean "first available"
+-- was replaced by this option (conform/init.lua:260).
+local prettier = { "prettierd", "prettier", stop_after_first = true }
+
+-- The formatter a detected toolchain maps to. Kept separate from by_ft because
+-- the slot names come from config.js_toolchain, not from vim filetypes.
+local slot_to_conform = {
+  biome = { "biome" },
+  dprint = { "dprint" },
+  oxfmt = { "oxfmt" },
+  prettier = { "prettierd", "prettier" },
+  eslint = { "eslint_d" },
+}
+
+-- JS/TS formatting follows the project, not our preference. An unconfigured
+-- project gets an EMPTY chain plus lsp_format = "never", so the buffer is left
+-- exactly as typed: prettier's own default is singleQuote:false, and imposing it
+-- on a repo whose style lives in ESLint is the defect this whole module exists to
+-- fix. lsp_format must be set per-filetype — the global "fallback" in
+-- lua/plugins/conform.lua is load-bearing for lua, where an absent stylua is meant
+-- to fall through to lua_ls.
+--
+-- Only these four filetypes are slot-driven. json/css/markdown/yaml and friends
+-- keep unconditional prettier below: the defect is prettier's quote default,
+-- which is JS/TS-specific, and gating them would strip formatting from repos with
+-- no JS toolchain at all (a Go repo full of markdown, this config's own docs).
+---@param bufnr integer
+---@return string[]
+local function js_formatters(bufnr)
+  local slot = require("config.js_toolchain").resolve(bufnr).formatter
+  -- Copied, not shared: conform receives this table and consumers elsewhere treat
+  -- the literals above as read-only.
+  local chain = vim.deepcopy(slot and slot_to_conform[slot] or {})
+  chain.stop_after_first = true
+  chain.lsp_format = "never"
+  return chain
+end
 
 -- Vim filetype -> ordered list of conform formatter names (or a function
 -- of bufnr returning one — conform supports both).
@@ -96,10 +131,10 @@ M.by_ft = {
   objc = { "clang_format" },
   objcpp = { "clang_format" },
   toml = { "taplo" },
-  javascript = prettier,
-  javascriptreact = prettier,
-  typescript = prettier,
-  typescriptreact = prettier,
+  javascript = js_formatters,
+  javascriptreact = js_formatters,
+  typescript = js_formatters,
+  typescriptreact = js_formatters,
   json = prettier,
   jsonc = prettier,
   css = prettier,

@@ -28,6 +28,16 @@ return {
       formatters_by_ft = formatters.by_ft,
       default_format_opts = { lsp_format = "fallback" },
       notify_on_error = true,
+      -- ESLint exits 1 whenever an error survives --fix, and conform treats any
+      -- unlisted exit code as a formatter failure (conform/runner.lua:402 defaults
+      -- to { 0 }). With notify_on_error on, an ordinary mid-edit save in an
+      -- eslint-formatted project — one unused variable is enough — would both skip
+      -- formatting and raise a notification. conform's own oxlint builtin sets the
+      -- same pair for the same reason. The errors still surface, as diagnostics
+      -- from nvim-lint.
+      formatters = {
+        eslint_d = { exit_codes = { 0, 1 } },
+      },
       format_on_save = function(buf)
         -- :FormatDisable (global) / :FormatDisable! (this buffer) flip these,
         -- so a plain :w then saves untouched. Buffer flag wins so a per-buffer

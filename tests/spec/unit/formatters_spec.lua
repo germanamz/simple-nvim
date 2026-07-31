@@ -65,4 +65,93 @@ describe("config.formatters", function()
       end)
     end)
   end)
+
+  describe("JS/TS entries", function()
+    local toolchain = require("config.js_toolchain")
+    local root
+
+    before_each(function()
+      toolchain._clear()
+      root = vim.fn.tempname()
+      vim.fn.mkdir(root .. "/src", "p")
+    end)
+
+    after_each(function()
+      vim.fn.delete(root, "rf")
+      toolchain._clear()
+    end)
+
+    local function write(relpath, contents)
+      local path = root .. "/" .. relpath
+      vim.fn.mkdir(vim.fs.dirname(path), "p")
+      local f = assert(io.open(path, "w"))
+      f:write(contents)
+      f:close()
+    end
+
+    local function chain_for(ft)
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_name(bufnr, root .. "/src/a.ts")
+      local chain = M.by_ft[ft](bufnr)
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+      return chain
+    end
+
+    it("exposes the four JS/TS filetypes as functions", function()
+      for _, ft in ipairs({ "javascript", "javascriptreact", "typescript", "typescriptreact" }) do
+        assert.is_function(M.by_ft[ft], ft .. " should be slot-driven")
+      end
+    end)
+
+    it("returns the prettier chain when the project configures prettier", function()
+      write(".prettierrc", "{}\n")
+      local chain = chain_for("typescript")
+      assert.same({ "prettierd", "prettier" }, { chain[1], chain[2] })
+    end)
+
+    it("returns eslint_d when the project configures only eslint", function()
+      write("eslint.config.mjs", "export default [];\n")
+      assert.same({ "eslint_d" }, { chain_for("typescript")[1] })
+    end)
+
+    it("returns biome when the project configures biome", function()
+      write("biome.json", "{}\n")
+      assert.same({ "biome" }, { chain_for("typescriptreact")[1] })
+    end)
+
+    it("returns an empty chain when nothing is configured", function()
+      assert.are.equal(0, #chain_for("typescript"))
+    end)
+
+    -- An empty chain must not fall through to ts_ls, which would reformat with
+    -- tsserver's own defaults — a style nobody in the project chose.
+    it("never lets the LSP format a JS/TS buffer", function()
+      assert.are.equal("never", chain_for("typescript").lsp_format)
+    end)
+
+    it("stops after the first available formatter", function()
+      write(".prettierrc", "{}\n")
+      assert.is_true(chain_for("typescript").stop_after_first)
+    end)
+
+    it("does not mutate the shared chain literal between calls", function()
+      write("biome.json", "{}\n")
+      local first = chain_for("typescript")
+      first[#first + 1] = "sentinel"
+      toolchain._clear()
+      assert.are.equal(1, #chain_for("typescript"))
+    end)
+  end)
+
+  describe("non-JS web entries", function()
+    it("keeps prettier unconditional for markdown and json", function()
+      for _, ft in ipairs({ "markdown", "json", "yaml", "css" }) do
+        assert.same({ "prettierd", "prettier" }, { M.by_ft[ft][1], M.by_ft[ft][2] })
+      end
+    end)
+
+    it("stops after the first available formatter", function()
+      assert.is_true(M.by_ft.markdown.stop_after_first)
+    end)
+  end)
 end)
