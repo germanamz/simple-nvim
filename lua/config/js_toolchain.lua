@@ -367,4 +367,26 @@ function M.resolve(bufnr)
   return result
 end
 
+--- Wrap a language server's `root_dir` so it starts only where detection names
+--- `tool` as the linter.
+---
+--- Wrapping rather than replacing: the server keeps deciding WHERE its root is
+--- (biome's resolver deliberately picks the monorepo root so one instance serves
+--- every package), we only decide WHETHER it gets one. Declining to call `on_dir`
+--- is how lspconfig itself says "not this buffer", and with workspace_required —
+--- which both servers already set — that means no process at all.
+---@param base fun(bufnr: integer, on_dir: fun(dir: string|nil))
+---@param tool string
+---@return fun(bufnr: integer, on_dir: fun(dir: string|nil))
+function M.gate_root_dir(base, tool)
+  return function(bufnr, on_dir)
+    local ok, result = pcall(M.resolve, bufnr)
+    if not ok or result.linter ~= tool then
+      return
+    end
+    -- A raising base resolver must not propagate into lspconfig's resolution.
+    pcall(base, bufnr, on_dir)
+  end
+end
+
 return M

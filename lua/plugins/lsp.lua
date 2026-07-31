@@ -78,6 +78,30 @@ local servers = {
       },
     },
   },
+  -- biome and oxlint are the linter half of config.js_toolchain. Both are Rust,
+  -- start in milliseconds and idle at a few MB, which is why they get language
+  -- servers while ESLint (Node, one process per root) goes through a single
+  -- shared eslint_d daemon in lua/plugins/nvim-lint.lua instead.
+  --
+  -- workspace_required is NOT set here: both servers already set it themselves
+  -- (lspconfig/lsp/biome.lua, lspconfig/lsp/oxlint.lua). What they do NOT do is
+  -- respect our repo boundary or our linter priority, so their root_dir is
+  -- wrapped below.
+  biome = {
+    filetypes = {
+      "javascript",
+      "javascriptreact",
+      "typescript",
+      "typescriptreact",
+      "json",
+      "jsonc",
+      "css",
+      "graphql",
+    },
+  },
+  oxlint = {
+    filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
+  },
 }
 
 -- Buffer-local LSP keymaps. `]d` / `[d` come free from Neovim 0.11 defaults,
@@ -272,6 +296,17 @@ return {
       if type(base_root_dir) == "function" then
         servers.ts_ls.root_dir = tsdk.wrap_root_dir(lsp_root.bound(base_root_dir))
         servers.ts_ls.before_init = tsdk.before_init
+      end
+
+      -- Gate the linter servers on our own detection, so the boundary rule and the
+      -- linter priority order actually apply to them. Guarded the same way ts_ls's
+      -- wiring is: if lspconfig ships no resolver for a server, leave it alone.
+      local js_toolchain = require("config.js_toolchain")
+      for name, tool in pairs({ biome = "biome", oxlint = "oxlint" }) do
+        local base = vim.lsp.config[name] and vim.lsp.config[name].root_dir
+        if type(base) == "function" then
+          servers[name].root_dir = js_toolchain.gate_root_dir(base, tool)
+        end
       end
 
       -- Disable workspace/didChangeWatchedFiles for every server. With no
