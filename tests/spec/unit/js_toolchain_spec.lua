@@ -208,6 +208,18 @@ describe("config.js_toolchain.resolve", function()
     local ok = pcall(toolchain.resolve, 0)
     assert.is_true(ok)
   end)
+
+  it("memoizes per directory until cleared", function()
+    write("src/a.ts", "")
+    assert.is_nil(resolve("src/a.ts").formatter)
+
+    -- Adding a config mid-session is invisible until the cache is dropped.
+    write(".prettierrc", "{}\n")
+    assert.is_nil(resolve("src/a.ts").formatter)
+
+    toolchain._clear()
+    assert.are.equal("prettier", resolve("src/a.ts").formatter)
+  end)
 end)
 
 describe("config.js_toolchain.marker_basenames", function()

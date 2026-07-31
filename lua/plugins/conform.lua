@@ -66,6 +66,19 @@ return {
       end,
     })
 
+    -- Writing any toolchain marker (a new biome.json, a package.json gaining a
+    -- "prettier" key) changes which tool owns this project, so drop the memoized
+    -- answers on that write instead of making the user restart the session. The
+    -- pattern list comes from js_toolchain so it cannot drift from the marker
+    -- tables; basenames carry no slash, so they match anywhere in the tree.
+    vim.api.nvim_create_autocmd("BufWritePost", {
+      group = vim.api.nvim_create_augroup("conform_js_toolchain_cache", { clear = true }),
+      pattern = require("config.js_toolchain").marker_basenames(),
+      callback = function()
+        require("config.js_toolchain")._clear()
+      end,
+    })
+
     -- Toggle format-on-save. The bang scopes to the current buffer (vim.b),
     -- bare scopes globally (vim.g); FormatEnable clears both so it always
     -- restores regardless of how it was disabled. <leader>F still formats on

@@ -62,4 +62,24 @@ describe("config.dir_cache", function()
     vim.api.nvim_exec_autocmds("BufWritePost", { pattern = ".gitmodules" })
     assert.is_true(cleared)
   end)
+
+  it("clears the js_toolchain cache", function()
+    local toolchain = require("config.js_toolchain")
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir .. "/src", "p")
+
+    local bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(bufnr, dir .. "/src/a.ts")
+    assert.is_nil(toolchain.resolve(bufnr).formatter)
+
+    local f = assert(io.open(dir .. "/.prettierrc", "w"))
+    f:write("{}\n")
+    f:close()
+
+    require("config.dir_cache")._clear()
+    assert.are.equal("prettier", toolchain.resolve(bufnr).formatter)
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+    vim.fn.delete(dir, "rf")
+  end)
 end)

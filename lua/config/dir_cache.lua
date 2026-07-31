@@ -22,6 +22,10 @@ local function clear()
   -- (init.lua loads ignore_filter unconditionally at startup, so it is always
   -- present here).
   require("config.ignore_filter")._clear()
+  -- A submodule add/remove also moves js_toolchain's boundary, so a directory
+  -- that resolved to the superproject's config may now be sealed off (or the
+  -- reverse). Same lazy contract: clear only, the next resolve re-walks.
+  require("config.js_toolchain")._clear()
 end
 
 -- Exposed as the manual hatch (wired into <leader>gR) and for tests.
