@@ -609,6 +609,10 @@ background highlights (no sign column: `signcolumn=false`).
 | `<Space>ht`  | toggle deleted-lines display                 |
 | `<Space>gR`  | refresh git hunks & status (manual)          |
 
+Blame always answers from the file's own history, even when a review base is set
+(see below): a line you committed on your branch is named by its real commit, not
+reported as uncommitted, and never attributed to a ref belonging to another repo.
+
 All git displays auto-refresh when nvim regains focus (so an external
 commit/stage shows up on return): gitsigns hunks, the statusline branch/base
 and hunk counts, and the file-tree's git decorations. `<Space>gR` forces the
@@ -628,7 +632,10 @@ the smart files picker surfaces files changed since it.
 | `<Space>gB`  | pick a base branch (auto-opens Telescope files)     |
 | `<Space>gX`  | clear the review base                               |
 
-Stored per repo on disk; auto-applies on buffer attach.
+Stored per repo on disk; auto-applies on buffer attach — to buffers in **that**
+repo only. A superproject's base never follows you into a submodule (or any other
+repo), which each keep their own base, or none. The base drives the diff — hunks,
+signs, `<Space>hd` — but not blame.
 
 ### Git pickers (Telescope)
 

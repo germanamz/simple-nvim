@@ -154,6 +154,6 @@ These cost real time to rediscover.
 | File | Surface |
 | --- | --- |
 | `tests/helpers/nvim_env.lua` | `setup_isolated_env()` / `teardown()`. Fresh `$HOME` and `$XDG_*` under `$TMPDIR`, the host's lazy cache symlinked in, `NVIM_BOOTSTRAP=0`, `TZ=UTC` |
-| `tests/helpers/git_fixture.lua` | `repo({ commits, staged, modified, untracked, base_branch })` → path, with pinned author/committer dates so commit SHAs are reproducible; `with_remote(repo, name)` |
+| `tests/helpers/git_fixture.lua` | `repo({ commits, staged, modified, untracked, base_branch })` → path, with pinned author/committer dates so commit SHAs are reproducible; `with_remote(repo, name)`; `superproject({ children, grandchild, worktree, unborn })`; `superproject_pinned_submodule()` for a submodule checked out behind its own branch tip |
 | `tests/helpers/keymap_probe.lua` | `resolve(mode, lhs)` → `{ callback, rhs, buffer }`, buffer-local maps before global |
 | `tests/helpers/wait.lua` | `wait_for`, `wait_for_buffer`, `wait_for_event` — all `vim.wait` wrappers with explicit failure messages. No `sleep` anywhere in the suite |

@@ -255,6 +255,132 @@ describe("e2e: gitsigns", function()
     require("config.review_base").clear(canonical)
   end)
 
+  -- gitsigns feeds its base to `git blame <revision>` as well as to the diff, so
+  -- a base belonging to another root doesn't just mis-diff a submodule buffer —
+  -- it makes the current-line blame name whoever last touched the line on that
+  -- ref (a squash/merge commit) instead of the commit that actually wrote it.
+  it("blames a submodule line against its own history, not another root's base", function()
+    local fx = git_fixture.superproject_pinned_submodule()
+    local super = vim.uv.fs_realpath(fx.root) or fx.root
+    local sub = vim.uv.fs_realpath(fx.sub) or fx.sub
+    vim.fn.chdir(super)
+    -- A base on the SUPERPROJECT only; the submodule has none of its own.
+    require("config.review_base").set(super, "main")
+
+    local function open(path)
+      vim.cmd("edit " .. path)
+      local b = vim.api.nvim_get_current_buf()
+      wait.wait_for(function()
+        return vim.b[b].gitsigns_status ~= nil
+      end, 5000, "gitsigns never attached to " .. path)
+      return b
+    end
+
+    -- Order matters: the superproject buffer is what applies its root's base.
+    local pbuf = open(super .. "/root.txt")
+    local sbuf = open(sub .. "/f.txt")
+
+    local cache = require("gitsigns.cache").cache
+    wait.wait_for(function()
+      return cache[sbuf] ~= nil
+    end, 5000, "submodule buffer never reached the gitsigns cache")
+    assert.is_nil(
+      cache[sbuf].git_obj.revision,
+      "submodule buffer inherited a base from another root"
+    )
+    -- ...while the root that owns the base still gets it.
+    wait.wait_for(function()
+      return cache[pbuf] and cache[pbuf].git_obj.revision == "main"
+    end, 5000, "superproject buffer never picked up its own review base")
+
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+    vim.b[sbuf].gitsigns_blame_line_dict = nil
+    vim.api.nvim_exec_autocmds("CursorMoved", { buffer = sbuf, modeline = false })
+    wait.wait_for(function()
+      return vim.b[sbuf].gitsigns_blame_line_dict ~= nil
+    end, 5000, "current-line blame never resolved")
+
+    local blame = vim.b[sbuf].gitsigns_blame_line_dict
+    assert.are.equal(fx.pinned_summary, blame.summary)
+
+    -- A base set on the submodule itself lands on its buffer only; the
+    -- superproject's buffer keeps the base of its own root.
+    require("config.review_base").set(sub, "origin/feature")
+    wait.wait_for(function()
+      return cache[sbuf].git_obj.revision == "origin/feature"
+    end, 5000, "submodule buffer never took its own review base")
+    assert.are.equal("main", cache[pbuf].git_obj.revision)
+
+    require("config.review_base").clear(sub)
+    require("config.review_base").clear(super)
+  end)
+
+  -- A review base makes every line committed on the branch a hunk, and gitsigns
+  -- calls hunk lines "Not Committed Yet" without ever running blame. Blame has
+  -- to answer from the buffer's own history instead — while the signs keep
+  -- diffing against the base.
+  it("blames branch-committed lines by their real commit while a base is set", function()
+    local repo = git_fixture.repo({
+      commits = { { files = { ["f.txt"] = "L1\n" }, message = "base commit" } },
+    })
+    git_fixture.with_remote(repo)
+    local canonical = vim.uv.fs_realpath(repo) or repo
+    vim.fn.chdir(canonical)
+    -- A commit on a feature branch, on top of what origin/main holds.
+    vim.fn.system({ "git", "-C", canonical, "checkout", "-q", "-b", "feature" })
+    local f = assert(io.open(canonical .. "/f.txt", "w"))
+    f:write("L1\nL2-committed-on-branch\n")
+    f:close()
+    vim.fn.system({ "git", "-C", canonical, "add", "-A" })
+    vim.fn.system({
+      "git",
+      "-C",
+      canonical,
+      "commit",
+      "-q",
+      "-m",
+      "branch commit",
+      "--no-gpg-sign",
+    })
+    -- ...plus a genuinely uncommitted line, which must still read as such.
+    f = assert(io.open(canonical .. "/f.txt", "w"))
+    f:write("L1\nL2-committed-on-branch\nL3-uncommitted\n")
+    f:close()
+
+    require("config.review_base").set(canonical, "origin/main")
+    vim.cmd("edit " .. canonical .. "/f.txt")
+    local bufnr = vim.api.nvim_get_current_buf()
+    wait.wait_for(function()
+      return vim.b[bufnr].gitsigns_status ~= nil
+    end, 5000, "gitsigns_status never set on buffer")
+
+    local cache = require("gitsigns.cache").cache
+    wait.wait_for(function()
+      return cache[bufnr] and cache[bufnr].git_obj.revision == "origin/main"
+    end, 5000, "buffer never took the review base")
+
+    local function blame_at(lnum)
+      vim.b[bufnr].gitsigns_blame_line_dict = nil
+      vim.api.nvim_win_set_cursor(0, { lnum, 0 })
+      vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr, modeline = false })
+      wait.wait_for(function()
+        return vim.b[bufnr].gitsigns_blame_line_dict ~= nil
+      end, 5000, "blame never resolved for line " .. lnum)
+      return vim.b[bufnr].gitsigns_blame_line_dict
+    end
+
+    assert.are.equal("base commit", blame_at(1).summary)
+    -- The regression: this line IS committed, just not in origin/main.
+    assert.are.equal("branch commit", blame_at(2).summary)
+    assert.are.equal("Not Committed Yet", blame_at(3).author)
+
+    -- ...and the review base still drives the diff: L2 and L3 are both changes
+    -- against origin/main, so the hunks stay.
+    assert.is_true(#(require("gitsigns").get_hunks(bufnr) or {}) >= 1)
+
+    require("config.review_base").clear(canonical)
+  end)
+
   it("hides hunk highlights and restores them on toggle", function()
     local bufnr = open_modified_repo()
     ensure_shown(bufnr)

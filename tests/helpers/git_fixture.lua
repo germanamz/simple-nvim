@@ -112,6 +112,47 @@ local function add_submodule(parent, src, name)
   run(parent, "-c", "protocol.file.allow=always", "submodule", "add", "--quiet", src, name)
 end
 
+-- A superproject whose submodule is checked out BEHIND its own branch tip, with
+-- the tip carrying the same content under a different commit — the shape a
+-- squash-merged submodule takes in real life:
+--
+--   sub/main:    init sub -> squash merge feature   (tip, same content)
+--   sub/HEAD:    init sub -> feature adds L2        (pinned here, detached)
+--
+-- Blaming sub/f.txt against `main` therefore reports the squash commit for every
+-- line, while blaming it against its own history reports the commit that wrote
+-- the line. That difference is what makes a review base leaking in from another
+-- root observable. Returns { root, sub, pinned_summary, tip_summary }.
+function M.superproject_pinned_submodule()
+  local src = vim.fn.tempname() .. "-sub-src"
+  init_repo(src)
+  write_file(src, "f.txt", "L1\n")
+  commit(src, "init sub")
+  run(src, "checkout", "-q", "-b", "feature")
+  write_file(src, "f.txt", "L1\nL2\n")
+  commit(src, "feature adds L2")
+  local pinned = run(src, "rev-parse", "HEAD")[1]
+  run(src, "checkout", "-q", "main")
+  run(src, "merge", "--squash", "feature")
+  commit(src, "squash merge feature")
+
+  local parent = vim.fn.tempname() .. "-superproject-pinned"
+  init_repo(parent)
+  write_file(parent, "root.txt", "-- parent\n")
+  commit(parent, "init parent")
+  add_submodule(parent, src, "sub")
+  -- Detach the submodule at the pre-squash commit and record that gitlink.
+  run(parent .. "/sub", "checkout", "-q", pinned)
+  commit(parent, "pin submodule behind its branch tip")
+
+  return {
+    root = parent,
+    sub = parent .. "/sub",
+    pinned_summary = "feature adds L2",
+    tip_summary = "squash merge feature",
+  }
+end
+
 -- Build a superproject: a parent repo with N child submodules, optionally a
 -- nested grandchild submodule, a linked worktree of a child, and a standalone
 -- unborn-HEAD repo. Returns:

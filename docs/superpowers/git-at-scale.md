@@ -52,6 +52,22 @@ and status in the file tree). This document is the engineering side.
 - **`lua/config/telescope_smart.lua`** — the recursion: cheap `.gitmodules`
   discovery instead of `git submodule status --recursive`, then per-submodule
   status through `util.pool`.
+- **`lua/config/gitsigns_base.lua`** — keeps gitsigns' single global base
+  (`config.base`) unset and gives each attached buffer the review base of its
+  *own* root instead, via `change_base(ref, false)` under `nvim_buf_call`. The
+  global base is not only a diff base: gitsigns passes it to
+  `git blame <revision>`, so a superproject base leaking into a submodule buffer
+  made the current-line blame name whoever last touched the line on that ref —
+  a squash or merge commit — instead of the line's real author. A base change
+  re-bases that root's buffers only (exact `git.buf_in_root` equality).
+- **`lua/config/gitsigns_blame.lua`** — makes blame answer from the buffer's own
+  history even when that buffer is diffed against a base, by patching the two
+  places the base reaches blame: the `<revision>` argument, and
+  `CacheEntry:get_blame`'s short-circuit that calls every hunk line "Not
+  Committed Yet" (against a base, that is all of your branch's committed work).
+  Scoped by the `git_obj._review_base` tag, so a `gitsigns://` buffer showing a
+  historical revision still blames from that revision. Hunks and signs keep
+  following the base.
 
 ### Bounds
 
@@ -73,11 +89,6 @@ Do not file these as bugs.
   `D`, `?`, with the `*` unstaged marker) but no `b` codes, because `review_base`
   is keyed by the outer toplevel and a submodule's "changed since base" is
   ill-defined.
-- **gitsigns has exactly one global base.** `config.base` is shared by every
-  attached buffer across every repo, and `change_base` re-diffs all of them. Two
-  submodules with different stored bases cannot both be diffed simultaneously —
-  the last `change_base` wins. A plugin limitation, documented in
-  `lua/plugins/gitsigns.lua`.
 - **`dir_cache` does not see external shell changes.** A `git submodule
   add/deinit/init` run outside the editor fires neither `DirChanged` nor a
   `.gitmodules` write. `<leader>gR` clears the same caches as the manual hatch.

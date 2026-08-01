@@ -5,25 +5,6 @@ return {
     local review_base = require("config.review_base")
     local git = require("util.git")
 
-    local function apply_base(bufnr)
-      local root = git.buf_root(bufnr)
-      local ref = root and review_base.get(root) or nil
-      -- gitsigns has only ONE global base (config.base), shared by every attached
-      -- buffer across every repo/submodule. change_base re-diffs ALL attached
-      -- buffers against the ref, so calling it on each attach clobbered things:
-      --   * change_base(nil, true) wiped the global base, re-diffing everything
-      --     against the index even when this buffer has no review base.
-      --   * a buffer in one submodule forced every other repo's buffers to
-      --     re-diff against a ref that may not exist there.
-      -- gitsigns already inherits config.base on attach, so a nil ref needs no
-      -- action; only push a change when this root's base genuinely differs from
-      -- the current global base. (Cross-repo base correctness is inherently
-      -- limited by that single global base — we can't hold a per-repo base here.)
-      if ref and ref ~= require("gitsigns.config").config.base then
-        require("gitsigns").change_base(ref, true)
-      end
-    end
-
     return {
       signcolumn = false,
       numhl = true,
@@ -40,7 +21,9 @@ return {
         ignore_whitespace = false,
       },
       on_attach = function(bufnr)
-        apply_base(bufnr)
+        -- Per-buffer, never global: a superproject's review base must not follow
+        -- this buffer into a submodule (config.gitsigns_base explains why).
+        require("config.gitsigns_base").apply(bufnr)
         local gs = require("gitsigns")
         local map = function(mode, lhs, rhs, desc)
           vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc })
@@ -53,12 +36,12 @@ return {
         end, "Prev hunk")
         map("n", "<leader>hp", gs.preview_hunk, "Preview hunk")
         map("n", "<leader>hs", gs.stage_hunk, "Stage hunk")
-        -- With a review base set, apply_base points gitsigns at that ref, so
+        -- With a review base set, this buffer is pointed at that ref, so
         -- reset_hunk reverts working-tree lines to the BASE content (not the
         -- index) — it can clobber branch-committed work. Confirm first in that
         -- mode; without a base it's the ordinary reset-to-index. Checked per
-        -- press because change_base fires from ReviewBaseChanged without
-        -- re-running on_attach, so attach-time state would go stale.
+        -- press because ReviewBaseChanged re-bases the buffer without re-running
+        -- on_attach, so attach-time state would go stale.
         map("n", "<leader>hr", function()
           local root = git.buf_root(bufnr)
           local ref = root and review_base.get(root)
@@ -101,6 +84,9 @@ return {
     -- sweep). review_base is still required above — file_new_vs_base uses it.
 
     require("gitsigns").setup(opts)
+    -- Blame reports real authorship even when this buffer is diffed against a
+    -- review base; hunks and signs still follow the base (see the module).
+    require("config.gitsigns_blame").setup()
 
     local function paint()
       -- GitHub-light diff tints live in config.palette (git.*) so the literal hex
@@ -496,12 +482,15 @@ return {
       pattern = "ReviewBaseChanged",
       callback = function(args)
         local ref = args.data and args.data.ref or nil
-        require("gitsigns").change_base(ref, true)
+        local root = args.data and args.data.root or nil
+        -- Only this root's buffers are re-based; the ref is meaningless (or, in
+        -- a submodule, means something else entirely) in every other root.
+        require("config.gitsigns_base").rebase_root(root, ref)
         -- Attached buffers repaint via their own GitSignsUpdate once hunks
         -- recompute against the new base; unattached (new-vs-base) buffers get no
         -- such event, so repaint them here — but only in the root whose base
         -- actually changed (a sibling submodule's new-vs-base is unaffected).
-        repaint_all(args.data and args.data.root or nil)
+        repaint_all(root)
       end,
     })
 

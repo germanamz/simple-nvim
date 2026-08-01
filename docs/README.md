@@ -20,6 +20,9 @@ beyond the code.
 - **[lsp-typescript-version.md](lsp-typescript-version.md).** Why ts_ls ran
   mason's bundled TypeScript instead of the project's in pnpm monorepos, and the
   buffer-relative resolution that fixes it.
+- **[lsp-fs-sync.md](lsp-fs-sync.md).** Why deleting or renaming files from the
+  file tree sent gopls and ts_ls into error storms with watchers off, and the
+  in-editor notification path that replaces them.
 - **[js-toolchain.md](js-toolchain.md).** How a JavaScript/TypeScript project's
   formatter and linter are detected, why prettier no longer runs in projects that
   never configured it, and how to diagnose which tool owns a buffer. Also the
