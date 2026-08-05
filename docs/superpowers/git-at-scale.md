@@ -60,14 +60,26 @@ and status in the file tree). This document is the engineering side.
   made the current-line blame name whoever last touched the line on that ref —
   a squash or merge commit — instead of the line's real author. A base change
   re-bases that root's buffers only (exact `git.buf_in_root` equality).
-- **`lua/config/gitsigns_blame.lua`** — makes blame answer from the buffer's own
-  history even when that buffer is diffed against a base, by patching the two
-  places the base reaches blame: the `<revision>` argument, and
+- **`lua/config/gitsigns_blame.lua`** — makes blame answer "who wrote this line"
+  rather than "who last touched this file", on two axes.
+
+  Everywhere, it passes `-C -C` so blame follows lines back through moves and
+  copies. Plain `git blame` stops at the commit that put a line in *this* file,
+  so a file created by lifting code out of another one credits the extraction
+  for every line it moved — a 435-line test file in one repo blamed entirely on
+  its extraction commit, versus eleven real authoring commits with `-C -C`. The
+  flags are injected in `Obj:run_blame`, not in `current_line_blame_opts`,
+  because the per-buffer blame cache is not keyed by opts: whichever path ran
+  first — the eol label, `<leader>hb`, the blame window — would otherwise fix
+  the flags for all of them.
+
+  With a review base it additionally blames from the buffer's own history, by
+  patching the two places the base reaches blame: the `<revision>` argument, and
   `CacheEntry:get_blame`'s short-circuit that calls every hunk line "Not
   Committed Yet" (against a base, that is all of your branch's committed work).
-  Scoped by the `git_obj._review_base` tag, so a `gitsigns://` buffer showing a
-  historical revision still blames from that revision. Hunks and signs keep
-  following the base.
+  That half is scoped by the `git_obj._review_base` tag, so a `gitsigns://`
+  buffer showing a historical revision still blames from that revision. Hunks
+  and signs keep following the base.
 
 ### Bounds
 

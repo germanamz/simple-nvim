@@ -1,7 +1,14 @@
--- Blame answers "who wrote this line" — a question about the buffer's own
--- history, never about the review base. gitsigns derives both from one
--- per-buffer revision (see config.gitsigns_base), so with a base set it answered
--- the wrong question twice over:
+-- Blame answers "who wrote this line". Two things made gitsigns answer "who
+-- last touched this file" instead, and both are patched here.
+--
+-- The first is universal: `git blame` stops at the commit that put a line in
+-- THIS file, so a file created by lifting code out of another one credits the
+-- extraction for every line it moved. M.setup makes every blame path follow
+-- copies (see FOLLOW_COPIES).
+--
+-- The second only bites with a review base. gitsigns derives blame and the diff
+-- from one per-buffer revision (see config.gitsigns_base), so with a base set it
+-- answered the wrong question twice over:
 --
 --   * `git blame <base>` walks history from the base, so a line committed after
 --     it is attributed to whatever the base's tip made of it — or, when the
@@ -11,12 +18,42 @@
 --     index, but against a review base EVERY line you committed on your branch
 --     is inside a hunk — so committed work read as uncommitted.
 --
--- Both are patched below, and only for buffers whose revision came from a review
+-- Both of those are patched only for buffers whose revision came from a review
 -- base (tagged `git_obj._review_base`). A `gitsigns://` buffer showing a
 -- historical revision keeps stock behaviour: there, blaming from that revision
 -- is the whole point. Hunks, signs and `<leader>hd` are untouched — they still
 -- diff against the base.
 local M = {}
+
+-- Follow lines back through moves and copies. `-C` searches the other files a
+-- commit touched; the second `-C` also searches the parent commit's files, and
+-- that is the one a file CREATED by the move needs — the usual shape of "this
+-- helper was extracted into its own file". A third `-C` would search every
+-- commit in history, which is unbounded and fixes nothing this doesn't.
+--
+-- Measured on a 435-line file whose whole content arrived in one extraction
+-- commit (the worst case: git actually has a parent tree to search) it took
+-- blame from 0.16s to 0.55s; where there is nothing to find it costs ~0.03s.
+-- Blame is async, debounced, and cached per buffer, so that is off the hot path.
+local FOLLOW_COPIES = { "-C", "-C" }
+
+-- Every blame path — the eol label, `<leader>hb`, the blame window — shares one
+-- per-buffer cache (`CacheEntry.blame`) that is NOT keyed by opts, so whichever
+-- path runs first decides the flags the whole buffer's blame was computed with.
+-- Injecting here instead of in `current_line_blame_opts.extra_opts` keeps them
+-- on one answer. The caller's table is copied rather than extended in place:
+-- `current_line_blame_opts` is gitsigns' shared config table, and appending to
+-- it would grow the flag list on every blame.
+local function follow_copies(opts)
+  local extra = {}
+  if opts and opts.extra_opts then
+    vim.list_extend(extra, opts.extra_opts)
+  end
+  vim.list_extend(extra, FOLLOW_COPIES)
+  local out = vim.tbl_extend("force", {}, opts or {})
+  out.extra_opts = extra
+  return out
+end
 
 -- True when this object's revision is the review base we applied, rather than a
 -- revision the buffer genuinely represents. The equality check keeps the tag
@@ -68,21 +105,22 @@ local function blame_ignoring_base(self, lnum, opts)
   return blame.entries[lnum]
 end
 
--- Patch the two gitsigns entry points, once. Both keep their stock path for
--- every buffer that isn't sitting on a review base.
+-- Patch the two gitsigns entry points, once. Copy-following applies to every
+-- buffer; dropping the revision keeps its stock path for every buffer that
+-- isn't sitting on a review base.
 function M.setup()
   local Obj = require("gitsigns.git").Obj
-  if Obj._review_base_blame_patched then
+  if Obj._blame_patched then
     return
   end
-  Obj._review_base_blame_patched = true
+  Obj._blame_patched = true
 
   local orig_run_blame = Obj.run_blame
   Obj.run_blame = function(self, contents, lnum, revision, opts)
     if from_review_base(self) then
       revision = nil
     end
-    return orig_run_blame(self, contents, lnum, revision, opts)
+    return orig_run_blame(self, contents, lnum, revision, follow_copies(opts))
   end
 
   local CacheEntry = require("gitsigns.cache").CacheEntry

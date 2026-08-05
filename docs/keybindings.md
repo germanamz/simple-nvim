@@ -609,9 +609,12 @@ background highlights (no sign column: `signcolumn=false`).
 | `<Space>ht`  | toggle deleted-lines display                 |
 | `<Space>gR`  | refresh git hunks & status (manual)          |
 
-Blame always answers from the file's own history, even when a review base is set
-(see below): a line you committed on your branch is named by its real commit, not
-reported as uncommitted, and never attributed to a ref belonging to another repo.
+Blame names whoever wrote the line, not whoever last touched the file. It follows
+lines back through moves and copies (`-C -C`), so code lifted out of one file into
+another keeps its original author instead of being credited to the extraction. And
+it answers from the file's own history even when a review base is set (see below):
+a line you committed on your branch is named by its real commit, not reported as
+uncommitted, and never attributed to a ref belonging to another repo.
 
 All git displays auto-refresh when nvim regains focus (so an external
 commit/stage shows up on return): gitsigns hunks, the statusline branch/base

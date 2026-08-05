@@ -381,6 +381,73 @@ describe("e2e: gitsigns", function()
     require("config.review_base").clear(canonical)
   end)
 
+  -- `git blame` stops at the commit that put a line in THIS file, so a file
+  -- created by lifting code out of another one blames every extracted line on
+  -- whoever did the extraction — the label names who last touched the file
+  -- instead of who wrote the line. Following copies fixes the extracted lines
+  -- without disturbing the ones the extraction genuinely introduced.
+  it("blames extracted lines by the commit that wrote them, not the move", function()
+    local helper = table.concat({
+      "function M.validate_workspace_configuration(cfg)",
+      '  assert(type(cfg) == "table", "workspace configuration must be a table")',
+      "  return cfg.workspace_root ~= nil and cfg.workspace_name ~= nil",
+      "end",
+    }, "\n")
+    local stays = table.concat({
+      "function M.stays_behind()",
+      '  return "this one is not extracted anywhere"',
+      "end",
+    }, "\n")
+    local repo = git_fixture.repo({
+      commits = {
+        {
+          files = {
+            ["orig.lua"] = "local M = {}\n\n" .. helper .. "\n\n" .. stays .. "\n\nreturn M\n",
+          },
+          message = "write the workspace helper",
+        },
+        {
+          -- The helper moves into its own file while orig.lua lives on, and the
+          -- new file gains a function of its own. git's copy detection needs a
+          -- block of real code (≥40 alphanumeric chars) to match, which the
+          -- helper above supplies.
+          files = {
+            ["orig.lua"] = "local M = {}\n\n" .. stays .. "\n\nreturn M\n",
+            ["extracted.lua"] = "local M = {}\n\n"
+              .. helper
+              .. "\n\nfunction M.brand_new_thing()\n"
+              .. '  return "added during the extraction"\n'
+              .. "end\n\nreturn M\n",
+          },
+          message = "extract the workspace helper",
+        },
+      },
+    })
+    local canonical = vim.uv.fs_realpath(repo) or repo
+    vim.fn.chdir(canonical)
+    vim.cmd("edit " .. canonical .. "/extracted.lua")
+    local bufnr = vim.api.nvim_get_current_buf()
+    wait.wait_for(function()
+      return vim.b[bufnr].gitsigns_status ~= nil
+    end, 5000, "gitsigns_status never set on buffer")
+
+    local function blame_at(lnum)
+      vim.b[bufnr].gitsigns_blame_line_dict = nil
+      vim.api.nvim_win_set_cursor(0, { lnum, 0 })
+      vim.api.nvim_exec_autocmds("CursorMoved", { buffer = bufnr, modeline = false })
+      wait.wait_for(function()
+        return vim.b[bufnr].gitsigns_blame_line_dict ~= nil
+      end, 5000, "blame never resolved for line " .. lnum)
+      return vim.b[bufnr].gitsigns_blame_line_dict
+    end
+
+    -- Line 4 is the assert inside the moved helper: written by the first commit,
+    -- merely relocated by the second.
+    assert.are.equal("write the workspace helper", blame_at(4).summary)
+    -- Line 9 is brand_new_thing's body, which really did arrive with the move.
+    assert.are.equal("extract the workspace helper", blame_at(9).summary)
+  end)
+
   it("hides hunk highlights and restores them on toggle", function()
     local bufnr = open_modified_repo()
     ensure_shown(bufnr)
