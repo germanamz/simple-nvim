@@ -26,8 +26,13 @@ return {
     -- preset's own snippet_forward, which this whole-chain override would
     -- otherwise drop — core's default Tab mapping covers the no-menu case via
     -- "fallback", but with the menu open "accept" would win over the jump);
-    -- otherwise it accepts the blink menu selection, else falls back to a
-    -- literal Tab. Enter remains the canonical menu accept throughout. The
+    -- otherwise it accepts from the blink menu, else falls back to a literal
+    -- Tab. That menu step is "select_and_accept", not "accept", because nothing
+    -- is preselected here (see completion.list.selection below): "accept" needs
+    -- an explicit selection and would otherwise fall through to a literal Tab,
+    -- whereas select_and_accept takes `selected_item_idx or 1` — so Tab still
+    -- accepts the top item with no C-n first. Enter accepts only what you
+    -- deliberately selected, and is a plain newline otherwise. The
     -- function runs in blink's insert-mode keymap runner, where a truthy return
     -- means "handled, stop here" and nil/false falls through to the next entry
     -- — see saghen/blink.cmp keymap/apply.lua. A chain containing a snippet
@@ -52,7 +57,7 @@ return {
           end
         end,
         "snippet_forward",
-        "accept",
+        "select_and_accept",
         "fallback",
       },
     },
@@ -80,6 +85,17 @@ return {
       },
     },
     completion = {
+      -- Nothing is selected when the menu opens. blink preselects item 1 by
+      -- default, which under the "enter" preset makes <CR> ("accept" then
+      -- "fallback") *always* accept — there is no selection for accept to
+      -- decline, so a newline typed right after a trigger char (`.` in go, where
+      -- gopls fires the menu on the dot) silently completed a symbol instead.
+      -- With preselect off, <CR> is a literal newline until you pick an entry
+      -- with C-n/C-p or the arrows; Tab still takes the top item via
+      -- select_and_accept (see the keymap note above). Trade-off: the
+      -- documentation window below no longer auto-shows on open, since there is
+      -- no selected item to document until you move.
+      list = { selection = { preselect = false } },
       documentation = {
         auto_show = true,
         auto_show_delay_ms = 200,
