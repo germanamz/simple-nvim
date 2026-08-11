@@ -80,6 +80,7 @@ return {
     local inline_diff = require("util.inline_diff")
     local path = require("util.path")
     local palette = require("config.palette")
+    local hl = require("util.hl")
     -- review_base validates stored bases lazily on first read now (no startup
     -- sweep). review_base is still required above — file_new_vs_base uses it.
 
@@ -111,6 +112,28 @@ return {
       vim.api.nvim_set_hl(0, "GitSignsDeleteLnInline", {})
 
       vim.api.nvim_set_hl(0, "GitSignsDelPrev", { sp = g.delete, underdashed = true })
+
+      -- Current-line blame ("You, 16 hours ago - <subject>") is the most
+      -- ancillary text on screen: it follows the cursor and is read on purpose,
+      -- never scanned. gitsigns links it to NonText, which is the dimmest
+      -- builtin group on a DARK background — this theme paints NonText #20252c,
+      -- so the blame rendered at 12.9:1 against the CursorLine band, as heavy as
+      -- the code it annotates. Same trap config.syntax_emphasis documents for
+      -- @comment.documentation.
+      --
+      -- Dimmed to the ancillary-text tier: palette.muted at 0.82, matching the
+      -- doc-comment tier, which lands ~2.75:1 against CursorLine — a touch
+      -- softer than a doc comment on plain background, which is right for
+      -- something the cursor drags around with it. The alpha is deliberately its
+      -- own knob rather than a shared constant: blame and doc comments are
+      -- tuned against different backdrops.
+      -- fallback = Comment, never define_dim's NonText default: falling back to
+      -- NonText here would restore the exact bug this line fixes.
+      hl.define_dim("GitSignsCurrentLineBlame", {
+        color = palette.muted,
+        alpha = 0.82,
+        fallback = "Comment",
+      })
     end
     paint()
     -- The GitHub theme defines its own GitSigns* groups on load; re-assert these

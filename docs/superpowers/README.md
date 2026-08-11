@@ -31,6 +31,11 @@ divergence is called out — those deltas are usually the most useful part.
   that replaced in-buffer markdown decoration.
 - **[theme.md](theme.md).** The move to GitHub Light high-contrast, and what the
   config still overrides on top of it.
+- **[token-emphasis.md](token-emphasis.md).** Dimming comments into two tiers,
+  bolding declaration names but not call sites, and the hairline that separates
+  one top-level declaration from the next. Includes the two traps: LSP semantic
+  tokens outranking treesitter, and `line_hl_group` being silently ignored on an
+  ephemeral extmark.
 
 ## Where the originals went
 

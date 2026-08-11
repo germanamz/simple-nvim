@@ -32,9 +32,10 @@ Leader = `<Space>` · Local leader = `\`
 18. [Markdown / MDX](#18-markdown--mdx)
 19. [Formatting](#19-formatting)
 20. [Sticky context](#20-sticky-context)
-21. [Command-line tricks](#21-command-line-tricks)
-22. [Sessions](#22-sessions)
-23. [Known conflicts](#23-known-conflicts)
+21. [Reading density](#21-reading-density)
+22. [Command-line tricks](#22-command-line-tricks)
+23. [Sessions](#23-sessions)
+24. [Known conflicts](#24-known-conflicts)
 
 ---
 
@@ -738,7 +739,26 @@ disappears when you can already see where you are.
 
 ---
 
-## 21. Command-line tricks
+## 21. Reading density
+
+How much of the screen each kind of text is allowed to claim. Comments are dimmed
+to two tiers — an inline `// why` note stays legible, the doc block above a
+declaration recedes further — while declaration *names* go bold and call sites
+stay plain. A hairline sits above each top-level declaration group so you can see
+where one ends and the next begins. Together they matter most in comment-heavy
+languages like Go. See [superpowers/token-emphasis.md](superpowers/token-emphasis.md).
+
+| Keys         | Action                                             |
+| ------------ | -------------------------------------------------- |
+| `<Space>ur`  | toggle the declaration hairlines                   |
+| `<Space>ub`  | toggle block scope guides (the vertical indent bars)|
+
+Nothing else here is a toggle: the comment tiers and the bold declaration names
+are highlight groups, retuned in `lua/config/syntax_emphasis.lua`.
+
+---
+
+## 22. Command-line tricks
 
 In `:` command-line mode:
 
@@ -766,7 +786,7 @@ Other helpful Ex bits:
 
 ---
 
-## 22. Sessions
+## 23. Sessions
 
 `persistence.nvim` auto-saves a session per working directory (window layout,
 open buffers, cwd). Nothing is restored automatically. Pick a restore on demand.
@@ -778,7 +798,7 @@ open buffers, cwd). Nothing is restored automatically. Pick a restore on demand.
 
 ---
 
-## 23. Known conflicts
+## 24. Known conflicts
 
 ### `gd`: depends on filetype
 

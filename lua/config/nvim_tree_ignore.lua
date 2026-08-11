@@ -12,12 +12,19 @@ local M = {}
 local ignore_filter = require("config.ignore_filter")
 local hl = require("util.hl")
 
--- Muted GREY from Comment: 0.55 weight, over halfway to the background, so it
--- recedes ("de-emphasised noise"). Distinct from the blue dot-folders and teal
--- symlinks; this decorator is ordered LAST of the three (see nvim-tree.lua) so
--- grey wins overlaps — an ignored dot-folder like .next/.venv reads grey.
+-- Muted GREY from Comment: 0.7 weight, comfortably past halfway to the
+-- background, so it recedes ("de-emphasised noise"). Distinct from the blue
+-- dot-folders and teal symlinks; this decorator is ordered LAST of the three
+-- (see nvim-tree.lua) so grey wins overlaps — an ignored dot-folder like
+-- .next/.venv reads grey.
+--
+-- The weight was 0.55 while Comment was the theme's high-contrast #4b535d.
+-- config.syntax_emphasis dims Comment to palette.muted for readability in
+-- comment-heavy languages, and this borrows Comment purely as "a muted grey" —
+-- dimming twice would have washed ignored rows out to ~1.9:1, barely above the
+-- indent guides. 0.7 of the softer base reproduces the grey this always had.
 local function define_highlights()
-  hl.define_dim("NvimTreeGitIgnored", { source = "Comment", alpha = 0.55 })
+  hl.define_dim("NvimTreeGitIgnored", { source = "Comment", alpha = 0.7 })
 end
 
 -- is_ignored is O(1) table lookups (static set + memoized oracle); a

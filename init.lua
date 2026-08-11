@@ -44,7 +44,13 @@ vim.filetype.add({ extension = { mdx = "mdx", tmpl = "gohtmltmpl", tf = "terrafo
 require("config.options")
 require("config.lsp_refs").setup()
 require("config.statusline").setup()
+-- Ordering among the three visual modules is load-bearing on the ColorScheme
+-- event, which fires their handlers in registration order: syntax_emphasis sets
+-- Comment, and decl_rules derives its hairline from Comment's resolved value.
+-- (block_guides only *links* to Comment, so it tracks either way.)
+require("config.syntax_emphasis").setup()
 require("config.block_guides").setup()
+require("config.decl_rules").setup()
 require("config.dir_cache").setup()
 require("config.ignore_filter").setup()
 

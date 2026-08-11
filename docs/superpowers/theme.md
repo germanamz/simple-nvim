@@ -26,6 +26,15 @@ was never explicitly set anywhere.
 5. Plain theme token styles — no italic comments, no bold keywords.
 6. Dead dark-mode code is deleted rather than left in place.
 
+**Decisions 3 and 5 were since amended**, deliberately and in one place. Maximum
+token contrast turned out to have a cost the variant choice could not see: it
+applies to *comments* too, and a language that puts a doc comment above every
+exported declaration ends up with prose as loud as code. `config.syntax_emphasis`
+now dims comments (in two tiers) and bolds declaration names while leaving call
+sites alone. Comments are still not italic and keywords are still not bold — the
+emphasis is confined to the comment/declaration axis, which is the one that was
+actually failing. See [token-emphasis.md](token-emphasis.md).
+
 ## Load order
 
 This is the one non-obvious constraint. The eager `config.*` modules are required
@@ -73,6 +82,11 @@ The distinction that matters:
 - **`M.git`** intentionally does **not** use `default = true`. The bespoke diff
   visualization — numbered line-number chips, full-line backgrounds, inline
   word-diff — is meant to win over the theme's plainer `GitSigns*` groups.
+- **The `syntax_emphasis` / `decl_rules` groups** likewise skip `default = true`,
+  and for a stronger reason: they are *re-derived from the live theme* on every
+  `ColorScheme`, and a `default` set refuses to update a group that already
+  exists — the emphasis would freeze at whatever the first colorscheme resolved.
+  Same trap `lsp_refs`' `LspReferenceText` documents below.
 
 | Role | Value | Set in |
 | --- | --- | --- |
@@ -93,6 +107,19 @@ The distinction that matters:
 | `ReviewBaseActive` | `#8250df` | `config/review_base.lua` |
 | `SmartFilesUnstaged`, `SmartFilesLegend`, `ReviewBaseLegend`, `BuffersLegend`, `LspPickerLegend` | `palette.muted` | various |
 | `SmartFilesLegendCount`, `BuffersLegendFlag`, `LspPickerLegendKey` | `#768390`, bold | various |
+| `Comment` | `palette.muted` | `config/syntax_emphasis.lua` |
+| `@comment.documentation` | `palette.muted` blended `0.82` toward the background | ditto |
+| `@lsp.type.comment` | cleared, so treesitter's comment tiers survive | ditto |
+| `@function`, `@function.method`, `@type.definition` | the theme's own colour **+ bold** | ditto |
+| `@function.call`, `@function.method.call`, `@type` | the theme's own colour, pinned non-bold | ditto |
+| `@lsp.type.function` / `.method` / `.type` | pinned to the plain "use" weight | ditto |
+| `@lsp.typemod.<t>.definition` / `.declaration` | linked to the bold declaration group | ditto |
+| `@module`, `@lsp.type.namespace` | `#010409` — neutral; they were the *exact* keyword red | ditto |
+| `@variable.member`, `@property`, `@lsp.type.property` | `#971368` magenta; they were the same blue as constants | ditto |
+| `@constant*`, `@number`, `@boolean`, `@lsp.typemod.variable.defaultLibrary` | `#0550ae`; lightened away from strings | ditto |
+| `@type.definition` | `#702c00` — the type colour, with bold doing the "definition" work | ditto |
+| `DeclRule` | `sp` = `Comment` blended `0.45`, underlined | `config/decl_rules.lua` |
+| `GitSignsCurrentLineBlame` | `palette.muted` blended `0.82`; gitsigns links it to `NonText`, which this theme paints near-black | `plugins/gitsigns.lua` |
 
 The git line-number "chip" is dark foreground on a light tint. The old
 white-on-saturated chip washed out on a white background.
@@ -122,20 +149,41 @@ references distinct from a Visual selection.
 ## Nothing in the suite guards a color
 
 The tests are theme-agnostic on purpose, and that cuts both ways: **no spec
-asserts a hex value or `vim.o.background`.** The only hex literals under `tests/`
-are in `hl_spec.lua`, and only for the pure `hl.blend` function. The four specs
-that call `nvim_get_hl` (`lsp_refs`, `hl`, `nvim_tree_decorators`,
-`block_guides`) assert group names, definedness and the `LspReferenceText`
-underline attribute — never a color.
+asserts that a group is a particular colour.** Six specs call `nvim_get_hl` —
+`lsp_refs`, `hl`, `nvim_tree_decorators`, `block_guides`, `syntax_emphasis` and
+the `decl_rules` e2e — and what they assert is group names, definedness, and
+*attributes*: the `LspReferenceText` underline, the `DeclRule` underline, `bold`
+on each declaration capture and its absence on each call-site capture.
+
+Two of them touch colour without pinning one, and the distinction is worth
+keeping if you add more:
+
+- `hl_spec.lua` has hex literals, but only as inputs to the pure `hl.blend`
+  function — arithmetic, not theme.
+- `syntax_emphasis_spec.lua` stands up a miniature fixture theme (hex literals
+  it supplies itself, never read from the real colorscheme) and then asserts
+  *relationships*: that `Comment` ends up at `palette.muted` — the shared
+  constant, not a literal — and that `@comment.documentation` has a **higher
+  relative luminance** than `Comment`, i.e. is dimmer on a light background.
+  Retune `palette.muted` or `DOC_ALPHA` and the spec still passes; break the
+  wiring and it fails.
 
 So the table above is verified by eye, not by `make test`. After retuning any of
 it, look at a real `nvim` on the high-contrast white background and check: code
 tokens across several languages; a git diff (signs, line backgrounds, inline
 word-diff, the deletion underdash); the smart picker's legend and status letters;
-the block-guide dim/chain/active hierarchy; the treesitter-context separator.
+the block-guide dim/chain/active hierarchy; the treesitter-context separator; and
+a comment-dense Go file for the two comment tiers, the bold `func` names and the
+declaration hairlines.
 
 ## Out of scope
 
 - Dark mode or dual-background support.
-- Per-language token tweaks beyond the theme's defaults.
-- Italic or bold token styling.
+- Per-*filetype* token rules. The config does now retune token colours — see
+  [token-emphasis.md](token-emphasis.md) for the comment tiers, the declaration
+  bolding and the four rebalanced hues — but every one of them overrides a
+  capture or semantic-token group, so it applies to whatever language uses that
+  group. Nothing branches on `filetype`. The two files under `after/queries/`
+  (`go/highlights.scm`, `gotmpl/injections.scm`) patch missing upstream
+  *captures* and *injections*, never a colour.
+- Italic token styling.
