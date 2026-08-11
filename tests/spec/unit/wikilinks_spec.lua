@@ -124,7 +124,8 @@ describe("config.wikilinks", function()
 
   -- Resolve a local-file link's destination to an absolute path: relative to the
   -- source file's directory (standard markdown semantics), with any `#fragment`
-  -- dropped and `.`/`..` segments collapsed. Absolute destinations are kept.
+  -- dropped, percent-escapes decoded, and `.`/`..` segments collapsed. Absolute
+  -- destinations are kept.
   describe("_resolve_file", function()
     it("resolves a relative destination against the source dir", function()
       assert.are.equal("/home/u/notes/PRODUCT.md", wl._resolve_file("PRODUCT.md", "/home/u/notes"))
@@ -140,6 +141,38 @@ describe("config.wikilinks", function()
 
     it("drops a trailing #fragment before resolving", function()
       assert.are.equal("/home/u/doc.md", wl._resolve_file("doc.md#sec", "/home/u"))
+    end)
+
+    -- CommonMark spells a space in a link destination as %20, so the on-disk
+    -- name only appears after decoding -- without it every link to a file with
+    -- a space in its name is reported as missing.
+    it("decodes percent-escaped spaces", function()
+      assert.are.equal("/home/u/sub/My Note.md", wl._resolve_file("sub/My%20Note.md", "/home/u"))
+    end)
+
+    it("decodes multi-byte percent escapes", function()
+      assert.are.equal("/home/u/café.md", wl._resolve_file("caf%C3%A9.md", "/home/u"))
+    end)
+
+    -- The fragment split runs on the still-encoded dest (the separating `#` is
+    -- raw), so an encoded `#` in the filename survives it and decodes after.
+    it("decodes an escaped # instead of treating it as a fragment", function()
+      assert.are.equal("/home/u/a#b.md", wl._resolve_file("a%23b.md", "/home/u"))
+    end)
+
+    it("decodes the path but not the dropped fragment", function()
+      assert.are.equal("/home/u/My Note.md", wl._resolve_file("My%20Note.md#a%20b", "/home/u"))
+    end)
+
+    it("leaves a lone % that is not a valid escape", function()
+      assert.are.equal("/home/u/100% done.md", wl._resolve_file("100% done.md", "/home/u"))
+      assert.are.equal("/home/u/%zz.md", wl._resolve_file("%zz.md", "/home/u"))
+    end)
+
+    -- `+` means a space in a query string, never in a path -- a file called
+    -- "a+b.md" must not resolve to "a b.md".
+    it("does not treat + as a space", function()
+      assert.are.equal("/home/u/a+b.md", wl._resolve_file("a+b.md", "/home/u"))
     end)
   end)
 

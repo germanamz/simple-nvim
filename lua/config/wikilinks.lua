@@ -113,12 +113,24 @@ M._standard_link_at = standard_link_at
 
 -- Resolve a local-file link destination to an absolute path, relative to the
 -- source file's directory (CommonMark semantics). Drops a trailing `#fragment`,
--- keeps an absolute (or `~`) dest, and collapses `.`/`..` segments.
+-- decodes percent-escapes, keeps an absolute (or `~`) dest, and collapses
+-- `.`/`..` segments.
+--
+-- A link destination is percent-encoded, so `[Note](My%20Note.md)` names the
+-- file "My Note.md" on disk -- without decoding, every link to a file with a
+-- space (or any other escaped character) in its name resolves to a path that
+-- doesn't exist and is reported as a broken link. The decode runs *after* the
+-- fragment split, which is the order the encoding implies: the `#` that starts
+-- a fragment is raw, while a `#` belonging to the filename arrives as `%23` and
+-- must survive the split to be decoded here. vim.uri_decode leaves a lone `%`
+-- (`100% done.md`) alone and doesn't read `+` as a space, both of which are
+-- what a path wants.
 local function resolve_file(dest, src_dir)
   dest = dest:gsub("#.*$", "")
   if dest == "" then
     return nil
   end
+  dest = vim.uri_decode(dest)
   local first = dest:sub(1, 1)
   local path = (first == "/" or first == "~") and dest or (src_dir .. "/" .. dest)
   return vim.fs.normalize(path)
