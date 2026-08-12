@@ -19,7 +19,18 @@ local servers = {
   },
   pyright = { filetypes = { "python" } },
   gopls = { filetypes = { "go", "gomod" } },
-  rust_analyzer = { filetypes = { "rust" } },
+  -- experimental.localDocs asks rust-analyzer to return a `local` file:// path
+  -- alongside the docs.rs URL in its `experimental/externalDocs` reply, so a
+  -- crate whose docs have been built by `cargo doc` opens from disk. config.docs
+  -- stats the path before preferring it, and falls back to the web URL when the
+  -- docs were never generated. rust-analyzer is the only server that implements
+  -- this request at all (gopls, pyright, ts_ls, clangd and lua_ls all answer
+  -- -32601), and it is the only way to get URLs that follow re-exports to the
+  -- defining crate and honor a crate's #![doc(html_root_url)].
+  rust_analyzer = {
+    filetypes = { "rust" },
+    capabilities = { experimental = { localDocs = true } },
+  },
   clangd = { filetypes = { "c", "cpp", "objc", "objcpp", "cuda", "proto" } },
   lua_ls = {
     filetypes = { "lua" },

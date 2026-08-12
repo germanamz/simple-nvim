@@ -53,6 +53,9 @@ require("config.block_guides").setup()
 require("config.decl_rules").setup()
 require("config.dir_cache").setup()
 require("config.ignore_filter").setup()
+-- gK / <leader>kd, plus the vim.ui.open wrapper that routes web URLs into a
+-- cmux browser pane instead of raising the system browser over the terminal.
+require("config.docs").setup()
 
 vim.keymap.set("n", "<leader>k?", function()
   vim.cmd.edit(vim.fn.stdpath("config") .. "/docs/keybindings.md")

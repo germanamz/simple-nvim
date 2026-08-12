@@ -56,6 +56,7 @@ Leader = `<Space>` · Local leader = `\`
 | `<Space>E`        | Open netrw file tree in current window                |
 | `gd`              | Go to definition (LSP)                                |
 | `K`               | Hover docs (LSP default)                              |
+| `gK`              | Open the *real* docs for the thing under the cursor   |
 | `]c` / `[c`       | Next / previous git hunk                              |
 | `]d` / `[d`       | Next / previous diagnostic (Nvim 0.11 default)        |
 | `]r` / `[r`       | Next / previous LSP reference in current buffer       |
@@ -537,6 +538,30 @@ Global (not buffer-local):
 | ------------ | ------------------------------------------------------- |
 | `<Space>ll`  | picker over active LSP clients (`:LspList`)              |
 | `<Space>lk`  | stop LSP servers left serving no buffer (`:LspReapIdle`) |
+| `gK`         | **documentation** for the symbol / import under the cursor |
+| `<Space>kd`  | picker over this project's declared dependencies         |
+
+`gK` is the docs counterpart to `K`: where `K` shows the hover blurb, `gK` opens
+the actual documentation. It asks the running server first — gopls hands back a
+version-pinned, symbol-anchored `pkg.go.dev` link, and rust-analyzer resolves
+re-exports to the crate that really defines the symbol — then falls back to the
+language adapter, and finally to a web search so the key is never a no-op.
+
+Where a language has a good offline docs command (`go doc`, `pydoc`, `man 3`)
+the output opens in a float instead; press `o` in that float for the web page.
+Neovim's own API skips all of it and goes to `:help`. **Both keys** honor this —
+picking a Go module from `<Space>kd` renders `go doc` in the float, same as `gK`.
+
+Pages opened from the picker are pinned to the version your manifest declares
+(`pkg.go.dev/…@v1.3.0`, `docs.rs/serde/1.0/serde/`) rather than to latest. That
+version is read straight from `go.mod` / `Cargo.toml` — no lockfile is parsed
+and nothing is resolved, so a manifest stating a range still yields a range,
+which docs.rs accepts.
+
+Web pages open in a **cmux browser pane** beside Neovim rather than raising the
+system browser. Repeated lookups re-navigate the same pane. `gx` and anything
+else that opens a URL go the same way (see `lua/config/open_url.lua`); outside
+cmux it degrades to `vim.ui.open`.
 
 In the `<Space>ll` picker: `j`/`k` move, `<CR>` restarts the client under the
 cursor (re-attaching its buffers), `<C-k>` stops it after a confirm, `<esc>`
