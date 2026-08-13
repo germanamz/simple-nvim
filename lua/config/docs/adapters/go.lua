@@ -5,18 +5,19 @@
 -- --------------------
 -- `go doc` is the strongest offline renderer any adapter here gets: it reads
 -- $GOMODCACHE directly, needs no build step and no generated HTML, and answered
--- in 91ms (stdlib) / 136ms (third-party) under GOPROXY=off on a warm cache. The
--- float beats the browser, so the URL is the fallback rather than the reverse.
+-- in 91ms (stdlib) / 136ms (third-party) under GOPROXY=off on a warm cache —
+-- 60-70ms for a whole package with -all. The viewer beats the browser, so the
+-- URL is the fallback rather than the reverse.
 --
 -- The all-or-nothing module graph
 -- -------------------------------
 -- `go doc` resolves the WHOLE module graph before it will name a single symbol,
 -- so any unresolvable require poisons it — but not uniformly, and the asymmetry
--- is what cmd() below is shaped around. Probed with one uncached module in
+-- is what page() below is shaped around. Probed with one uncached module in
 -- go.mod: stdlib lookups still succeed (exit 0) while EVERY third-party lookup
 -- fails (exit 1), including modules that are themselves fully cached, because
 -- the failed graph load drops the go command back to GOPATH resolution. A
--- missing go.sum entry fails identically. So a failing cmd() is routine, not
+-- missing go.sum entry fails identically. So a failing page() is routine, not
 -- exceptional: the driver falls through to url() and pkg.go.dev serves the same
 -- page.
 --
@@ -258,44 +259,6 @@ function M.url(c, _ctx)
   return url
 end
 
---- argv for rendering `c` with `go doc`.
----
---- `-C` must be the first flag — `go doc <sym> -C <dir>` prints a usage error —
---- and it is what makes third-party lookups work at all: from outside a module,
---- `go doc github.com/julienschmidt/httprouter.Router` fails while
---- `go doc net/http.HandlerFunc` still resolves out of GOROOT. That is exactly
---- why a nil root is fatal for a dependency but harmless for the standard
---- library, and why this returns nil in only the first of those two cases.
----
---- The `@` guard is not defensive coding: `go doc` genuinely rejects
---- `pkg@version` ("cannot find package ..."), so a manifest_line coordinate
---- would burn a process spawn to fail before the driver reached url().
----@param c DocCoord
----@param ctx DocCtx
----@return string[]|nil
-function M.cmd(c, ctx)
-  if not c or type(c.pkg) ~= "string" or c.pkg == "" then
-    return nil
-  end
-  if c.pkg:find("@", 1, true) then
-    return nil
-  end
-
-  local arg = c.pkg
-  if type(c.symbol) == "string" and c.symbol ~= "" then
-    arg = arg .. "." .. c.symbol
-  end
-
-  local root = ctx and ctx.root
-  if not root then
-    if not c.stdlib then
-      return nil
-    end
-    return { "go", "doc", arg }
-  end
-  return { "go", "doc", "-C", root, arg }
-end
-
 -- Module paths and versions, as character classes rather than %p: %p would also
 -- swallow the quotes and parens that surround real go.mod syntax.
 local PATH_PAT = "[%w%.%-_~/]+"
@@ -493,6 +456,347 @@ local function module_deps(root)
 
   vim.list_extend(direct, indirect)
   return direct
+end
+
+-- ===========================================================================
+-- The viewer's half: a whole page, an outline into it, and source locations.
+-- ===========================================================================
+
+--- argv for the COMPLETE package page.
+---
+--- `-all` rather than the index `go doc` prints by default, and that one flag
+--- is what makes the viewer possible. The index renders `type Client struct{
+--- ... }` and stops; -all carries the full struct with its field comments and
+--- every method inline (net/http: the type at line 711, `func (c *Client) Do`
+--- at 796). So one 60-70ms call leaves nothing to fetch, and picking a symbol
+--- out of the outline is a scroll rather than another subprocess.
+---
+--- `c.symbol` is deliberately ignored. A page is a package; the symbol you
+--- arrived asking about only decides where the viewer parks the cursor.
+---@param c DocCoord
+---@param ctx DocCtx
+---@return DocPage|nil
+function M.page(c, ctx)
+  if not c or type(c.pkg) ~= "string" or c.pkg == "" then
+    return nil
+  end
+  -- A module coordinate (`path@version`, from manifest_line) names a thing
+  -- `go doc` cannot render — same rejection cmd() makes, and for the same
+  -- reason: it would burn a spawn to fail.
+  if c.pkg:find("@", 1, true) then
+    return nil
+  end
+  local root = ctx and ctx.root
+  if root then
+    return { cmd = { "go", "doc", "-all", "-C", root, c.pkg }, title = c.pkg }
+  end
+  -- Outside a module only GOROOT resolves, exactly as in cmd().
+  if not c.stdlib then
+    return nil
+  end
+  return { cmd = { "go", "doc", "-all", c.pkg }, title = c.pkg }
+end
+
+-- The four headers `go doc -all` emits, at column 0 and in this spelling.
+local SECTIONS = {
+  CONSTANTS = true,
+  VARIABLES = true,
+  FUNCTIONS = true,
+  TYPES = true,
+}
+
+-- The declaration keywords that can open a column-0 line. Matched against an
+-- exact set rather than `^%l+%s`, so a doc paragraph that happens to begin at
+-- column 0 with a lowercase word cannot be read as a declaration.
+local DECL = { func = true, type = true, const = true, var = true }
+
+--- An outline of `lines`, as a tree of entries indexing back into them.
+---
+--- Pure: page text in, entries out, no buffer and no process. That is what
+--- lets the whole parser be tested against captured `go doc -all` output.
+---
+--- The format makes this exact rather than heuristic. Declarations sit at
+--- column 0 and documentation prose is always indented, so anchoring on `^`
+--- separates them with no lookahead. Methods nest under their type by parsing
+--- the RECEIVER — `func (c *Client) Do` files under `type Client` because of
+--- the `(c *Client)`, not because of where it happens to fall in the file.
+---
+--- const/var groups collapse to one entry apiece. Expanding them is what an
+--- outline must not do: net/http declares roughly a hundred status constants
+--- in a single block, and listing each would bury the types they sit above.
+--- The group is labelled with its first member, and `/` still finds any
+--- individual constant in the page.
+---@param lines string[]
+---@return DocEntry[]
+function M.outline(lines)
+  if type(lines) ~= "table" then
+    return {}
+  end
+
+  local out, by_type = {}, {}
+  local section, group = nil, nil
+
+  for i, line in ipairs(lines) do
+    if group then
+      -- Inside a `const (` / `var (` block. Column-0 `)` ends it; the first
+      -- tab-indented identifier names it. Comment lines inside the block start
+      -- `\t//` and so cannot be mistaken for that identifier.
+      if line:match("^%)") then
+        group = nil
+      elseif not out[group].label then
+        local name = line:match("^\t([%w_]+)")
+        if name then
+          out[group].label = name .. " …"
+          out[group].symbol = name
+        end
+      end
+    elseif SECTIONS[line] then
+      out[#out + 1] = { label = line, lnum = i, kind = "section" }
+      section = #out
+    else
+      local kw, rest = line:match("^([%l]+)%s+(.*)$")
+      if kw and DECL[kw] and rest ~= "" then
+        -- Only const and var open a group. Testing the paren alone would read
+        -- a method — `func (c *Client) Do(...)`, whose rest also begins `(` —
+        -- as a block opener, and it would then swallow every declaration up to
+        -- the next column-0 `)`.
+        if (kw == "const" or kw == "var") and rest:sub(1, 1) == "(" then
+          -- `const (` / `var (`: one entry, labelled once we see a member.
+          out[#out + 1] = { label = nil, lnum = i, kind = kw, parent = section }
+          group = #out
+        elseif kw == "func" then
+          local recv, name = rest:match("^%(%s*[%w_]*%s*%*?([%w_]+)[^%)]*%)%s*([%w_]+)")
+          if recv and name then
+            out[#out + 1] = {
+              label = name,
+              lnum = i,
+              kind = "method",
+              parent = by_type[recv] or section,
+              -- `Client.Do` is simultaneously what `go doc` accepts and the
+              -- pkg.go.dev anchor, so one string serves both.
+              symbol = recv .. "." .. name,
+            }
+          else
+            local fn = rest:match("^([%w_]+)")
+            if fn then
+              out[#out + 1] = { label = fn, lnum = i, kind = "func", parent = section, symbol = fn }
+            end
+          end
+        else
+          local name = rest:match("^([%w_]+)")
+          if name then
+            out[#out + 1] = { label = name, lnum = i, kind = kw, parent = section, symbol = name }
+          end
+          if kw == "type" and name then
+            by_type[name] = #out
+          end
+        end
+      end
+    end
+  end
+
+  -- A group that never yielded a member name (an empty or malformed block) has
+  -- no label and would render as a blank row. Drop those rather than show them.
+  local kept = {}
+  local remap = {}
+  for idx, e in ipairs(out) do
+    if e.label then
+      kept[#kept + 1] = e
+      remap[idx] = #kept
+    end
+  end
+  for _, e in ipairs(kept) do
+    e.parent = e.parent and remap[e.parent] or nil
+  end
+  return kept
+end
+
+--- Import short-name -> import path, for the page's own package.
+---
+--- Async and lazy. The viewer asks only when you actually press <CR> on a
+--- qualified name, so a page you merely read costs nothing, and the answer is
+--- cached for the life of that page. `go list` is 40ms and — unlike `go list
+--- -m all` — resolves only this one package, so it stays offline-safe.
+---
+--- Keyed by the identifier the import BINDS, which is package_name()'s job:
+--- net/url binds `url`, and github.com/go-chi/chi/v5 binds `chi`, not `v5`.
+---@param c DocCoord
+---@param ctx DocCtx
+---@param cb fun(map: table<string, string>)
+function M.qualifiers(c, ctx, cb)
+  if not c or type(c.pkg) ~= "string" or c.pkg == "" then
+    return cb({})
+  end
+  -- The `\\n` is deliberate. Go's template parser wants the two characters
+  -- `\` `n` and unescapes them itself; a real newline here makes the template
+  -- an unterminated string literal and `go list` fails to parse it.
+  local argv = { "go", "list", "-f", '{{join .Imports "\\n"}}' }
+  if ctx and ctx.root then
+    table.insert(argv, 2, "-C")
+    table.insert(argv, 3, ctx.root)
+  end
+  argv[#argv + 1] = c.pkg
+
+  local ok = pcall(function()
+    vim.system(argv, { text = true }, function(res)
+      local map = {}
+      if res.code == 0 and res.stdout then
+        for path in res.stdout:gmatch("[^\n]+") do
+          local key = package_name(path)
+          if key then
+            map[key] = path
+          end
+        end
+      end
+      vim.schedule(function()
+        cb(map)
+      end)
+    end)
+  end)
+  if not ok then
+    cb({})
+  end
+end
+
+--- What page does `word` point at, if any?
+---
+--- Pure, and about ONE question: which other package. Names that live on the
+--- page you are already reading never reach here — the viewer resolves those
+--- against its own outline and scrolls, which costs nothing.
+---
+--- `ctx.qualifiers` is the map qualifiers() produced. Absent it, only a word
+--- that is already a full import path can resolve; guessing a package from a
+--- bare qualifier is the same mistake coord() declines to make on
+--- `router.HandlerFunc`.
+---@param word string
+---@param c DocCoord
+---@param ctx DocCtx
+---@return DocCoord|nil
+function M.xref(word, c, ctx)
+  if type(word) ~= "string" or word == "" then
+    return nil
+  end
+
+  -- A slash means it is spelled as an import path already.
+  if word:find("/", 1, true) then
+    local path, sym = word:match("^(.-/[^/%.]*)%.(%u[%w_%.]*)$")
+    if path then
+      return { pkg = path, symbol = sym, stdlib = is_stdlib(path) }
+    end
+    return { pkg = word, stdlib = is_stdlib(word) }
+  end
+
+  local head, rest = word:match("^([%w_]+)%.([%w_%.]+)$")
+  if not head then
+    return nil
+  end
+  local quals = ctx and ctx.qualifiers
+  local path = type(quals) == "table" and quals[head] or nil
+  if not path then
+    return nil
+  end
+  return { pkg = path, symbol = rest, stdlib = is_stdlib(path) }
+end
+
+--- An ERE matching the declaration of `symbol` at column 0.
+---
+--- Split out and pure so the receiver handling can be tested directly. The
+--- receiver group is anchored on the closing paren — `\*?Client\)` rather than
+--- `Client[^)]*\)` — because the loose form also matches `(cc *ClientConn)`
+--- and would land `Client.Do` in httputil (verified against GOROOT).
+---
+--- The optional `\[[^]]*\]` after the type name is the generic parameter list,
+--- so `func (r *N[C]) n()` still resolves.
+---@param symbol string
+---@return string|nil
+function M._decl_pattern(symbol)
+  if type(symbol) ~= "string" or symbol == "" then
+    return nil
+  end
+  local recv, name = symbol:match("^([%w_]+)%.([%w_]+)$")
+  if recv then
+    return "^func \\([A-Za-z_0-9]+ \\*?" .. recv .. "(\\[[^]]*\\])?\\) " .. name .. "\\("
+  end
+  if not symbol:match("^[%w_]+$") then
+    return nil
+  end
+  return "^(func|type|var|const) " .. symbol .. "([ (\\[]|$)"
+end
+
+--- Where `c.symbol` is declared on disk.
+---
+--- Two steps, both offline: `go list` names the package directory (GOROOT for
+--- the standard library, GOMODCACHE for a dependency) and grep finds the
+--- declaration in it. Enumerating the directory's own .go files rather than
+--- passing grep -r is deliberate — recursion reaches subpackages, which is how
+--- `Client.Do` first resolved to net/http/httputil.
+---
+--- Test files are excluded: an `ExampleClient_Do` in client_test.go is not the
+--- declaration, and for some symbols it is the only other column-0 match.
+---@param c DocCoord
+---@param ctx DocCtx
+---@param cb fun(loc: {file: string, lnum: integer}|nil)
+function M.locate(c, ctx, cb)
+  local pattern = c and M._decl_pattern(c.symbol)
+  if not pattern or type(c.pkg) ~= "string" or c.pkg == "" then
+    return cb(nil)
+  end
+
+  local argv = { "go", "list", "-f", "{{.Dir}}" }
+  if ctx and ctx.root then
+    table.insert(argv, 2, "-C")
+    table.insert(argv, 3, ctx.root)
+  end
+  argv[#argv + 1] = c.pkg
+
+  local function fail()
+    vim.schedule(function()
+      cb(nil)
+    end)
+  end
+
+  local ok = pcall(function()
+    vim.system(argv, { text = true }, function(res)
+      if res.code ~= 0 or not res.stdout then
+        return fail()
+      end
+      local dir = vim.trim(res.stdout)
+      if dir == "" then
+        return fail()
+      end
+
+      local files = {}
+      for name, typ in vim.fs.dir(dir) do
+        if typ == "file" and name:sub(-3) == ".go" and not name:match("_test%.go$") then
+          files[#files + 1] = vim.fs.joinpath(dir, name)
+        end
+      end
+      if #files == 0 then
+        return fail()
+      end
+
+      -- -H because grep omits the filename when handed exactly one file, and a
+      -- single-file package (common for small modules) would then parse as a
+      -- bare line number with no path.
+      local grep = { "grep", "-HnE", pattern }
+      vim.list_extend(grep, files)
+      vim.system(grep, { text = true }, function(hit)
+        if hit.code ~= 0 or not hit.stdout or hit.stdout == "" then
+          return fail()
+        end
+        local file, lnum = hit.stdout:match("^([^\n:]+):(%d+):")
+        if not file or not lnum then
+          return fail()
+        end
+        vim.schedule(function()
+          cb({ file = file, lnum = tonumber(lnum) })
+        end)
+      end)
+    end)
+  end)
+  if not ok then
+    fail()
+  end
 end
 
 --- Everything worth offering in the dependency picker.

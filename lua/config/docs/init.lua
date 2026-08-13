@@ -37,16 +37,33 @@ local resolve = require("config.docs.resolve")
 ---@field line string         -- the cursor's line, for adapters that read syntax around it
 ---@field col integer         -- 0-indexed cursor column
 
+---@class DocPage
+---@field cmd string[]         -- argv rendering the COMPLETE page
+---@field title string         -- what the panes are labelled with
+
+---@class DocEntry
+---@field label string         -- what the outline row reads
+---@field lnum integer         -- 1-indexed line in the page this entry heads
+---@field kind string          -- section|type|class|func|method|const|var
+---@field parent integer|nil   -- index of the parent entry, giving the tree
+---@field symbol string|nil    -- qualified name, for locate() and following
+
 ---@class DocAdapter
 ---@field ft string[]
 ---@field manifest string|string[]|nil
 ---@field prefer "local"|"web"|nil
 ---@field coord fun(ctx: DocCtx): DocCoord|nil
 ---@field url fun(c: DocCoord, ctx: DocCtx|nil): string|nil
----@field cmd fun(c: DocCoord, ctx: DocCtx): string[]|nil
 ---@field help_tag fun(ctx: DocCtx): string|nil
 ---@field manifest_line fun(bufnr: integer, lnum: integer): DocCoord|nil
 ---@field deps fun(ctx: DocCtx): table[]|nil
+--- The viewer's half. An adapter that implements `page` reads in the two-pane
+--- viewer; one that does not falls through to its web URL.
+---@field page fun(c: DocCoord, ctx: DocCtx): DocPage|nil
+---@field outline fun(lines: string[]): DocEntry[]
+---@field xref fun(word: string, c: DocCoord, ctx: DocCtx): DocCoord|nil
+---@field qualifiers fun(c: DocCoord, ctx: DocCtx, cb: fun(map: table<string, string>))
+---@field locate fun(c: DocCoord, ctx: DocCtx, cb: fun(loc: {file: string, lnum: integer}|nil))
 
 -- filetype -> adapter module basename. Static rather than derived by loading
 -- every adapter and reading its `ft` field, so opening a Go file never pays to
@@ -255,108 +272,37 @@ local function resolve_url(ctx, ad, coord, cb)
   }, cb)
 end
 
---- Show command output in a float, with `o` bound to the web equivalent.
----
---- `get_url` is a provider rather than a string because the two callers learn
---- the web URL very differently. `gK` has a cursor and asks the LSP, which is
---- async; the picker already holds a URL built from the manifest row and must
---- NOT issue an LSP request, since its "cursor" is wherever the buffer under
---- the picker happens to be sitting.
----@param cmd string[]
----@param get_url fun(cb: fun(url: string|nil))
----@param on_no_answer fun()
-local function render_cmd(cmd, get_url, on_no_answer)
-  vim.system(cmd, { text = true }, function(res)
-    vim.schedule(function()
-      -- Falling through on failure is load-bearing for two adapters. `go doc`
-      -- loads the whole module graph and fails outright when any go.mod is
-      -- missing from the cache — even when the package asked for is cached —
-      -- and `man` exits nonzero when there is simply no page.
-      if res.code ~= 0 or not res.stdout or res.stdout == "" then
-        return get_url(function(url)
-          if url then
-            open_target(url)
-          else
-            on_no_answer()
-          end
-        end)
-      end
-      local lines = vim.split(res.stdout, "\n", { trimempty = true })
-      local fbuf, fwin = vim.lsp.util.open_floating_preview(lines, "", {
-        border = "rounded",
-        max_width = 100,
-        max_height = 30,
-        focus_id = "docs",
-      })
-      -- Enter the float instead of leaving it a glance-only popup. `go doc` on
-      -- a real package runs to hundreds of lines, so `/`, `n` and <C-d> are the
-      -- whole point of rendering it here rather than in the browser — and none
-      -- of them reach a window you are not in. open_floating_preview only
-      -- focuses on a SECOND call through the same focus_id, which is
-      -- undiscoverable from gK and impossible from the picker.
-      --
-      -- Safe against its own auto-close autocmds: the CursorMoved watchers are
-      -- registered on the SOURCE buffer, whose cursor we do not move, and the
-      -- BufLeave handler declines to close while the float's buffer is current.
-      if fwin and vim.api.nvim_win_is_valid(fwin) then
-        vim.api.nvim_set_current_win(fwin)
-        vim.wo[fwin].wrap = true
-        vim.keymap.set("n", "q", function()
-          if vim.api.nvim_win_is_valid(fwin) then
-            vim.api.nvim_win_close(fwin, true)
-          end
-        end, { buffer = fbuf, desc = "Close docs" })
-      end
-      -- The float is text; the hosted page has rendered examples and
-      -- cross-links. Resolve the web URL in the background and bind `o` to it
-      -- once it lands, so the escape hatch costs no extra keybinding.
-      get_url(function(url)
-        if not url or not vim.api.nvim_buf_is_valid(fbuf) then
-          return
-        end
-        vim.keymap.set("n", "o", function()
-          open_target(url)
-        end, { buffer = fbuf, desc = "Open docs in browser" })
-      end)
-    end)
-  end)
-end
-
---- Test seam: render an arbitrary command in the docs float.
-M._render_cmd = render_cmd
-
 --- Open docs for a package coordinate the picker chose.
 ---
---- Same local-first promise `gK` makes: when the adapter has an offline
---- renderer (`go doc`, `pydoc`) it is used, and the hosted page stays one `o`
---- away. Nothing here touches the LSP — a picker row has no cursor position to
---- ask about, and the buffer underneath belongs to whatever you were editing.
+--- Same local-first promise `gK` makes: when the adapter can render the whole
+--- page offline (`go doc -all`, `pydoc`, `man`) it opens in the viewer, and the
+--- hosted page stays one `o` away. Nothing here touches the LSP — a picker row
+--- has no cursor position to ask about, and the buffer underneath belongs to
+--- whatever you were editing.
 ---@param ad DocAdapter
 ---@param coord DocCoord
 ---@param ctx DocCtx
 function M.open_coord(ad, coord, ctx)
   local ok_url, url = pcall(ad.url or function() end, coord, ctx)
   url = ok_url and url or nil
-  local ok_cmd, cmd = pcall(ad.cmd or function() end, coord, ctx)
-  cmd = ok_cmd and cmd or nil
 
-  local function get_url(cb)
-    cb(url)
-  end
-  local function no_answer()
-    vim.notify("docs: no documentation for " .. (coord.pkg or "?"), vim.log.levels.INFO)
+  local function web()
+    if url then
+      open_target(url)
+    else
+      vim.notify("docs: no documentation for " .. (coord.pkg or "?"), vim.log.levels.INFO)
+    end
   end
 
-  if ad.prefer == "local" and cmd then
-    return render_cmd(cmd, get_url, no_answer)
+  -- The page command can legitimately fail — `go doc` loads the whole module
+  -- graph and any unresolvable require poisons it, and `man` exits nonzero when
+  -- there is simply no page — so the web URL stays the fallback, not the plan.
+  if ad.page then
+    if ad.prefer == "local" or not url then
+      return require("config.docs.viewer").open(ad, coord, ctx, { on_fail = web })
+    end
   end
-  if url then
-    return open_target(url)
-  end
-  if cmd then
-    return render_cmd(cmd, get_url, no_answer)
-  end
-  no_answer()
+  web()
 end
 
 --- `gK` — documentation for the thing under the cursor.
@@ -393,11 +339,7 @@ function M.open_at_cursor()
   end
 
   local coord = ad and ad.coord and ad.coord(ctx) or nil
-  local cmd = (ad and ad.cmd and coord) and ad.cmd(coord, ctx) or nil
 
-  local function get_url(cb)
-    resolve_url(ctx, ad, coord, cb)
-  end
   local function search_instead()
     -- Never a silent no-op: say that we fell back, so a language with no docs
     -- host reads as "no direct link" rather than "the keymap is broken".
@@ -405,16 +347,29 @@ function M.open_at_cursor()
     open_target(M._search_url(ft, ctx.word))
   end
 
-  if ad and ad.prefer == "local" and cmd then
-    return render_cmd(cmd, get_url, search_instead)
+  --- The URL cascade, run only once the local renderer has declined.
+  local function web_cascade()
+    resolve_url(ctx, ad, coord, function(url)
+      if url then
+        return open_target(url)
+      end
+      search_instead()
+    end)
+  end
+
+  -- A nil coord reaches the viewer too: `page` declines it, `on_fail` fires,
+  -- and the cascade asks gopls — which is exactly what answers the common
+  -- `router.HandlerFunc` case the adapter deliberately will not guess at.
+  if ad and ad.prefer == "local" and ad.page then
+    return require("config.docs.viewer").open(ad, coord, ctx, { on_fail = web_cascade })
   end
 
   resolve_url(ctx, ad, coord, function(url)
     if url then
       return open_target(url)
     end
-    if cmd then
-      return render_cmd(cmd, get_url, search_instead)
+    if ad and ad.page then
+      return require("config.docs.viewer").open(ad, coord, ctx, { on_fail = search_instead })
     end
     search_instead()
   end)

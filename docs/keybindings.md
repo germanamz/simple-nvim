@@ -548,9 +548,57 @@ re-exports to the crate that really defines the symbol — then falls back to th
 language adapter, and finally to a web search so the key is never a no-op.
 
 Where a language has a good offline docs command (`go doc`, `pydoc`, `man 3`)
-the output opens in a float instead; press `o` in that float for the web page.
-Neovim's own API skips all of it and goes to `:help`. **Both keys** honor this —
-picking a Go module from `<Space>kd` renders `go doc` in the float, same as `gK`.
+the docs open in a **two-pane reader** instead of the browser — a symbol outline
+beside the page — and `o` still gets you the web page. Neovim's own API skips
+all of it and goes to `:help`. **Both keys** honor this: picking a Go module
+from `<Space>kd` opens the same reader as `gK`.
+
+### The docs reader
+
+The whole package is rendered at once (`go doc -all`, `pydoc <module>`, the man
+page), so every type, method and constant is already in the buffer. Picking a
+symbol in the outline scrolls to it rather than running another command, and `/`
+searches the entire package.
+
+Press `?` in either pane for these keys without leaving the reader; the section
+for the pane you are in is marked. `?`, `q` or `<Esc>` dismisses it.
+
+| Keys      | In the outline pane (left)                    |
+| --------- | --------------------------------------------- |
+| `j` / `k` | move — the content pane follows as you go      |
+| `<CR>`    | same, then jump the cursor into the content    |
+| `f`       | fuzzy-filter the outline (`clientdo` → `Client.Do`) |
+| `<Esc>`   | clear the filter                               |
+
+| Keys              | In the content pane (right)                     |
+| ----------------- | ----------------------------------------------- |
+| `/`, `n`, `<C-d>` | ordinary search and scroll, over the whole package |
+| `<CR>`            | follow the name under the cursor                 |
+| `gd`              | open the **real source**, closing the reader      |
+| `<C-o>` / `<C-t>` | back; `<C-i>` forward                            |
+| `o`               | the hosted page, in the cmux browser pane        |
+
+| Keys | In either pane           |
+| ---- | ------------------------ |
+| `?`  | the key panel            |
+| `q`  | close both panes         |
+
+`<CR>` resolves cheapest-first: a name already on this page just scrolls there,
+a qualified name into another package renders that package and pushes history
+(`url.Values` in `net/http` → `net/url`), and anything else says so rather than
+guessing. `gd` opens the declaration in the window you came from and **closes
+the reader** — GOROOT or `GOMODCACHE` for Go, so the file lands read-only with
+gopls attached and its own `gd`/`gr`/`K` take over from there. A `gd` that finds
+nothing leaves the reader up, since it cost you nothing. Man pages have no
+source to jump to and say so.
+
+The panes take a vertical split beside your code. Below ~157 columns there isn't
+room for all three, so the reader opens in its own tab instead.
+
+**Not implemented:** searching symbols across *all* your dependencies at once
+("find `Marshal` anywhere in this project's modules"). `f` filters the package
+you are currently reading, and nothing here builds a cross-dependency symbol
+index — that needs a different mechanism than rendering one page at a time.
 
 Pages opened from the picker are pinned to the version your manifest declares
 (`pkg.go.dev/…@v1.3.0`, `docs.rs/serde/1.0/serde/`) rather than to latest. That

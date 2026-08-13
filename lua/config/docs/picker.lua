@@ -75,7 +75,7 @@ function M.open()
           end
           -- Routed through the driver rather than straight to a URL so this key
           -- keeps the same local-first promise gK makes: `go doc` and `pydoc`
-          -- render in a float, and the hosted page is one `o` away.
+          -- render in the two-pane viewer, and the hosted page is one `o` away.
           local coord, ctx = M.coord_for(row)
           require("config.docs").open_coord(row.adapter, coord, ctx)
         end

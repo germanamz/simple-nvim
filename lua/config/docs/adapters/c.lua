@@ -61,12 +61,12 @@ local MAN_SECTIONS = "2:3"
 -- macOS man emits backspace-overstrike bold even when stdout is not a tty —
 -- raw output for printf(3) is 29714 bytes of `p\bpr\bri\bin\bnt\btf\bf`, vs
 -- 22303 once stripped. vim.system hands the driver those raw bytes, so an
--- unfiltered float renders literal ^H sequences over every bolded word.
+-- unfiltered pane renders literal ^H sequences over every bolded word.
 --
 -- `-b` strips the overstrike. `-x` is not optional decoration: col re-tabulates
 -- runs of spaces into tabs by default (256 tab-bearing lines in printf(3)
 -- alone), and man pages are column-aligned with spaces — so without -x the
--- float's `tabstop` setting, not the page, decides where the SYNOPSIS and the
+-- pane's `tabstop` setting, not the page, decides where the SYNOPSIS and the
 -- conversion-specifier tables land, shearing them. UTF-8 survives either way
 -- (the en dash in the NAME line comes through intact).
 --
@@ -108,7 +108,11 @@ function M.coord(ctx)
   return { symbol = name }
 end
 
---- The man invocation for a coordinate, as argv.
+--- The man invocation for a coordinate, as a viewer page.
+---
+--- A man page is already whole — there is no index-versus-full distinction to
+--- make here, so unlike `go doc` this needs no extra flag to become a page the
+--- viewer can outline.
 ---
 --- Re-validates rather than trusting `c.symbol`, since the driver unit-tests
 --- these functions independently against fixture values and a coord it did not
@@ -122,13 +126,68 @@ end
 --- pager does not mask the miss.
 ---@param c DocCoord
 ---@param _ctx DocCtx
----@return string[]|nil
-function M.cmd(c, _ctx)
+---@return DocPage|nil
+function M.page(c, _ctx)
   local name = man_page_name(c and c.symbol)
   if not name then
     return nil
   end
-  return { "man", "-S", MAN_SECTIONS, "-P", MAN_PAGER, name }
+  return {
+    cmd = { "man", "-S", MAN_SECTIONS, "-P", MAN_PAGER, name },
+    title = name,
+  }
+end
+
+--- An outline of a man page: its SECTIONS.
+---
+--- The one adapter whose outline is not a symbol list, and deliberately so. A
+--- man page has no symbol table to expose — it documents ONE name, and what a
+--- reader navigates is RETURN VALUES, ERRORS, EXAMPLES. Pretending otherwise
+--- would mean inventing structure the page does not have.
+---
+--- Column 0 is the whole test. `man` indents body text by four and subsection
+--- headers by three, so only true section headers reach the left margin, and
+--- the running header (`PRINTF(3) ... PRINTF(3)`) carries digits and parens
+--- that an all-caps-and-spaces match cannot accept.
+---@param lines string[]
+---@return DocEntry[]
+function M.outline(lines)
+  if type(lines) ~= "table" then
+    return {}
+  end
+  local out = {}
+  for i, line in ipairs(lines) do
+    if line:match("^[A-Z][A-Z ]*$") then
+      out[#out + 1] = { label = line, lnum = i, kind = "section" }
+    end
+  end
+  return out
+end
+
+--- Follow a `name(3)` cross-reference.
+---
+--- Gated on the cursor's LINE actually spelling the reference with its section
+--- number, which is how SEE ALSO writes them. Without that gate every word in
+--- the prose would look followable and <CR> would spawn `man` on English.
+---@param word string
+---@param _c DocCoord
+---@param ctx DocCtx
+---@return DocCoord|nil
+function M.xref(word, _c, ctx)
+  local name = man_page_name(word)
+  if not name then
+    return nil
+  end
+  local line = ctx and ctx.line
+  if type(line) ~= "string" or not line:find(name .. "(", 1, true) then
+    return nil
+  end
+  -- The reference must carry a section number; a bare `name(` is a function
+  -- call in a SYNOPSIS or an EXAMPLES block, not a link to another page.
+  if not line:match(name:gsub("%W", "%%%0") .. "%(%d%w*%)") then
+    return nil
+  end
+  return { symbol = name }
 end
 
 return M

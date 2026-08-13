@@ -34,8 +34,8 @@
 --    fastapi` renders the page, the same command via the pyenv `python3` on
 --    PATH prints "No Python documentation found for 'fastapi'".
 -- 3. pydoc exits 0 on that failure and writes the apology to stdout, so the
---    driver's `res.code ~= 0` fallback never fires and the float would render
---    the apology. `cmd` therefore refuses to emit argv unless something on
+--    driver's `res.code ~= 0` fallback never fires and the viewer would render
+--    the apology. `page` therefore refuses to emit argv unless something on
 --    disk already proves the module is importable.
 -- 4. `.venv/bin/python` is a symlink to the base interpreter (uv, virtualenv
 --    and venv all do this), so site-packages must be derived from the venv
@@ -669,24 +669,32 @@ function M.url(c, ctx)
   return "https://pypi.org/project/" .. pypi_slug(c.pkg) .. "/"
 end
 
---- Coordinates -> argv for the float.
+--- Coordinates -> argv for the whole module page.
 ---
 --- Gated on evidence, because `python -m pydoc nonexistent` exits 0 and prints
 --- "No Python documentation found for 'nonexistent'." to stdout. The driver
 --- falls back on a nonzero exit or empty stdout, so an ungated argv would
---- render that apology in the float and never reach the web URL behind it.
+--- render that apology in the viewer and never reach the web URL behind it.
 --- Emitting nothing instead is a supported outcome and lets the cascade run.
+---
+--- The MODULE is rendered, never `module.Symbol`, even when the coordinate
+--- names one. `pydoc json` already carries every class and function inline, so
+--- the whole page is one call and the symbol only decides where the viewer
+--- parks — the same trade `go doc -all` makes.
 ---
 --- Nothing here can stop pydoc importing the module and running whatever its
 --- `__init__` does. That is inherent to pydoc and is the reason this adapter's
 --- local answer is accurate at all; there is no read-only mode to ask for.
 ---@param c DocCoord
 ---@param ctx DocCtx
----@return string[]|nil
-function M.cmd(c, ctx)
+---@return DocPage|nil
+function M.page(c, ctx)
   if not c then
     return nil
   end
+  -- `symbol` first: for a third-party coordinate `pkg` is the DISTRIBUTION
+  -- name (PyYAML) and only `symbol` carries the import path (yaml.safe_load),
+  -- which is what pydoc understands.
   local target = c.symbol or c.pkg
   if not target then
     return nil
@@ -706,7 +714,197 @@ function M.cmd(c, ctx)
       return nil
     end
   end
-  return { exe, "-m", "pydoc", target }
+  return { cmd = { exe, "-m", "pydoc", module }, title = module }
+end
+
+-- Only members the class DEFINES. pydoc also lists `Methods inherited from
+-- builtins.object:` under most classes, and threading `__delattr__` and
+-- friends into the outline buries the handful of methods that are the point.
+local MEMBER_MARKER = "defined here:%s*$"
+
+--- An outline of a pydoc page.
+---
+--- Pure, and shaped entirely by pydoc's own layout, which is regular: ALL-CAPS
+--- section headers at column 0, `    class Name(Bases)` indented four, and
+--- members inside the `|` gutter a class body is drawn with.
+---
+--- Members are gated on the `Methods defined here:` marker rather than on
+--- "looks like a call". Prose inside a class body sits in the same gutter at
+--- the same indent and routinely contains `something(...)`, so a shape test
+--- alone reports sentences as methods; the marker makes it exact.
+---
+--- Symbols come out fully qualified (`json.JSONEncoder`) using the module name
+--- pydoc prints in its NAME section, so a coordinate carrying `json.dumps`
+--- finds its row and following a dotted name resolves on this page.
+---@param lines string[]
+---@return DocEntry[]
+function M.outline(lines)
+  if type(lines) ~= "table" then
+    return {}
+  end
+
+  local out = {}
+  local section, class, in_members = nil, nil, false
+  local module = nil
+
+  for i, line in ipairs(lines) do
+    if line:match("^[A-Z][A-Z ]*$") then
+      out[#out + 1] = { label = line, lnum = i, kind = "section" }
+      section = #out
+      class, in_members = nil, false
+      -- NAME is followed by the module's own name, which qualifies every
+      -- symbol below it.
+      if line == "NAME" and not module then
+        module = lines[i + 1] and lines[i + 1]:match("^%s+([%w_%.]+)")
+      end
+    else
+      local cls = line:match("^    class ([%w_]+)")
+      if cls then
+        out[#out + 1] = {
+          label = cls,
+          lnum = i,
+          kind = "class",
+          parent = section,
+          symbol = module and (module .. "." .. cls) or cls,
+        }
+        class, in_members = #out, false
+      elseif class then
+        -- A marker line inside the gutter switches member capture on or off.
+        local marker = line:match("^%s*|%s%s([%u].-:)%s*$")
+        if marker then
+          in_members = marker:match("ethods") ~= nil and line:match(MEMBER_MARKER) ~= nil
+        elseif in_members then
+          local name = line:match("^%s*|%s%s([%w_]+)%(")
+          if name then
+            out[#out + 1] = {
+              label = name,
+              lnum = i,
+              kind = "method",
+              parent = class,
+              symbol = (out[class].symbol or out[class].label) .. "." .. name,
+            }
+          end
+        end
+      else
+        -- Top-level functions and data, four-space indented under their
+        -- section. Anchored on `^    ` with no gutter so class bodies, which
+        -- are already handled above, cannot reach here.
+        local fn = line:match("^    ([%w_]+)%(")
+        local data = not fn and line:match("^    ([%w_]+) = ") or nil
+        local name = fn or data
+        if name then
+          out[#out + 1] = {
+            label = name,
+            lnum = i,
+            kind = fn and "func" or "var",
+            parent = section,
+            symbol = module and (module .. "." .. name) or name,
+          }
+        end
+      end
+    end
+  end
+  return out
+end
+
+--- What page does `word` point at?
+---
+--- Only a dotted name can leave the current page, and its head is read as a
+--- module. A bare name never reaches here — the viewer has already tried it
+--- against this page's outline, which is where `dumps` on the `json` page
+--- resolves.
+---@param word string
+---@param c DocCoord
+---@param _ctx DocCtx
+---@return DocCoord|nil
+function M.xref(word, c, _ctx)
+  if type(word) ~= "string" or word == "" then
+    return nil
+  end
+  local head = word:match("^([%a_][%w_]*)%.[%w_%.]+$")
+  if not head then
+    return nil
+  end
+  -- Same module, different spelling of a name already on the page. Declining
+  -- keeps the viewer from re-rendering the page it is already showing.
+  local here = c and (c.symbol or c.pkg)
+  if here and head == here:match("^([%a_][%w_]*)") then
+    return nil
+  end
+  return { pkg = head, symbol = word, stdlib = STDLIB[head] or nil }
+end
+
+-- Resolve a dotted name to its defining file and line. Written out rather than
+-- squeezed onto one line because `-c` takes a whole program and the readable
+-- form is what makes the failure modes obvious: anything unimportable, missing
+-- or implemented in C exits 1 and the viewer falls back to the web page.
+local LOCATE_SRC = [[
+import sys, inspect, importlib
+try:
+    obj = importlib.import_module(sys.argv[1])
+    for part in sys.argv[2].split('.'):
+        if part:
+            obj = getattr(obj, part)
+    print(inspect.getsourcefile(obj))
+    print(inspect.getsourcelines(obj)[1])
+except Exception:
+    sys.exit(1)
+]]
+
+--- Where `c.symbol` is defined on disk.
+---
+--- `inspect` rather than a grep, because Python's declaration syntax gives no
+--- column-0 anchor to grep for — a method is indented inside its class, and
+--- the same `def parse(` appears in several of them. The interpreter already
+--- knows, and pydoc imported the module to render the page anyway, so this
+--- adds no side effect the page did not already have.
+---
+--- A C-implemented symbol has no source at all; `inspect` raises and the
+--- nonzero exit reads as "no source", which is the truth.
+---@param c DocCoord
+---@param ctx DocCtx
+---@param cb fun(loc: {file: string, lnum: integer}|nil)
+function M.locate(c, ctx, cb)
+  local exe = ctx and interpreter(ctx)
+  local target = c and (c.symbol or c.pkg)
+  if not exe or not target then
+    return cb(nil)
+  end
+  local module = target:match("^([%a_][%w_]*)")
+  if not module then
+    return cb(nil)
+  end
+  -- Everything after the leading module name is the attribute path. A bare
+  -- module yields "", and the script's `if part` skips it.
+  local attr = target:sub(#module + 2)
+
+  local function fail()
+    vim.schedule(function()
+      cb(nil)
+    end)
+  end
+
+  local ok = pcall(function()
+    vim.system(
+      { exe, "-c", LOCATE_SRC, module, attr },
+      { text = true, timeout = 5000 },
+      function(res)
+        if res.code ~= 0 or not res.stdout then
+          return fail()
+        end
+        local file, lnum = res.stdout:match("^(.-)\n(%d+)")
+        if not file or file == "" or file == "None" then
+          return fail()
+        end
+        vim.schedule(function()
+          cb({ file = file, lnum = tonumber(lnum) })
+        end)
+      end
+    )
+  end)
+  if not ok then
+    fail()
+  end
 end
 
 --- Strip a trailing `#` comment, respecting quotes.
