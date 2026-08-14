@@ -30,11 +30,14 @@ update:
 check:
 	@./scripts/warm-cache.sh --check-only
 
+# `scripts` is listed because scripts/ts-sync.lua and scripts/mason-sync.lua are
+# real Lua that nvim runs, and they sat outside the target list, so nothing
+# checked them. stylua ignores the .sh files sitting beside them.
 lint:
-	@stylua --check lua init.lua tests parser-revisions.lua
+	@stylua --check lua init.lua tests parser-revisions.lua scripts
 
 fmt:
-	@stylua lua init.lua tests parser-revisions.lua
+	@stylua lua init.lua tests parser-revisions.lua scripts
 
 test: test-unit test-smoke test-e2e
 

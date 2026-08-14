@@ -11,6 +11,7 @@ set -eu
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PARSER_INFO_DIR="${HOME}/.local/share/nvim/site/parser-info"
+PARSER_DIR="${HOME}/.local/share/nvim/site/parser"
 MASON_PKG_DIR="${HOME}/.local/share/nvim/mason/packages"
 LOCKFILE="${REPO_ROOT}/mason-tool-versions.lock"
 PARSER_REVS_LUA="${REPO_ROOT}/parser-revisions.lua"
@@ -33,11 +34,20 @@ install_plugins() {
 }
 
 install_parsers() {
-  # Plugin config calls config.ts_pinned.apply() before install(), so a normal
-  # bootstrap installs at the pinned revisions. TSUpdate sync re-runs install
-  # with the pins applied for any parsers that drifted.
-  nvim --headless "+TSUpdate sync" "+qa" >/dev/null 2>&1 \
-    || { err "TSUpdate sync failed"; return 1; }
+  # The work is in scripts/ts-sync.lua — read that file before changing this
+  # one. What stood here, `nvim --headless "+TSUpdate sync" "+qa"`, was a no-op
+  # twice over: `sync` is parsed as a LANGUAGE name (main-branch nvim-treesitter
+  # has no TSUpdateSync) so nothing was selected, and install/update are async
+  # so "+qa" killed the run mid-download regardless. Both exited 0. The script
+  # awaits the install and then verifies both files a parser install leaves on
+  # disk — the revision stamp and the compiled grammar — which is what turns the
+  # pins in parser-revisions.lua into something enforced rather than
+  # aspirational. It also repairs a half-installed parser rather than reporting
+  # it, so this step self-heals and the run below has something to check.
+  # stderr is kept (not sent to /dev/null like install_plugins) so failures —
+  # and the warning about a pin upstream has dropped — reach the caller.
+  nvim --headless -c "luafile ${REPO_ROOT}/scripts/ts-sync.lua" "+qa" >/dev/null \
+    || { err "treesitter parser sync failed"; return 1; }
 }
 
 install_mason_tools() {
@@ -69,6 +79,14 @@ check_lockfile_honored() {
 check_parser_revisions() {
   # parser-revisions.lua format:  name = "<rev>",  (one per line)
   # Compare each entry to ~/.local/share/nvim/site/parser-info/<name>.revision.
+  #
+  # The stamp alone is not proof the parser works. `:TSUninstall` unlinks
+  # parser/<name>.so and the queries symlink but leaves the stamp behind, so a
+  # stamp-only check exits 0 while every buffer of that filetype has silently
+  # dropped to regex highlighting — the exact class of silent success this
+  # script exists to catch. Require the compiled grammar too. (Same rule as the
+  # Lua side, config.ts_sync.drift; this one has to be repeated in shell
+  # because --check-only installs nothing and so never starts nvim.)
   awk '/^[[:space:]]*[a-zA-Z_]+[[:space:]]*=[[:space:]]*"[^"]+",/' "$PARSER_REVS_LUA" \
     | while IFS= read -r line; do
         name=$(printf '%s' "$line" | sed -E 's/^[[:space:]]*([a-zA-Z_]+)[[:space:]]*=.*/\1/')
@@ -81,6 +99,10 @@ check_parser_revisions() {
         actual=$(cat "$rev_file")
         if [ "$actual" != "$expected" ]; then
           err "parser ${name} revision mismatch: expected ${expected} got ${actual}"
+          exit 1
+        fi
+        if [ ! -f "${PARSER_DIR}/${name}.so" ]; then
+          err "parser ${name} stamped ${expected} but ${PARSER_DIR}/${name}.so is missing"
           exit 1
         fi
       done

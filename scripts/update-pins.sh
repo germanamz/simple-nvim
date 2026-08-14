@@ -26,10 +26,25 @@ nvim --headless "+Lazy! sync" "+qa" >/dev/null 2>&1 \
 nvim --headless "+MasonToolsUpdateSync" "+qa" >/dev/null 2>&1 \
   || { err "MasonToolsUpdateSync failed"; exit 1; }
 
-# Also re-install treesitter parsers so their .revision files match whatever
-# the bumped nvim-treesitter pins are.
-nvim --headless "+TSUpdate sync" "+qa" >/dev/null 2>&1 \
-  || { err "TSUpdate sync failed"; exit 1; }
+# Also re-install treesitter parsers so their .revision files match the pins,
+# because step 3 below snapshots those stamps back into parser-revisions.lua.
+# Same invocation as warm-cache.sh's install_parsers, deliberately identical.
+#
+# Which means this step does NOT advance a parser pin, and step 3 re-emits what
+# it already said. That is the intended behaviour, not an oversight: the parser
+# pins are PRESCRIPTIVE — config.ts_pinned rewrites install_info.revision, so
+# the pin, not the plugin, decides which grammar tarball gets downloaded.
+# Advancing one is a hand edit here followed by `make warm`.
+#
+# Automating it is not simply a matter of running this step with the overrides
+# dropped. A grammar revision and its highlight queries have to move together
+# (the queries are symlinked live out of the nvim-treesitter checkout, not taken
+# from the pinned tarball), some of them are patched in queries/ in this repo,
+# and nothing here yet checks that a freshly paired grammar and query set
+# actually parse. Until that check exists, a bump that silently breaks
+# highlighting would land in a commit titled "update pins". Left manual.
+nvim --headless -c "luafile ${REPO_ROOT}/scripts/ts-sync.lua" "+qa" >/dev/null \
+  || { err "treesitter parser sync failed"; exit 1; }
 
 # Step 2: refresh mason-tool-versions.lock ----------------------------------
 
