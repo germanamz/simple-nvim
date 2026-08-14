@@ -9,6 +9,7 @@ describe("config.ts_pinned", function()
 
   after_each(function()
     package.loaded["nvim-treesitter.parsers"] = nil
+    pcall(vim.api.nvim_del_augroup_by_name, "ts_pinned")
   end)
 
   it("overrides install_info.revision for known parsers", function()
@@ -55,5 +56,30 @@ describe("config.ts_pinned", function()
     end)
 
     package.preload["nvim-treesitter.parsers"] = nil
+  end)
+
+  it("applies revisions when nvim-treesitter fires User TSUpdate", function()
+    -- install() reload_parsers() throws away anything written before the call,
+    -- then fires this event. Applying on the event is the only thing the
+    -- installer actually sees.
+    local parsers = { lua = { install_info = { revision = "old-lua" } } }
+    package.loaded["nvim-treesitter.parsers"] = parsers
+
+    M.setup({ lua = "new-lua" })
+    vim.api.nvim_exec_autocmds("User", { pattern = "TSUpdate" })
+
+    assert.are.equal("new-lua", parsers.lua.install_info.revision)
+  end)
+
+  it("re-applies on every TSUpdate, not just the first", function()
+    local parsers = { lua = { install_info = { revision = "old-lua" } } }
+    package.loaded["nvim-treesitter.parsers"] = parsers
+    M.setup({ lua = "new-lua" })
+
+    vim.api.nvim_exec_autocmds("User", { pattern = "TSUpdate" })
+    parsers.lua.install_info.revision = "clobbered-by-reload"
+    vim.api.nvim_exec_autocmds("User", { pattern = "TSUpdate" })
+
+    assert.are.equal("new-lua", parsers.lua.install_info.revision)
   end)
 end)

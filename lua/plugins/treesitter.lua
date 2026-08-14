@@ -18,8 +18,12 @@ return {
       -- to nothing). See lua/config/ts_pinned.lua for why pinning can't be a
       -- per-call arg. The config root isn't on package.path, so load by
       -- absolute path.
+      --
+      -- The pins are applied from a `User TSUpdate` autocmd rather than
+      -- inline: install() reloads the parser table as its first statement and
+      -- would discard an inline apply()'s writes before reading them.
       local revisions = dofile(vim.fn.stdpath("config") .. "/parser-revisions.lua")
-      require("config.ts_pinned").apply(revisions)
+      require("config.ts_pinned").setup(revisions)
       require("nvim-treesitter").install(vim.tbl_keys(revisions))
 
       -- Global filetype → parser registration: the single source of truth for
