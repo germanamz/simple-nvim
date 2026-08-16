@@ -123,10 +123,11 @@ client per `root_dir` does not merge module-resolution scopes.
 one of them for both. Using a `Temporal` reference (present only in 6.0.3's
 `lib.esnext`), the 5.9.3 client put a **false** `TS2304` on a2 that a2's own
 `tsc` accepts, and the 6.0.3 client **swallowed** a real `TS2304` on a1 that a1's
-own `tsc` reports. `<leader>lr` does re-resolve from the current buffer, with two
-caveats: it detaches every *sibling* buffer under that root and they do not
-re-attach on their own (`:edit` makes them rejoin the surviving client), so only
-one package under a mixed-version root can be correct at a time.
+own `tsc` reports. `<leader>lr` re-resolves the whole root from the buffer you are
+standing in: it stops the client, re-attaches every buffer that client served, and
+resolves the current buffer **last** so its package is the one the new client
+runs. Only one package under a mixed-version root can be correct at a time, and
+the keymap is how you choose which.
 
 **A stray lockfile can capture a lockfile-less submodule.** `vim.fs.root`'s
 nested marker groups mean "nearest lockfile *anywhere* up to `/`" outranks

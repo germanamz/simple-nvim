@@ -10,9 +10,9 @@
 -- and `:lsp stop <name>` kills by server name, taking the one you are using with
 -- it. Neither shows you what is running.
 --
--- Restart fills a second gap: `<leader>lr` stops the clients attached to the
--- CURRENT buffer and `:edit`s, so a client rooted at another directory cannot be
--- restarted at all.
+-- Restart fills a second gap: `<leader>lr` only reaches the clients attached to
+-- the CURRENT buffer (it drives `restart_clients` below), so a client rooted at
+-- another directory cannot be restarted at all without this picker.
 --
 -- Rows are ordered idle-first because a client with no attached buffers is the
 -- kill candidate; telescope's generic_sorter preserves that order while the
@@ -22,11 +22,6 @@ local palette = require("config.palette")
 local picker_legend = require("util.picker_legend")
 
 local M = {}
-
--- Bound the wait for a stopping client to exit. Stop is asynchronous, and
--- starting a new client before the old one exits risks the reuse path selecting
--- the dying one. Same budget as lsp_fs_sync's synchronous rename round-trip.
-local STOP_TIMEOUT_MS = 2000
 
 --- One row per client: name, how many buffers it serves, and its root.
 --- Idle clients first (the kill candidates), then by name, then by root.
@@ -74,6 +69,74 @@ function M.kill(client)
   return true
 end
 
+--- Stop `clients` and bring them back for every buffer they were serving.
+---
+--- Returns how many clients were stopped and how many buffers were re-attached.
+--- Clients already on their way out are skipped, so this is safe to double-fire.
+---
+--- Re-attaching EVERY buffer, not just the current one, is the point: `stop()`
+--- detaches all of them at once, and nothing brings a non-current buffer back on
+--- its own — sibling files under the same root would sit there with no server
+--- until you reopened each one.
+---
+--- No wait between the stop and the re-attach. `Client:stop()` marks the client
+--- `_is_stopping` synchronously and nvim's default `reuse_client` refuses a
+--- stopped client, so the fresh `lsp.start` cannot land on the dying one (no
+--- server in lua/plugins/lsp.lua overrides `reuse_client`). Blocking the UI
+--- thread on a tsserver shutdown to re-prove that would only add latency to a
+--- keypress.
+---@param clients vim.lsp.Client[]
+---@param opts? { last_buf?: integer }
+---@return integer stopped, integer reattached
+function M.restart_clients(clients, opts)
+  local live = vim.tbl_filter(function(c)
+    return c ~= nil and not c:is_stopped()
+  end, clients)
+
+  -- The union of their buffers, deduplicated: a tsx file is served by ts_ls,
+  -- biome and oxlint at once, and one FileType fire per client would also run
+  -- every OTHER FileType handler (treesitter, statusline, decl_rules) twice more
+  -- for that buffer.
+  --
+  -- `last_buf` goes last on purpose. lspconfig's resolvers and both wrappers
+  -- around them call back synchronously while `vim.lsp.enable` defers the actual
+  -- `lsp.start` to the next tick, so every buffer resolves before any client is
+  -- created and the LAST resolution is the one config.lsp_tsdk's `before_init`
+  -- reads. Ordering the buffer you are standing in last is what keeps
+  -- `<leader>lr` meaning "run THIS package's TypeScript" in a mixed-version
+  -- monorepo; `pairs()` order alone would pick a random open package.
+  local last = opts and opts.last_buf
+  local bufs, seen, last_seen = {}, {}, false
+  for _, c in ipairs(live) do
+    for b in pairs(c.attached_buffers or {}) do
+      if not seen[b] and vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_is_loaded(b) then
+        seen[b] = true
+        if b == last then
+          last_seen = true
+        else
+          bufs[#bufs + 1] = b
+        end
+      end
+    end
+  end
+  if last_seen then
+    bufs[#bufs + 1] = last
+  end
+
+  for _, c in ipairs(live) do
+    c:stop()
+  end
+
+  -- vim.lsp.enable() installs a FileType autocmd that starts/attaches the
+  -- server, so re-firing FileType is what brings the clients back. It reaches a
+  -- buffer that is not current, and — unlike the `:edit` this replaced — it
+  -- leaves the buffer's TEXT alone (see the <leader>lr note in plugins/lsp.lua).
+  for _, b in ipairs(bufs) do
+    vim.api.nvim_exec_autocmds("FileType", { buffer = b })
+  end
+  return #live, #bufs
+end
+
 --- Stop one client and bring it back for the buffers it was serving.
 ---
 --- Returns the number of buffers re-attached, or nil when there was nothing to
@@ -84,26 +147,8 @@ function M.restart(client)
   if not client or client:is_stopped() then
     return nil
   end
-  local bufs = {}
-  for b in pairs(client.attached_buffers or {}) do
-    if vim.api.nvim_buf_is_valid(b) and vim.api.nvim_buf_is_loaded(b) then
-      bufs[#bufs + 1] = b
-    end
-  end
-
-  client:stop()
-  -- Let it actually exit before re-triggering attach.
-  vim.wait(STOP_TIMEOUT_MS, function()
-    return client:is_stopped()
-  end, 50)
-
-  -- vim.lsp.enable() installs a FileType autocmd that starts/attaches the
-  -- server, so re-firing FileType is what brings the client back — the buffers
-  -- are not current, so the `:edit` trick <leader>lr uses does not apply here.
-  for _, b in ipairs(bufs) do
-    vim.api.nvim_exec_autocmds("FileType", { buffer = b })
-  end
-  return #bufs
+  local _, reattached = M.restart_clients({ client })
+  return reattached
 end
 
 -- ===================== legend =====================

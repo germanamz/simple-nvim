@@ -157,3 +157,86 @@ describe("config.lsp_picker.restart", function()
     assert.is_nil(c._stop_calls)
   end)
 end)
+
+-- The workhorse behind both the picker's <CR> and <leader>lr. The keymap case is
+-- what forces the set-of-clients shape: a tsx buffer is served by ts_ls, biome
+-- and oxlint at once, and every one of them has to come back.
+describe("config.lsp_picker.restart_clients", function()
+  local group
+
+  local function watch(bufs)
+    local fired = {}
+    group = vim.api.nvim_create_augroup("lsp_picker_restart_spec", { clear = true })
+    for _, b in ipairs(bufs) do
+      fired[b] = 0
+      vim.api.nvim_create_autocmd("FileType", {
+        group = group,
+        buffer = b,
+        callback = function()
+          fired[b] = fired[b] + 1
+        end,
+      })
+    end
+    return fired
+  end
+
+  after_each(function()
+    if group then
+      pcall(vim.api.nvim_del_augroup_by_id, group)
+      group = nil
+    end
+  end)
+
+  it("stops every client and re-attaches the union of their buffers", function()
+    local b1 = vim.api.nvim_create_buf(false, true)
+    local b2 = vim.api.nvim_create_buf(false, true)
+    local a = client({ id = 1, name = "ts_ls", bufs = { [b1] = true, [b2] = true } })
+    local b = client({ id = 2, name = "biome", bufs = { [b1] = true } })
+    local fired = watch({ b1, b2 })
+
+    local stopped, reattached = picker.restart_clients({ a, b })
+
+    assert.are.equal(2, stopped)
+    assert.are.equal(2, reattached)
+    assert.are.equal(1, a._stop_calls)
+    assert.are.equal(1, b._stop_calls)
+    -- b1 is served by both clients; re-firing FileType twice would run every
+    -- other FileType handler (treesitter, statusline) a second time for nothing.
+    assert.are.equal(1, fired[b1])
+    assert.are.equal(1, fired[b2])
+
+    vim.api.nvim_buf_delete(b1, { force = true })
+    vim.api.nvim_buf_delete(b2, { force = true })
+  end)
+
+  it("ignores clients that are already stopped", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local live = client({ id = 1, bufs = { [buf] = true } })
+    local dead = client({ id = 2, stopped = true, bufs = { [buf] = true } })
+
+    local stopped, reattached = picker.restart_clients({ live, dead })
+
+    assert.are.equal(1, stopped)
+    assert.are.equal(1, reattached)
+    assert.is_nil(dead._stop_calls)
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("skips buffers that are no longer valid", function()
+    local buf = vim.api.nvim_create_buf(false, true)
+    local c = client({ bufs = { [buf] = true, [999999] = true } })
+    vim.api.nvim_buf_delete(buf, { force = true })
+
+    local stopped, reattached = picker.restart_clients({ c })
+
+    assert.are.equal(1, stopped)
+    assert.are.equal(0, reattached)
+  end)
+
+  it("returns zero counts for an empty list", function()
+    local stopped, reattached = picker.restart_clients({})
+    assert.are.equal(0, stopped)
+    assert.are.equal(0, reattached)
+  end)
+end)

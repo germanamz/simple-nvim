@@ -144,7 +144,8 @@ Split so the logic is unit-testable over fake client tables, the way
 | `M.rows(clients)` | pure | `{ client, name, nbufs, root }` per client, **idle-first** (0 buffers), then by name, then root |
 | `M.format(row)` | pure | `ts_ls          2 bufs   ~/projects/lola-web` — aligned columns, root through `fnamemodify(root, ":~")`, `(no root)` when absent |
 | `M.kill(client)` | effect | Stop unless already stopped; returns whether it acted |
-| `M.restart(client)` | effect | Stop, wait for exit, re-attach its buffers; returns the count re-attached |
+| `M.restart_clients(clients, opts?)` | effect | Stop them all, re-attach the **union** of their buffers; returns `stopped, reattached` |
+| `M.restart(client)` | effect | One-client `restart_clients`; returns the count re-attached |
 | `M.open()` | effect | Build and open the picker |
 
 Idle-first ordering puts the kill candidates at the top, and `generic_sorter`
@@ -164,16 +165,30 @@ acting. `<C-k>` keeps the mnemonic, works from both modes, matches the
 `map({ "i", "n" }, …)` idiom the other custom pickers use, and shadows telescope's
 global insert-mode `<C-k>` inside this picker only.
 
-**Restart is the fiddly part.** The target client's buffers are not current, so
-`<leader>lr`'s stop-and-`:edit` trick does not apply:
+**Restart is the fiddly part**, and `restart_clients` is shared with
+`<leader>lr` rather than duplicated, because a restart must reach buffers that
+are not current:
 
-1. Record `client.attached_buffers`, valid and loaded only.
-2. `client:stop()`.
-3. Wait, bounded at `STOP_TIMEOUT_MS = 2000`, for `client:is_stopped()`. Stop is
-   asynchronous, and starting a new client before the old one exits risks the
-   reuse path selecting the dying one.
+1. Drop clients that are already stopping.
+2. Record their `attached_buffers` as one deduplicated list, valid and loaded
+   only — a tsx file is served by `ts_ls`, `biome` and `oxlint` at once, and one
+   fire per client would run every *other* `FileType` handler (treesitter,
+   statusline, `decl_rules`) twice more for that buffer.
+3. `client:stop()` each.
 4. Re-fire `FileType` per recorded buffer, because that is the autocmd
    `vim.lsp.enable()` installs to start and attach the server.
+
+`opts.last_buf` puts one buffer at the end of step 4. The resolvers call back
+synchronously while `vim.lsp.enable` defers `lsp.start` to the next tick, so every
+buffer resolves before any client is created and the **last** resolution is what
+`config.lsp_tsdk`'s `before_init` reads — that ordering is what makes `<leader>lr`
+mean "run *this* package's TypeScript" instead of a random open one.
+
+**No wait for the old client to exit.** `Client:stop()` sets `_is_stopping`
+synchronously and nvim's default `reuse_client` refuses a stopped client, so the
+fresh `lsp.start` cannot land on the dying one (no server in `plugins/lsp.lua`
+overrides `reuse_client`). The former bounded wait polled `is_stopped()`, which is
+true from the first poll — it never actually waited for anything.
 
 A client with zero attached buffers has nothing to re-attach, so restart degrades
 to a plain stop and reports that.

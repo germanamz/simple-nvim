@@ -225,13 +225,33 @@ vim.api.nvim_create_autocmd("LspAttach", {
 
     -- Restart the LSP client(s) on this buffer and re-attach. Handy after a
     -- file rename confuses the server (e.g. ts_ls "Already included file name
-    -- ... only in casing"): stopping drops the stale in-memory project, and
-    -- `:edit` reloads the buffer so vim.lsp.enable spins up a fresh client.
+    -- ... only in casing"), or to pick up a change the servers never saw now
+    -- that didChangeWatchedFiles is off (:343): stopping drops the stale
+    -- in-memory project.
+    --
+    -- Re-attach runs through config.lsp_picker, NOT the `:edit` this used to do.
+    -- Reloading the buffer broke the keymap twice over: `:edit` REFUSES a
+    -- modified buffer (E37), and the clients are stopped by the time it throws,
+    -- so a restart reached for mid-edit — the usual case — left the buffer with
+    -- no server at all; and it only ever re-attached THIS buffer, while the stop
+    -- had detached every sibling the client served.
     map("<leader>lr", function()
-      for _, c in ipairs(vim.lsp.get_clients({ bufnr = args.buf })) do
-        c:stop()
-      end
-      vim.cmd("edit")
+      local lsp_picker = require("config.lsp_picker")
+      -- last_buf: this buffer resolves last, so in a mixed-version monorepo the
+      -- new client runs the TypeScript THIS package pins (see config.lsp_tsdk).
+      local stopped, reattached = lsp_picker.restart_clients(
+        vim.lsp.get_clients({ bufnr = args.buf }),
+        { last_buf = args.buf }
+      )
+      vim.notify(
+        stopped == 0 and "no LSP clients on this buffer"
+          or ("restarted %d client%s for %d buffer%s"):format(
+            stopped,
+            stopped == 1 and "" or "s",
+            reattached,
+            reattached == 1 and "" or "s"
+          )
+      )
     end, "Restart LSP on buffer")
 
     -- Inlay hints are off by default to keep the UI quiet; offer a per-buffer

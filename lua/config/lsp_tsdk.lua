@@ -40,9 +40,11 @@
 -- (waiting for each attach) makes that the first buffer, while a concurrent open
 -- (`nvim -p a b`, session restore, a telescope/quickfix multi-open) resolves
 -- every buffer before any client starts and the last one wins. `<leader>lr`
--- re-resolves from the current buffer, but it also detaches every sibling buffer
--- under that root and they do not re-attach on their own — so exactly one
--- package under a mixed-version root can be correct at a time.
+-- re-resolves the whole root and re-attaches every buffer under it, ordering the
+-- buffer you are standing in LAST so that its package is the one the new client
+-- runs (config.lsp_picker.restart_clients' `last_buf`) — so exactly one package
+-- under a mixed-version root can be correct at a time, and the keymap is how you
+-- choose which.
 local M = {}
 
 -- Same candidates typescript-language-server looks for, in its order.

@@ -115,20 +115,38 @@ describe("smoke: lsp fs sync", function()
       assert.is_function(m.callback)
     end)
 
-    it("stops the buffer's clients and reloads on invoke", function()
+    -- Re-attach must go through the FileType autocmd `vim.lsp.enable()` installs,
+    -- never through `:edit`. Reloading the buffer was the original mechanism and
+    -- it threw E37 on any buffer with unsaved changes — with the clients already
+    -- stopped, which left the buffer with no server at all. The e2e-lsp lane
+    -- proves that end to end against a real server; this pins the wiring.
+    it("stops the buffer's clients and re-attaches without reloading the buffer", function()
       local buf = vim.api.nvim_create_buf(false, true)
       vim.api.nvim_set_current_buf(buf)
       attach(buf)
       local m = buf_keymap_by_desc(buf, "Restart LSP on buffer")
       assert.is_not_nil(m, "<leader>lr not registered on LspAttach")
 
-      local stopped, edited = 0, false
+      local stopped, edited, fired = 0, false, 0
       local fake_client = {
+        attached_buffers = { [buf] = true },
+        is_stopped = function()
+          return false
+        end,
         stop = function()
           stopped = stopped + 1
         end,
       }
-      local orig_get_clients, orig_cmd = vim.lsp.get_clients, vim.cmd
+      local group = vim.api.nvim_create_augroup("lsp_fs_sync_restart_spec", { clear = true })
+      vim.api.nvim_create_autocmd("FileType", {
+        group = group,
+        buffer = buf,
+        callback = function()
+          fired = fired + 1
+        end,
+      })
+
+      local orig_get_clients, orig_cmd, orig_notify = vim.lsp.get_clients, vim.cmd, vim.notify
       vim.lsp.get_clients = function(opts)
         assert.are.equal(buf, opts.bufnr)
         return { fake_client }
@@ -140,14 +158,17 @@ describe("smoke: lsp fs sync", function()
           orig_cmd(c)
         end
       end
+      vim.notify = function() end
 
       local ok, err = pcall(m.callback)
 
-      vim.lsp.get_clients, vim.cmd = orig_get_clients, orig_cmd
+      vim.lsp.get_clients, vim.cmd, vim.notify = orig_get_clients, orig_cmd, orig_notify
+      vim.api.nvim_del_augroup_by_id(group)
 
       assert.is_true(ok, "restart keymap errored: " .. tostring(err))
       assert.are.equal(1, stopped)
-      assert.is_true(edited, "buffer was not reloaded with :edit")
+      assert.are.equal(1, fired, "the buffer was not re-attached via FileType")
+      assert.is_false(edited, "<leader>lr reloaded the buffer; that is the E37 bug")
     end)
   end)
 end)
