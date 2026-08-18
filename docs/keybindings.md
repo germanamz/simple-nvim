@@ -305,6 +305,11 @@ uppercase = case-sensitive. `incsearch` + `hlsearch` are on.
 | `:'<,'>s/old/new/g`          | in visual selection                          |
 | `:cdo s/old/new/g | update`  | replace across quickfix entries              |
 | `:argdo %s/old/new/ge | up`  | replace across `:args` files                 |
+| `*` then `cgn`               | change the next match of the word under the cursor; `.` repeats it, `n` skips one |
+
+`cgn` + `.` is the no-plugin way to rename a handful of occurrences one at a
+time; §9 has multiple cursors for when you want to see and edit them all at
+once.
 
 ---
 
@@ -367,6 +372,50 @@ a text object. All maps share the `gs` prefix so they don't shadow the built-in
 | `gsf` / `gsF` | find next / previous surround                     |
 | `gsh`         | highlight the surrounding pair                    |
 | `gsn`         | update the `n_lines` search range                 |
+
+### Multiple cursors (multicursor.nvim)
+
+Put a cursor on every occurrence of a symbol (or straight down a column), then
+use Vim normally — `ciwNewName<Esc>`, `A;<Esc>`, `~`, a macro — and every cursor
+does the same thing. `<Esc>` collapses back to one cursor.
+
+| Keys                  | Action                                           |
+| --------------------- | ------------------------------------------------ |
+| `<C-n>` (n / x)       | add cursor at next match of word / selection     |
+| `<Space>cN` (n / x)   | add cursor at *previous* match                   |
+| `<Space>cs` / `<Space>cS` | skip this match forward / backward           |
+| `<S-Down>` / `<S-Up>` (n / x) | add cursor on the line below / above      |
+| `<Space>cA` (n / x)   | add a cursor at **every** match in the buffer    |
+| `<Space>ca{motion}`   | one cursor per line over a motion (`<Space>caip`) |
+| `<Space>cr`           | restore cursors you just cleared                 |
+
+While more than one cursor exists, these extra maps apply (they are
+buffer-local and disappear the moment you collapse back to one):
+
+| Keys              | Action                                               |
+| ----------------- | ---------------------------------------------------- |
+| `<Esc>`           | collapse back to a single cursor                     |
+| `<Left>` / `<Right>` | make the previous / next cursor the main one      |
+| `<Space>cx`       | delete the cursor under the main one                  |
+
+Two things that surprise people:
+
+- **`<S-Up>` is not an undo for `<S-Down>`.** Each press clones a cursor where
+  the main one stands and then moves the main one along; reversing direction
+  drops a clone and walks the main cursor back onto an existing one, so the
+  stack keeps its size. To actually remove a cursor, use `<Space>cx`.
+- **Cursors survive until you collapse them.** If they vanish by accident,
+  `<Space>cr` brings them back.
+- **Brackets and quotes do not auto-close while cursors are alive.** Typing `(`
+  `[` `{` `"` `'` or `` ` `` inserts that one character at every cursor; you
+  type the closing half yourself. mini.pairs supplies its closing half through
+  a mapping that moves the cursor, which breaks the mechanism multicursor uses
+  to replay an insert (the `.` register) as soon as you press Enter inside the
+  pair — the brackets would go missing at every cursor but the main one. The
+  auto-pairing comes straight back when you collapse to one cursor.
+
+For a one-off rename with no plugin involved, `*` then `cgn` and `.` (§8) is
+often faster than setting up cursors at all.
 
 ---
 
@@ -888,6 +937,19 @@ open buffers, cwd). Nothing is restored automatically. Pick a restore on demand.
 ### `<Esc>` in Telescope
 
 Single press closes the picker (not "go to normal mode inside the picker").
+
+### Multiple cursors shadow three defaults
+
+- `<C-n>` (normal mode) was Vim's alias for `j`. Telescope's `<C-n>` (prompt
+  history) and blink's `<C-n>` (completion menu) are unaffected — those are
+  insert-mode and picker-local.
+- `<S-Down>` / `<S-Up>` were aliases for `<C-f>` / `<C-b>` (page forward /
+  back). Those two, plus `<C-d>` / `<C-u>`, still scroll as usual. They are
+  bound here because macOS reserves `<C-Up>` and `<C-Down>` system-wide for
+  Mission Control and App Exposé, so those keys never reach the terminal.
+- `<Esc>` normally clears the search highlight. While multiple cursors exist it
+  collapses them instead, and goes back to clearing the highlight as soon as
+  you are down to one cursor.
 
 ---
 

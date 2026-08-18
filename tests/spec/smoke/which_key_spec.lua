@@ -18,6 +18,7 @@ describe("smoke: which-key keybinding documentation", function()
   -- in the global keymap table) fails loudly instead of silently degrading.
   local EXPECTED_GROUPS = {
     ["<leader>b"] = "buffer",
+    ["<leader>c"] = "cursors",
     ["<leader>f"] = "find",
     ["<leader>g"] = "git",
     ["<leader>h"] = "hunks",

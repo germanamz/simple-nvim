@@ -9,6 +9,9 @@ return {
         { "<leader>a", group = "ai" },
         { "<leader>b", group = "buffer" },
         { "<leader>ba", group = "all buffers" },
+        -- multicursor.nvim (lua/plugins/multicursor.lua) hangs its verbs off
+        -- `<leader>c`; `<leader>m` was already markdown.
+        { "<leader>c", group = "cursors" },
         { "<leader>f", group = "find" },
         { "<leader>g", group = "git" },
         { "<leader>h", group = "hunks" },
