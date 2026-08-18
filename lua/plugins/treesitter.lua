@@ -67,6 +67,11 @@ return {
       vim.treesitter.language.register("bash", "sh")
       -- The parser is named git_config; the filetype Neovim sets is gitconfig.
       vim.treesitter.language.register("git_config", "gitconfig")
+      -- Tiltfiles (Tiltfile, Tiltfile.local, *.tiltfile → ft tiltfile, detected
+      -- by core) are Starlark. There is no `tiltfile` grammar, so point the ft
+      -- at the starlark parser; `.star` files self-resolve to it. The parser
+      -- comes with nvim-treesitter's own queries, unlike fga above.
+      vim.treesitter.language.register("starlark", "tiltfile")
 
       local ft_pattern = {
         "markdown",
@@ -102,6 +107,8 @@ return {
         "hcl",
         "graphql",
         "fga",
+        "tiltfile",
+        "starlark",
       }
 
       -- Per-filetype 'indentexpr' overrides that wrap nvim-treesitter's own.

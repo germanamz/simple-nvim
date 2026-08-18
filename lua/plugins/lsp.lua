@@ -70,6 +70,18 @@ local servers = {
   -- spawning a no-op node process on every stray .graphql buffer.
   graphql = { filetypes = { "graphql" }, workspace_required = true },
   marksman = { filetypes = { "markdown" } },
+  -- Tilt's language server (tilt-dev/starlark-lsp) is `tilt lsp start`, a
+  -- subcommand of the tilt binary itself, and this row deliberately runs the
+  -- `tilt` already on PATH rather than a mason-installed one (mason does carry a
+  -- `tilt` package). The server knows the builtins of the tilt it ships in, so
+  -- the one that runs your `tilt up` is the one that should complete and
+  -- document your Tiltfile — and mason prepends its bin dir to nvim's PATH, so
+  -- a second tilt there would also shadow the real one in every :terminal.
+  -- Without tilt on PATH core just skips the server (a line in lsp.log; no
+  -- notification), so the row is harmless on a machine without it.
+  -- lspconfig's defaults do the rest: filetypes { tiltfile } (core detects
+  -- Tiltfile / Tiltfile.local / *.tiltfile), root at `.git`. See docs/tiltfile.md.
+  tilt_ls = { filetypes = { "tiltfile" } },
   -- mdx_analyzer wraps tsserver, needs typescript lib. Falls back to
   -- mason's bundled typescript when the workspace has no node_modules.
   -- workspace.didChangeWatchedFiles.dynamicRegistration is disabled because

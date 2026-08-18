@@ -55,4 +55,18 @@ describe("smoke: language server filetype ownership", function()
       end
     end)
   end
+
+  -- Tiltfiles: tilt's own language server (`tilt lsp start`, embedded in the
+  -- tilt binary) is enabled for the tiltfile filetype and is the only server
+  -- that claims it — pyright must not be widened onto Starlark, say, without
+  -- this noticing the double attach.
+  it("enables tilt_ls as the sole owner of tiltfile", function()
+    assert.are.same({ "tiltfile" }, filetypes("tilt_ls"))
+    assert.is_not_nil(vim.lsp._enabled_configs["tilt_ls"], "tilt_ls is registered but not enabled")
+    for name in pairs(vim.lsp._enabled_configs) do
+      if name ~= "tilt_ls" then
+        assert.is_nil(set_of(name)["tiltfile"], name .. " also claims tiltfile")
+      end
+    end
+  end)
 end)

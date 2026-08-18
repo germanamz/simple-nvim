@@ -20,7 +20,7 @@ exactly one pin file, so "what pins X?" is grep-answerable.
 | Neovim binary | `.tool-versions` (`neovim 0.12.1`) | `mise` / `asdf` on the machine |
 | Plugin sources | `lazy-lock.json` | `init.lua` runs `lazy.restore()` on a fresh install; `config.lock_drift` warns 1 s after startup when an installed clone's commit differs from the lock |
 | Mason tools (LSPs, formatters, linters) | `mason-tool-versions.lock` — 27 tools | `lua/plugins/lsp.lua` registers `mason-tool-installer.nvim` from the lockfile; `scripts/mason-sync.lua` drives the install |
-| Treesitter parsers | `parser-revisions.lua` at the repo root — 34 parsers | `config.ts_pinned.apply()` rewrites each parser's `install_info.revision` before `nvim-treesitter`'s `install()` runs, and registers the out-of-tree ones (`fga`) it names |
+| Treesitter parsers | `parser-revisions.lua` at the repo root — 35 parsers | `config.ts_pinned.apply()` rewrites each parser's `install_info.revision` before `nvim-treesitter`'s `install()` runs, and registers the out-of-tree ones (`fga`) it names |
 | Test runtime | `NVIM_BOOTSTRAP=0` + scrubbed `$HOME`/`$XDG_*` via `tests/helpers/nvim_env.lua` | `init.lua` skips `lazy.setup` when the env var is `"0"`; specs run against the pre-warmed cache, symlinked in. No downloads during a test run |
 
 The consequence is that plugin and server updates stop being automatic.

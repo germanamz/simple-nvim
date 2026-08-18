@@ -59,4 +59,5 @@ return {
   hcl = "64ad62785d442eb4d45df3a1764962dafd5bc98b",
   terraform = "64ad62785d442eb4d45df3a1764962dafd5bc98b",
   fga = "ce72d1c484ba133a18e966d67be66bce85695451",
+  starlark = "a453dbf3ba433db0e5ec621a38a7e59d72e4dc69",
 }

@@ -34,10 +34,10 @@ check:
 # real Lua that nvim runs, and they sat outside the target list, so nothing
 # checked them. stylua ignores the .sh files sitting beside them.
 lint:
-	@stylua --check lua init.lua tests parser-revisions.lua scripts
+	@stylua --check lua ftplugin init.lua tests parser-revisions.lua scripts
 
 fmt:
-	@stylua lua init.lua tests parser-revisions.lua scripts
+	@stylua lua ftplugin init.lua tests parser-revisions.lua scripts
 
 test: test-unit test-smoke test-e2e
 

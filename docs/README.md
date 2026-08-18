@@ -30,6 +30,9 @@ beyond the code.
 - **[openfga.md](openfga.md).** OpenFGA `.fga` models: the out-of-tree
   treesitter parser, the vendored queries, and the model-aware completion
   source that stands in for a language server.
+- **[tiltfile.md](tiltfile.md).** Tiltfiles: the starlark parser registered for
+  the `tiltfile` filetype, the ftplugin the runtime lacks, and why the language
+  server is the `tilt` on `PATH` rather than a mason install.
 - **[superpowers/](superpowers/README.md).** The engineering record: how the
   larger pieces were designed and what actually shipped. Start with
   [testing.md](superpowers/testing.md) before changing anything — it covers the

@@ -15,6 +15,8 @@ management with automatic bootstrapping.
 search, display, markdown writing mode)
 - `lua/plugins/*.lua` — Each file returns a lazy.nvim plugin spec (or table of
 specs). lazy.nvim auto-discovers all files in this directory.
+- `ftplugin/*.lua` — Filetype options for filetypes the runtime ships no
+ftplugin for (e.g. `starlark`, sourced by `tiltfile`; see `docs/tiltfile.md`).
 
 ## Plugin conventions
 

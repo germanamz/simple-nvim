@@ -55,6 +55,15 @@ describe("e2e: treesitter", function()
       content = "model\n  schema 1.1\n\ntype user\n",
       capture_col = 0,
     },
+    {
+      -- Tiltfile → ft tiltfile (core detects the name), parsed by the starlark
+      -- parser lua/plugins/treesitter.lua registers for that ft — there is no
+      -- `tiltfile` grammar. col 0 = the `load` call.
+      label = "tiltfile",
+      path = "Tiltfile",
+      content = "load('ext://restart_process', 'docker_build_with_restart')\n",
+      capture_col = 0,
+    },
   }
 
   for _, case in ipairs(cases) do
@@ -341,6 +350,98 @@ describe("e2e: treesitter", function()
       assert.are.equal(">1", level(6), "`type group` opens a fold")
       assert.are.equal(">1", level(16), "`condition …` opens a fold")
       assert.are.equal("0", level(4), "`type user` (one line) is not a fold")
+    end)
+  end)
+
+  -- Tiltfiles are Starlark. Core detects the filetype but ships neither a
+  -- parser mapping (it would look for a `tiltfile` grammar) nor an ftplugin
+  -- (no commentstring, no indent), so pin what this config layers on top: the
+  -- starlark parser via language.register, and ftplugin/starlark.lua's options.
+  describe("tiltfile (Starlark)", function()
+    local TILTFILE = {
+      "# dev loop", -- 0
+      "load('ext://restart_process', 'docker_build_with_restart')", -- 1
+      "", -- 2
+      "def deploy(name):", -- 3
+      "    k8s_yaml('k8s/%s.yaml' % name)", -- 4
+      "    return True", -- 5
+      "", -- 6
+      "deploy('web')", -- 7
+    }
+
+    local bufnr
+
+    local function open_tiltfile()
+      local repo = git_fixture.repo({
+        commits = {
+          { files = { ["Tiltfile"] = table.concat(TILTFILE, "\n") .. "\n" } },
+          message = "init",
+        },
+      })
+      local canonical = vim.uv.fs_realpath(repo) or repo
+      vim.fn.chdir(canonical)
+      vim.cmd("edit " .. canonical .. "/Tiltfile")
+      bufnr = vim.api.nvim_get_current_buf()
+      wait.wait_for(function()
+        return vim.treesitter.highlighter.active[bufnr] ~= nil
+      end, 5000, "treesitter highlighter never attached to the Tiltfile buffer")
+      vim.treesitter.get_parser(bufnr):parse(true)
+    end
+
+    local function captures_at(row, col)
+      local names = {}
+      for _, c in ipairs(vim.treesitter.get_captures_at_pos(bufnr, row, col)) do
+        names[c.capture] = true
+      end
+      return names
+    end
+
+    it("parses a Tiltfile with the starlark grammar, without error nodes", function()
+      open_tiltfile()
+      assert.are.equal("tiltfile", vim.bo[bufnr].filetype)
+      assert.are.equal("starlark", vim.treesitter.language.get_lang("tiltfile"))
+      assert.are.equal("starlark", vim.treesitter.get_parser(bufnr):lang())
+      assert.is_false(
+        vim.treesitter.get_parser(bufnr):parse(true)[1]:root():has_error(),
+        "grammar produced ERROR nodes for a valid Tiltfile"
+      )
+    end)
+
+    it("highlights comments, calls, defs, strings and booleans", function()
+      open_tiltfile()
+      assert.is_true(captures_at(0, 0)["comment"] == true, "`# dev loop` should be @comment")
+      assert.is_true(captures_at(1, 0)["function.call"] == true, "`load` should be @function.call")
+      assert.is_true(captures_at(1, 5)["string"] == true, "the extension path should be @string")
+      assert.is_true(
+        captures_at(3, 0)["keyword.function"] == true,
+        "`def` should be @keyword.function"
+      )
+      assert.is_true(captures_at(3, 4)["function"] == true, "`deploy` should be @function")
+      assert.is_true(captures_at(5, 11)["boolean"] == true, "`True` should be @boolean")
+    end)
+
+    -- ftplugin/tiltfile.lua → ftplugin/starlark.lua: `#` comments (so gcc
+    -- works — the runtime has no ftplugin for either ft) and the 4-space indent
+    -- Starlark shares with Python (buildifier's output, and what the runtime's
+    -- python ftplugin gives python buffers here), over the config's global 2.
+    it("gets a `#` commentstring and 4-space indent from the ftplugin", function()
+      open_tiltfile()
+      assert.are.equal("# %s", vim.bo[bufnr].commentstring)
+      assert.are.equal(4, vim.bo[bufnr].shiftwidth)
+      assert.are.equal(4, vim.bo[bufnr].softtabstop)
+      assert.is_true(vim.bo[bufnr].expandtab)
+    end)
+
+    it("indents a def body one shiftwidth and folds the def", function()
+      open_tiltfile()
+      vim.api.nvim_set_current_buf(bufnr)
+      assert.are.equal("v:lua.require'nvim-treesitter'.indentexpr()", vim.bo[bufnr].indentexpr)
+      -- line 5 (1-based) = `    k8s_yaml(...)`, the first body line under `def`
+      assert.are.equal(4, require("nvim-treesitter.indent").get_indent(5))
+      -- foldexpr(lnum) reads its argument (v:lnum is only the fallback when
+      -- called from 'foldexpr' with no args), so pass the line directly.
+      assert.are.equal(">1", vim.treesitter.foldexpr(4), "`def deploy` opens a fold")
+      assert.are.equal("0", vim.treesitter.foldexpr(2), "a top-level call is not a fold")
     end)
   end)
 
