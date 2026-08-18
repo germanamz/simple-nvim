@@ -21,6 +21,9 @@ specs). lazy.nvim auto-discovers all files in this directory.
 - Treesitter uses the `main` branch API (Neovim 0.11+): no `configs.setup()`,
 parsers installed via `require("nvim-treesitter").install()`, highlighting
 started per-buffer via `vim.treesitter.start()` in a FileType autocmd.
+Parsers are pinned in `parser-revisions.lua`; grammars nvim-treesitter does
+not ship (e.g. `fga`) are registered out-of-tree in `lua/plugins/treesitter.lua`
+with their queries vendored under `queries/<lang>/` (see `docs/openfga.md`).
 - Telescope uses fzf-native extension (requires `make`). Pickers open in normal
 mode (`initial_mode = "normal"`); press `i`/`a` to type. In insert mode `<esc>`
 drops back to normal mode, `<C-c>` closes; in normal mode `<esc>` closes.

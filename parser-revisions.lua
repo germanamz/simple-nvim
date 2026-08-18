@@ -20,6 +20,10 @@
 -- sources them from two kept-in-sync repos (tree-sitter-grammars/ and
 -- MichaHoffmann/), and `make update` re-derives each pin independently, so a
 -- future divergence just yields two SHAs rather than breaking anything.
+-- `fga` (OpenFGA's DSL, matoous/tree-sitter-fga) is not in nvim-treesitter's
+-- registry at all: lua/plugins/treesitter.lua registers it out-of-tree through
+-- config.ts_pinned, and its queries are vendored in queries/fga/. The pin here
+-- is what makes it installable; a url without a pin registers nothing.
 return {
   markdown = "f969cd3ae3f9fbd4e43205431d0ae286014c05b5",
   markdown_inline = "f969cd3ae3f9fbd4e43205431d0ae286014c05b5",
@@ -54,4 +58,5 @@ return {
   graphql = "5e66e961eee421786bdda8495ed1db045e06b5fe",
   hcl = "64ad62785d442eb4d45df3a1764962dafd5bc98b",
   terraform = "64ad62785d442eb4d45df3a1764962dafd5bc98b",
+  fga = "ce72d1c484ba133a18e966d67be66bce85695451",
 }

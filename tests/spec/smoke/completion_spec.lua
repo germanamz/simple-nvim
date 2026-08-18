@@ -39,6 +39,21 @@ describe("smoke: completion (blink.cmp)", function()
       assert.are.same({ "lsp", "path", "buffer" }, cfg.sources.default)
     end)
 
+    -- OpenFGA models: no language server offers completion for the DSL, so a
+    -- config-owned source (config.blink_fga) fronts the fga filetype, with the
+    -- buffer source demoted to its fallback so buffer words only surface when
+    -- the model-aware source has nothing.
+    it("fronts fga buffers with the config's OpenFGA source", function()
+      assert.are.same({ "fga", "path", "buffer" }, cfg.sources.per_filetype.fga)
+      local fga = cfg.sources.providers.fga
+      assert.is_not_nil(fga, "no fga provider registered")
+      assert.are.equal("config.blink_fga", fga.module)
+      assert.are.same({ "buffer" }, fga.fallbacks)
+      assert.has_no.errors(function()
+        require(fga.module).new({}, fga)
+      end)
+    end)
+
     it("auto-shows documentation", function()
       assert.is_true(cfg.completion.documentation.auto_show)
     end)

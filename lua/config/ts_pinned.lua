@@ -33,12 +33,34 @@
 -- nothing verifies that pairing yet. See scripts/update-pins.sh.
 local M = {}
 
----Apply pinned revisions to nvim-treesitter's parser registry.
+---Apply pinned revisions to nvim-treesitter's parser registry, first
+---registering any out-of-tree parser the registry has no entry for.
+---
+---`out_of_tree` names grammars nvim-treesitter does not ship (today: fga, the
+---OpenFGA DSL). Each value is the install_info minus its revision — the
+---revision comes from `revs`, like every other parser's, so parser-revisions.lua
+---stays the single source of truth for what gets installed and at what ref: an
+---out-of-tree url with no pin registers nothing. Should upstream later add the
+---same language, its bundled entry wins (url, tier, maintainers) and only the
+---revision is overridden, exactly as for the parsers it always shipped.
+---
+---No `tier` is set on the entries created here. install() normalizes its
+---language list with `unsupported = true`, which drops tier-4 entries — a nil
+---tier passes. The only other reader is get_available(tier), used when a tier
+---NAME (`stable`, `unstable`, …) is passed as a language: an untiered entry is
+---simply left out of `:TSInstall stable` and friends, which is fine because
+---this config only ever installs by explicit parser name.
 ---@param revs table<string, string> map: parser name -> revision string
-function M.apply(revs)
+---@param out_of_tree? table<string, { url: string }> parsers to register when absent
+function M.apply(revs, out_of_tree)
   local ok, parsers = pcall(require, "nvim-treesitter.parsers")
   if not ok then
     return
+  end
+  for name, info in pairs(out_of_tree or {}) do
+    if not parsers[name] and revs[name] then
+      parsers[name] = { install_info = vim.tbl_extend("force", info, { revision = revs[name] }) }
+    end
   end
   for name, revision in pairs(revs) do
     if parsers[name] and parsers[name].install_info then
@@ -59,13 +81,16 @@ end
 ---is the only seam whose writes the installer sees.
 ---
 ---Also fires for `:TSUpdate` / `:TSInstall`, so the pins hold for those too.
+---Out-of-tree parsers ride the same event for the same reason: the reloaded
+---table has no entry for them, so they have to be re-registered each time.
 ---@param revs table<string, string> map: parser name -> revision string
-function M.setup(revs)
+---@param out_of_tree? table<string, { url: string }> see M.apply
+function M.setup(revs, out_of_tree)
   vim.api.nvim_create_autocmd("User", {
     pattern = "TSUpdate",
     group = vim.api.nvim_create_augroup("ts_pinned", { clear = true }),
     callback = function()
-      M.apply(revs)
+      M.apply(revs, out_of_tree)
     end,
   })
 end

@@ -39,7 +39,16 @@ vim.g.loaded_python3_provider = 0
 -- comment-only .tf lands on ft `tf` with no parser/LSP/formatter for the whole
 -- session (ft isn't re-detected as you type). Pin `.tf` to terraform by
 -- extension so support attaches immediately; this box has no TinyFugue files.
-vim.filetype.add({ extension = { mdx = "mdx", tmpl = "gohtmltmpl", tf = "terraform" } })
+--
+-- `.fga` is OpenFGA's authorization-model DSL. Newer runtimes detect it (the
+-- 0.12 filetype table has `fga`), older 0.11 ones may not, so pin it here as
+-- well; the fga.mod module manifest is parsed by the same grammar
+-- (schema/contents form), so map it by filename too — otherwise core's `.mod`
+-- handler (detect.mod) lands it on modsim3.
+vim.filetype.add({
+  extension = { mdx = "mdx", tmpl = "gohtmltmpl", tf = "terraform", fga = "fga" },
+  filename = { ["fga.mod"] = "fga" },
+})
 
 require("config.options")
 require("config.lsp_refs").setup()

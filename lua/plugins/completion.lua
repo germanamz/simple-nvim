@@ -79,9 +79,17 @@ return {
         javascriptreact = { "snippets", "lsp", "path", "buffer" },
         markdown = { "snippets", "lsp", "path", "buffer" },
         mdx = { "snippets", "lsp", "path", "buffer" },
+        -- OpenFGA models: no language server offers completion for the DSL
+        -- (OpenFGA's own does diagnostics/hover only and isn't in mason), so a
+        -- config-owned, model-aware source (types, relations, usersets,
+        -- conditions, keywords) fronts the filetype. No "lsp" here — nothing
+        -- attaches to fga — and buffer is this source's fallback (below), so
+        -- raw buffer words only surface when it has nothing to say.
+        fga = { "fga", "path", "buffer" },
       },
       providers = {
         lazydev = { name = "LazyDev", module = "lazydev.integrations.blink", score_offset = 100 },
+        fga = { name = "OpenFGA", module = "config.blink_fga", fallbacks = { "buffer" } },
       },
     },
     completion = {

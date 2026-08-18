@@ -27,6 +27,9 @@ beyond the code.
   formatter and linter are detected, why prettier no longer runs in projects that
   never configured it, and how to diagnose which tool owns a buffer. Also the
   full decision record: what was rejected and why, and what ships imperfect.
+- **[openfga.md](openfga.md).** OpenFGA `.fga` models: the out-of-tree
+  treesitter parser, the vendored queries, and the model-aware completion
+  source that stands in for a language server.
 - **[superpowers/](superpowers/README.md).** The engineering record: how the
   larger pieces were designed and what actually shipped. Start with
   [testing.md](superpowers/testing.md) before changing anything — it covers the

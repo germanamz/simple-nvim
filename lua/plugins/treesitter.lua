@@ -23,7 +23,18 @@ return {
       -- inline: install() reloads the parser table as its first statement and
       -- would discard an inline apply()'s writes before reading them.
       local revisions = dofile(vim.fn.stdpath("config") .. "/parser-revisions.lua")
-      require("config.ts_pinned").setup(revisions)
+      -- Grammars nvim-treesitter's registry does not carry, registered on the
+      -- same TSUpdate seam before the pins are applied (revision comes from the
+      -- pin file like everyone else's; see config.ts_pinned). Their queries
+      -- live in queries/fga/ etc. — the config dir is first on the runtimepath,
+      -- so those are the base queries and the installer never has to copy any.
+      local out_of_tree = {
+        -- OpenFGA authorization models (.fga, fga.mod). Upstream's own
+        -- highlights use a `#is-not? local` predicate core Neovim lacks, which
+        -- is why queries/fga/highlights.scm is a vendored, adapted copy.
+        fga = { url = "https://github.com/matoous/tree-sitter-fga" },
+      }
+      require("config.ts_pinned").setup(revisions, out_of_tree)
       require("nvim-treesitter").install(vim.tbl_keys(revisions))
 
       -- Global filetype → parser registration: the single source of truth for
@@ -90,6 +101,14 @@ return {
         "terraform-vars",
         "hcl",
         "graphql",
+        "fga",
+      }
+
+      -- Per-filetype 'indentexpr' overrides that wrap nvim-treesitter's own.
+      -- The one entry hands fga comment lines back to autoindent (see
+      -- config.fga_indent); every other filetype uses the plugin's directly.
+      local indentexpr_override = {
+        fga = "v:lua.require'config.fga_indent'.indentexpr()",
       }
 
       vim.api.nvim_create_autocmd("FileType", {
@@ -119,7 +138,8 @@ return {
           if ok then
             vim.wo.foldmethod = "expr"
             vim.wo.foldexpr = "v:lua.vim.treesitter.foldexpr()"
-            vim.bo[args.buf].indentexpr = "v:lua.require'nvim-treesitter'.indentexpr()"
+            vim.bo[args.buf].indentexpr = indentexpr_override[args.match]
+              or "v:lua.require'nvim-treesitter'.indentexpr()"
           end
         end,
       })
