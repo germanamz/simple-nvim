@@ -23,6 +23,11 @@ beyond the code.
 - **[lsp-fs-sync.md](lsp-fs-sync.md).** Why deleting or renaming files from the
   file tree sent gopls and ts_ls into error storms with watchers off, and the
   in-editor notification path that replaces them.
+- **[minuet-stale-guard.md](minuet-stale-guard.md).** Why AI ghost text was
+  painted against a buffer it no longer fit and then never corrected, why a
+  *faster* local model makes that worse rather than better, and the two-part fix
+  (trailing-edge pacing plus a buffer-freshness guard) that neither half achieves
+  alone.
 - **[js-toolchain.md](js-toolchain.md).** How a JavaScript/TypeScript project's
   formatter and linter are detected, why prettier no longer runs in projects that
   never configured it, and how to diagnose which tool owns a buffer. Also the

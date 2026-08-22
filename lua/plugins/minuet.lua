@@ -85,6 +85,30 @@ return {
       -- tight window keeps latency low (tunable up given 32GB).
       n_completions = 1,
       context_window = 512,
+      -- Pacing. minuet's defaults (throttle 1000, debounce 400) are sized as
+      -- cost/rate-limit controls for paid cloud APIs; upstream's own "local model"
+      -- preset uses 400/100. Against localhost they are actively harmful, because
+      -- `schedule()` (virtualtext.lua:288-292) early-returns while throttled
+      -- BEFORE re-arming the debounce — keystrokes inside the window are dropped,
+      -- not deferred, and `on_cursor_hold_i` (:499) is dead code that is never
+      -- registered, so nothing rescues them. Stop typing mid-window and no
+      -- corrective request is ever issued: measured 18 of 40 keystrokes dropped,
+      -- and a misaligned suggestion left on screen for 7.1s.
+      --
+      -- throttle = 0 restores the trailing edge (measured: zero keystrokes
+      -- dropped). It is not literally "off" — :309-312 has no `> 0` short-circuit,
+      -- unlike blink.lua:49 — but one event-loop tick is the intent here.
+      -- debounce = 150 measured 5 requests / 0 misaligned over a 40-key run; 75
+      -- (copilot's value) measured 29 requests with 22 SIGTERM cancellations for
+      -- no accuracy gain. Raising the debounce back toward the round-trip median
+      -- (433ms) is what re-opens the stale window, so keep it well under.
+      --
+      -- Safe against this Ollama despite the higher rate: common.terminate_all_jobs
+      -- runs at the head of every FIM request, so at most one job is in flight, and
+      -- SIGTERM frees the `-np 1` slot cleanly (next TTFB measured back at 0.17s).
+      -- Put the defaults back if this provider is ever pointed at a paid endpoint.
+      throttle = 0,
+      debounce = 150,
       provider_options = {
         openai_fim_compatible = {
           -- api_key is an env-var NAME (minuet resolves it via utils.get_api_key);
@@ -130,6 +154,23 @@ return {
     vim.api.nvim_create_user_command("AIModel", function()
       require("config.ai_models").open()
     end, { desc = "Pick the Ollama model for AI completions" })
+
+    -- Second half of the stale-ghost-text fix: throttle = 0 above restores the
+    -- trailing edge (so a wrong suggestion gets CORRECTED), but on its own it
+    -- still lets one land — minuet paints a response without checking the buffer
+    -- moved under it, measured at 4 misaligned renders out of 7 even with the
+    -- throttle gone. The guard drops those. Both halves are required: the guard
+    -- alone would trade wrong ghost text for missing ghost text. Full rationale
+    -- and the upstream line numbers live in lua/config/minuet_guard.lua.
+    --
+    -- Warn rather than fail silently: this wraps a plugin internal upstream makes
+    -- no promises about, so a rename would otherwise just quietly restore the bug.
+    if not require("config.minuet_guard").install() then
+      vim.notify(
+        "minuet stale-guard did not attach — completions may render against a stale buffer",
+        vim.log.levels.WARN
+      )
+    end
 
     -- Establish the initial state now that minuet is up. bootstrap() first checks
     -- that Ollama is installed: if not, it starts disabled (blink keeps its own LSP

@@ -21,12 +21,18 @@ describe("plugins.minuet FIM stop list", function()
       end,
       config = {},
     }
+    -- The stale-guard wraps this backend; stub it so config() takes the real
+    -- attach path instead of warning that it could not find it.
+    package.loaded["minuet.backends.openai_fim_compatible"] = {
+      complete = function() end,
+    }
     -- Re-require the spec fresh so its config() closure is rebuilt each run.
     package.loaded["plugins.minuet"] = nil
   end)
 
   after_each(function()
     package.loaded["minuet"] = real_minuet
+    package.loaded["minuet.backends.openai_fim_compatible"] = nil
     package.loaded["plugins.minuet"] = nil
     pcall(vim.api.nvim_del_user_command, "AIModel")
   end)
