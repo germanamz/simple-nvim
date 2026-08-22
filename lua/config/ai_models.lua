@@ -68,12 +68,6 @@ local CATALOG = {
     desc = "Qwen2.5 Coder — FIM base (recommended default)",
   },
   {
-    name = "qwen3-coder",
-    fim = true,
-    tags = { "30b" },
-    desc = "Qwen3 Coder",
-  },
-  {
     name = "codegemma",
     fim = true,
     tags = { "2b", "code" },
@@ -117,6 +111,31 @@ local CATALOG = {
   },
   -- Chat models (fim = false): installable/switchable, but the <CR> gate warns
   -- before wiring one in as the completion model (garbage FIM output otherwise).
+  --
+  -- qwen3-coder is filed here despite being a code model, and the distinction
+  -- matters: the weights DO know FIM (the tokens sit at the same ids as
+  -- qwen2.5-coder — <|fim_prefix|> = 151659, etc). Ollama's packaging is what
+  -- breaks. A tag only gains CapabilityInsert when its template references
+  -- `suffix`; qwen2.5-coder:*-base ships a 117-byte template carrying that
+  -- `.Suffix` branch, while the qwen3-coder / qwen3-coder-next / qwen3.5 / qwen3.6
+  -- manifests carry no template layer at all (model + license + params only).
+  -- minuet always sets `suffix` on /v1/completions, so those tags return
+  -- HTTP 400 "does not support insert" on every keystroke — no ghost text at all,
+  -- not merely dirty FIM. Upstream: ollama#12387 (open since 2025-09-23, no PR),
+  -- so no future Qwen release fixes this. Hand-patching the template was tried
+  -- (ollama#11621) and came out worse than the 7b base: the instruct eos is
+  -- <|im_end|>, so raw FIM never stops cleanly.
+  --
+  -- This entry was `fim = true` and had to be corrected — a curated fim = true is
+  -- exactly what slips past the <CR> gate, and the /api/show capability check
+  -- only catches it AFTER a 19GB pull. Do not add qwen3-coder-next, qwen3.5 or
+  -- qwen3.6 here under a FIM flag; they all have the same missing-template shape.
+  {
+    name = "qwen3-coder",
+    fim = false,
+    tags = { "30b" },
+    desc = "Qwen3 Coder — instruct MoE, no Ollama FIM template (no FIM)",
+  },
   {
     name = "llama3.1",
     fim = false,
