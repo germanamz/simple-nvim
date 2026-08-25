@@ -17,6 +17,14 @@ local servers = {
     filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" },
     init_options = { hostInfo = "neovim", disableAutomaticTypingAcquisition = true },
   },
+  -- No `settings` here on purpose. Pyright's per-rule severities are a property
+  -- of the PROJECT, not of this config: a codebase that annotates but does not
+  -- follow the annotations (Pydantic being the canonical case) needs specific
+  -- rules dialed down, while a strict codebase must keep them. So the severities
+  -- are picked per project and injected by config.pyright_rules' before_init,
+  -- wired in the config() block below. Note the usual advice — typeCheckingMode
+  -- = "basic" — does nothing for that case: the rules involved are "error" in
+  -- basic, standard AND strict alike. See docs/python-diagnostics.md.
   pyright = { filetypes = { "python" } },
   gopls = { filetypes = { "go", "gomod" } },
   -- experimental.localDocs asks rust-analyzer to return a `local` file:// path
@@ -223,6 +231,18 @@ vim.api.nvim_create_autocmd("LspAttach", {
       -- so once rather than letting the diagnostics quietly disagree with the
       -- package's own build. See lua/config/lsp_tsdk.lua.
       require("config.lsp_tsdk").warn_mismatch(args.buf, client)
+    elseif client and client.name == "pyright" then
+      map("gd", vim.lsp.buf.definition, "Goto definition")
+      -- Buffer-local and pyright-gated for the same reason the ts_ls maps above
+      -- are: the picker acts on the pyright client serving THIS buffer, so the
+      -- key is a no-op anywhere else and shouldn't advertise itself there.
+      map("<leader>ld", require("config.pyright_rules").open, "Python diagnostic rules")
+      -- Say it once per project if a pyrightconfig.json / [tool.pyright] is
+      -- discarding the severities recorded for this root — otherwise the picker
+      -- looks like it worked and pyright quietly ignored all of it.
+      require("config.pyright_rules").warn_shadowed(
+        client.config and client.config.root_dir or client.root_dir
+      )
     elseif ft_util.is_markdown(ft) then
       -- Smart gd: follow a wikilink if the cursor is on one, else LSP definition.
       -- Re-asserted here so marksman's attach doesn't overwrite the FileType map.
@@ -350,6 +370,22 @@ return {
         servers.ts_ls.root_dir = tsdk.wrap_root_dir(lsp_root.bound(base_root_dir))
         servers.ts_ls.before_init = tsdk.before_init
       end
+
+      -- Per-project pyright rule severities. before_init is the one hook that
+      -- runs AFTER root_dir is resolved but BEFORE the client is created, which
+      -- is exactly what per-root settings need — and it must MUTATE
+      -- config.settings, never reassign it: client.settings is already aliased
+      -- to that table by then, so a reassignment is a silent no-op. The module
+      -- owns that discipline; see lua/config/pyright_rules.lua.
+      servers.pyright.before_init = require("config.pyright_rules").before_init
+
+      -- :PyrightRules mirrors <leader>ld (the picker), for people who reach for
+      -- commands — same split as :AIModel / <leader>am. Global rather than
+      -- buffer-local, so on a non-Python buffer it can say WHY it cannot open
+      -- instead of simply not existing.
+      vim.api.nvim_create_user_command("PyrightRules", function()
+        require("config.pyright_rules").open()
+      end, { desc = "Per-project pyright diagnostic rules" })
 
       -- Gate the linter servers on our own detection, so the boundary rule and the
       -- linter priority order actually apply to them. Guarded the same way ts_ls's

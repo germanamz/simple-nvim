@@ -20,6 +20,10 @@ beyond the code.
 - **[lsp-typescript-version.md](lsp-typescript-version.md).** Why ts_ls ran
   mason's bundled TypeScript instead of the project's in pnpm monorepos, and the
   buffer-relative resolution that fixes it.
+- **[python-diagnostics.md](python-diagnostics.md).** The `<leader>ld` picker for
+  per-project pyright rule severities: why `typeCheckingMode = "basic"` does
+  nothing for annotated-but-sloppy codebases, which five rules Pydantic actually
+  trips, and the silent aliasing trap in delivering per-root LSP settings.
 - **[lsp-fs-sync.md](lsp-fs-sync.md).** Why deleting or renaming files from the
   file tree sent gopls and ts_ls into error storms with watchers off, and the
   in-editor notification path that replaces them.

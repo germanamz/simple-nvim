@@ -580,6 +580,12 @@ Buffer-local: these only exist in buffers with an attached LSP client.
 | `<C-w>d`     | show diagnostic float (Nvim 0.11 default)               |
 | `<Space>uh`  | Toggle inlay hints (off; only when server supports them)|
 | `<Space>lr`  | restart the LSP client(s) on this buffer (also re-resolves ts_ls's TypeScript from this package) |
+| `<Space>ld`  | **Python only:** per-project pyright rule severities (`:PyrightRules`) |
+
+`<Space>ld` opens a picker over the pyright rules firing in this project and
+cycles each one's severity for that project alone, live — the answer to a
+Pydantic-style codebase whose annotations are not followed by the letter. See
+[python-diagnostics.md](python-diagnostics.md).
 
 Global (not buffer-local):
 
