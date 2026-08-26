@@ -484,9 +484,16 @@ often faster than setting up cursors at all.
 | `"_d`            | "black hole" delete: does not pollute reg    |
 | `:reg` / `:reg a`| list registers / show register `a`            |
 | (insert) `<C-r>{r}` | paste register `r` while in insert mode    |
+| `<Space>yl`      | yank `path:line` reference for the cursor line |
+| (visual) `<Space>yl` | yank `path:line-line` for the selection    |
 
 OSC52: in containers / SSH sessions the config installs an OSC52 clipboard
 provider so `"+y` works through your terminal.
+
+`<Space>yl` copies a reference you can paste into a chat, a commit message or
+an AI prompt: the path is relative to the project root (the *superproject*
+root when the file is in a submodule, so `child/a.lua:42` says which one), and
+a multi-line visual selection becomes `a.lua:10-20`.
 
 ---
 

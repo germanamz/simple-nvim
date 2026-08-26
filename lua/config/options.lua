@@ -196,6 +196,14 @@ vim.api.nvim_create_user_command("LspList", function()
   require("config.lsp_picker").open()
 end, { desc = "Pick an LSP client to stop or restart" })
 
+-- Yank `path:line` (relative to the project root) for the cursor line, or the
+-- line span of a visual selection. See lua/config/file_reference.lua for how
+-- the root is picked in a superproject. Lazy require: the module (and its git
+-- shellouts) stays unloaded until the key is pressed.
+vim.keymap.set({ "n", "x" }, "<leader>yl", function()
+  require("config.file_reference").yank()
+end, { desc = "Yank file:line reference" })
+
 -- Quit all windows, discarding unsaved changes
 vim.keymap.set("n", "<leader>qa", "<cmd>qa!<cr>", { desc = "Quit all (force)" })
 

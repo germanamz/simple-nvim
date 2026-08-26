@@ -20,6 +20,7 @@ return {
         { "<leader>m", group = "markdown" },
         { "<leader>q", group = "quit" },
         { "<leader>u", group = "toggle" },
+        { "<leader>y", group = "yank" },
         -- A sibling mini.surround spec hangs its add/delete/replace verbs off a
         -- `gs` prefix; label the group so the chord menu reads "surround".
         { "gs", group = "surround" },
