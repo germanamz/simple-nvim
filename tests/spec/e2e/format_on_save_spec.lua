@@ -226,4 +226,121 @@ describe("e2e: format on save (conform.nvim)", function()
 
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
+
+  -- Zig: conform's zigfmt (`zig fmt --stdin`). A toolchain formatter off PATH
+  -- like gofmt/rustfmt, not a mason tool, so this self-skips without `zig`.
+  --
+  -- Two assertions, because either one alone is forgeable. The reformat alone
+  -- would also pass with NO `zig` entry in config.formatters at all, whenever
+  -- zls happens to be attached: the global lsp_format = "fallback" would hand
+  -- the buffer to the server, which formats through `zig fmt` too, and the
+  -- bytes would come out identical. The formatter list alone would pass on a
+  -- mapping that never actually runs. Together they pin the intended path.
+  --
+  -- Buffer built through the API rather than `:edit`, for the same reason the
+  -- two tests above do it: a second `:edit` of an LSP-served filetype across a
+  -- fresh isolated env trips a stale lsp.log path.
+  it("reformats a zig buffer with zigfmt when written", function()
+    if vim.fn.executable("zig") ~= 1 then
+      pending("zig not on PATH")
+      return
+    end
+
+    local path = root .. "/sample.zig"
+    -- Deliberately over-indented; `zig fmt` canonicalizes the body to 4 spaces.
+    local unformatted = "pub fn main() void {\n      return;\n}\n"
+    local fd = assert(io.open(path, "w"))
+    fd:write(unformatted)
+    fd:close()
+
+    local bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(bufnr, path)
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.bo[bufnr].filetype = "zig"
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      "pub fn main() void {",
+      "      return;",
+      "}",
+    })
+
+    local to_run = require("conform").list_formatters_to_run(bufnr)
+    local names = vim.tbl_map(function(f)
+      return f.name
+    end, to_run)
+    assert.are.same({ "zigfmt" }, names)
+
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("write!")
+    end)
+
+    wait.wait_for(function()
+      return vim.api.nvim_buf_get_lines(bufnr, 1, 2, false)[1] == "    return;"
+    end, 5000, "buffer was not reformatted by zigfmt on save")
+
+    assert.are.equal(
+      "pub fn main() void {\n    return;\n}\n",
+      assert(io.open(path, "r")):read("*a")
+    )
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
+  -- Saving a build.zig.zon must not corrupt it. Neovim maps .zon to ft=zig, so
+  -- the manifest inherits the zigfmt entry above and gets rewritten on every
+  -- write — which is only safe because `zig fmt --stdin` understands Zig object
+  -- notation as well as Zig source.
+  --
+  -- Worth its own test rather than trusting the .zig case, because the two
+  -- halves of the same toolchain disagree about this exact file: `zig
+  -- ast-check`, fed the identical bytes, answers "error: file cannot be a
+  -- tuple". A future linting pass wired on ft=zig would fire that on every
+  -- manifest (docs/zig.md); this pins the half that does work.
+  it("reformats a build.zig.zon without mangling it", function()
+    if vim.fn.executable("zig") ~= 1 then
+      pending("zig not on PATH")
+      return
+    end
+
+    local path = root .. "/build.zig.zon"
+    local canonical = table.concat({
+      ".{",
+      "    .name = .myproject,",
+      '    .version = "0.1.0",',
+      "    .dependencies = .{},",
+      "}",
+      "",
+    }, "\n")
+
+    local fd = assert(io.open(path, "w"))
+    fd:write(canonical)
+    fd:close()
+
+    local bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(bufnr, path)
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.bo[bufnr].filetype = "zig"
+    -- Over-indented on purpose: a formatter that silently no-ops would leave
+    -- this as typed and the assertion below would catch it, so the test cannot
+    -- pass by doing nothing.
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {
+      ".{",
+      "        .name = .myproject,",
+      '  .version = "0.1.0",',
+      "    .dependencies = .{},",
+      "}",
+    })
+
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("write!")
+    end)
+
+    wait.wait_for(function()
+      return vim.api.nvim_buf_get_lines(bufnr, 1, 2, false)[1] == "    .name = .myproject,"
+    end, 5000, "build.zig.zon was not reformatted by zigfmt on save")
+
+    -- Every field survived the round trip, at canonical indentation.
+    assert.are.equal(canonical, assert(io.open(path, "r")):read("*a"))
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
 end)

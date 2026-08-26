@@ -88,6 +88,7 @@ return {
         "rust",
         "c",
         "cpp",
+        "zig",
         "lua",
         "vim",
         "help",

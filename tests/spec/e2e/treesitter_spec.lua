@@ -64,6 +64,14 @@ describe("e2e: treesitter", function()
       content = "load('ext://restart_process', 'docker_build_with_restart')\n",
       capture_col = 0,
     },
+    {
+      -- .zig → ft zig (core detection), same-named parser, so no
+      -- language.register alias is needed. col 0 = the `pub` keyword.
+      label = "zig",
+      path = "sample.zig",
+      content = "pub fn main() void {\n    return;\n}\n",
+      capture_col = 0,
+    },
   }
 
   for _, case in ipairs(cases) do
@@ -133,6 +141,62 @@ describe("e2e: treesitter", function()
     assert.is_true(langs_at(1).html == true, "expected an injected html capture on the <div> tag")
     -- col 9 = `.Name` inside the action, highlighted by the primary gotmpl tree.
     assert.is_true(langs_at(9).gotmpl == true, "expected a gotmpl capture inside the {{ }} action")
+  end)
+
+  -- Zig object notation. Neovim maps .zon to ft=zig (core's own extension
+  -- table; nothing in init.lua overrides it), and there is no `zon` grammar —
+  -- so build.zig.zon is parsed by the ZIG grammar, whose root expects container
+  -- members and not a top-level `.{ ... }` tuple.
+  --
+  -- That mismatch is real: the tree comes back with has_error() true, and the
+  -- file is misread as one `container_field` holding a range_expression. This
+  -- test exists because the OBVIOUS conclusion from that — give .zon its own
+  -- filetype, or skip treesitter for it — makes things worse. The error node
+  -- lands on the closing brace and nothing else; every token that matters still
+  -- gets the capture it should, which is what is pinned here. Losing ft=zig
+  -- would also silently take zls and zigfmt away from the manifest, since both
+  -- are keyed on that filetype. See docs/zig.md.
+  it("highlights a build.zig.zon through the zig grammar despite the top-level tuple", function()
+    local repo = git_fixture.repo({
+      commits = {
+        {
+          files = {
+            ["build.zig.zon"] = '.{\n    .name = .myproject,\n    .version = "0.1.0",\n}\n',
+          },
+        },
+        message = "init",
+      },
+    })
+    local canonical = vim.uv.fs_realpath(repo) or repo
+    vim.fn.chdir(canonical)
+    vim.cmd("edit " .. canonical .. "/build.zig.zon")
+    local bufnr = vim.api.nvim_get_current_buf()
+
+    assert.are.equal("zig", vim.bo[bufnr].filetype)
+
+    wait.wait_for(function()
+      return vim.treesitter.highlighter.active[bufnr] ~= nil
+    end, 5000, "treesitter highlighter never attached")
+
+    local function captures_at(row, col)
+      local seen = {}
+      for _, c in ipairs(vim.treesitter.get_captures_at_pos(bufnr, row, col)) do
+        seen[c.capture] = true
+      end
+      return seen
+    end
+
+    -- row 1 col 6 = the `n` of `.name`: the field name of the manifest entry.
+    assert.is_true(
+      captures_at(1, 6)["variable.member"] == true,
+      "expected .name to highlight as a struct member"
+    )
+    -- row 2 col 16 = inside "0.1.0": the value must read as a string, not as
+    -- whatever the misparsed range_expression above it would suggest.
+    assert.is_true(
+      captures_at(2, 16)["string"] == true,
+      "expected the version value to be a string"
+    )
   end)
 
   -- OpenFGA models: the queries are vendored in queries/fga/ (upstream's use a

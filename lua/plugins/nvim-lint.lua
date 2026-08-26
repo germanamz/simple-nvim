@@ -12,6 +12,13 @@
 --
 -- biome and oxlint are NOT here: both are Rust language servers registered in
 -- lua/plugins/lsp.lua, where they cost almost nothing per root.
+--
+-- Zig is not here either, for a different reason: nvim-lint DOES ship a `zig`
+-- linter (`zig ast-check`), and zls runs that same check internally and
+-- publishes the result, so wiring it would put two identical diagnostics on
+-- every line. Adding it later needs a filename guard, not a filetype one —
+-- Neovim maps .zon to ft=zig and `ast-check` rejects a build.zig.zon outright
+-- ("file cannot be a tuple"). See docs/zig.md.
 return {
   "mfussenegger/nvim-lint",
   event = { "BufReadPre", "BufNewFile" },

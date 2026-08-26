@@ -42,6 +42,10 @@ beyond the code.
 - **[tiltfile.md](tiltfile.md).** Tiltfiles: the starlark parser registered for
   the `tiltfile` filetype, the ftplugin the runtime lacks, and why the language
   server is the `tilt` on `PATH` rather than a mason install.
+- **[zig.md](zig.md).** Zig: why `.zon` inherits the whole Zig toolchain from one
+  core filetype mapping, what each half of that toolchain then does with a
+  `build.zig.zon` (they disagree), why there is no lint pass, and the version
+  coupling between a mason-pinned `zls` and the `zig` on `PATH`.
 - **[superpowers/](superpowers/README.md).** The engineering record: how the
   larger pieces were designed and what actually shipped. Start with
   [testing.md](superpowers/testing.md) before changing anything — it covers the

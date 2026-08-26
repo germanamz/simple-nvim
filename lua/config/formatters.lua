@@ -133,6 +133,16 @@ M.by_ft = {
   lua = { "stylua" },
   go = { "gofmt" },
   rust = { "rustfmt" },
+  -- `zig fmt --stdin`. A toolchain formatter off PATH like gofmt/rustfmt above,
+  -- not a mason tool — absent the `zig` binary, lsp_format = "fallback" hands
+  -- the buffer to zls, which formats through the same `zig fmt` internally, so
+  -- the degradation is invisible rather than a lost feature.
+  --
+  -- Covers Zig object notation too: Neovim maps .zon as well as .zig to
+  -- ft=zig, and `zig fmt --stdin` formats a build.zig.zon correctly. That is
+  -- specific to formatting — `zig ast-check`, the other half of the same
+  -- toolchain, rejects the very same file (see docs/zig.md).
+  zig = { "zigfmt" },
   -- terraform fmt is a toolchain formatter (like gofmt / rustfmt above), not a
   -- mason tool; it needs the `terraform` CLI on PATH. Absent it, conform skips
   -- the formatter and lsp_format = "fallback" hands off to terraform-ls (which

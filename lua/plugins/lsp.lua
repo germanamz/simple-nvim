@@ -40,6 +40,25 @@ local servers = {
     capabilities = { experimental = { localDocs = true } },
   },
   clangd = { filetypes = { "c", "cpp", "objc", "objcpp", "cuda", "proto" } },
+  -- zls (zigtools/zls). Narrowed from lspconfig's own { "zig", "zir" }: Neovim
+  -- has no `zir` filetype, so that name can never match a buffer.
+  --
+  -- One row covers both Zig source and Zig object notation, because Neovim maps
+  -- .zig AND .zon to ft=zig — so this is also the server serving build.zig.zon,
+  -- which zls does understand.
+  --
+  -- No `settings`. zls publishes `zig ast-check` diagnostics on its own, which
+  -- is why there is no nvim-lint pass for Zig (see lua/plugins/nvim-lint.lua and
+  -- docs/zig.md); build-on-save is left off because it runs the project's build
+  -- steps on every write.
+  --
+  -- The mason pin is version-coupled in a way the other pins are not: zls links
+  -- the Zig compiler frontend it was built against, so zls 0.16.x expects zig
+  -- 0.16.x, and the `zig` that conform's zigfmt runs comes off PATH (Homebrew
+  -- here), not from mason. Bumping the compiler therefore means bumping the
+  -- "zls" line in mason-tool-versions.lock in the same breath, or the editor
+  -- quietly parses one language version while the toolchain builds another.
+  zls = { filetypes = { "zig" } },
   lua_ls = {
     filetypes = { "lua" },
     settings = {

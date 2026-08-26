@@ -69,4 +69,25 @@ describe("smoke: language server filetype ownership", function()
       end
     end
   end)
+
+  -- Zig: zls is the only server claiming the `zig` filetype, and it claims
+  -- exactly that one. Two things are pinned here.
+  --
+  -- The list is narrowed from lspconfig's own { "zig", "zir" }: Neovim's
+  -- filetype detection has no `zir` entry at all, so the second name can never
+  -- match a buffer — restoring lspconfig's default (the obvious "stop fighting
+  -- the plugin" edit) puts a dead filetype back with nothing else to notice.
+  --
+  -- Sole ownership matters more than it looks, because Neovim maps BOTH .zig
+  -- and .zon to ft=zig: this single row is also what serves build.zig.zon, and
+  -- a second server widened onto zig would double every diagnostic in both.
+  it("enables zls as the sole owner of zig", function()
+    assert.are.same({ "zig" }, filetypes("zls"))
+    assert.is_not_nil(vim.lsp._enabled_configs["zls"], "zls is registered but not enabled")
+    for name in pairs(vim.lsp._enabled_configs) do
+      if name ~= "zls" then
+        assert.is_nil(set_of(name)["zig"], name .. " also claims zig")
+      end
+    end
+  end)
 end)
