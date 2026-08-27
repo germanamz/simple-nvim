@@ -113,6 +113,11 @@ return {
         nowait = true,
         desc = "nvim-tree: Toggle Filter: Ignored (custom)",
       })
+      -- Same `<leader>mp` as in a markdown buffer, so previewing a doc from the
+      -- tree needs no detour through opening it. The module owns the node
+      -- resolution (and the "that is a directory" / "that is not markdown"
+      -- answers), since the preview state is keyed by path, not buffer.
+      require("config.markdown_preview").set_tree_keymap(bufnr)
     end,
     -- The "Diagnostics" decorator listed in renderer.decorators below is inert
     -- unless diagnostics integration is enabled here.

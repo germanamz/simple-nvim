@@ -214,7 +214,9 @@ you switch). Press `<Space>e` again to close it. Inside the tree: `<CR>` opens
 a file / toggles a folder, `a` creates a file (type `foo/bar.lua` to make the
 intermediate dirs too; trailing `/` makes a directory), `d` deletes, `r`
 renames, `H` toggles dotfiles, `I` toggles gitignored files, `g?` shows all
-mappings.
+mappings. `<Space>mp` on a markdown node previews it in a cmux markdown panel
+without opening the file first (§18); on a folder or any other filetype it says
+so and does nothing.
 
 `<Space>E` opens netrw (`:Explore`) in the current window using the tree
 listing style (`g:netrw_liststyle = 3`) with the banner hidden. The previous
@@ -803,32 +805,44 @@ with `]s` / `[s`, and `z=` lists suggestions for the word under the cursor.
 | ------------ | ------------------------------------------------------- |
 | `gq{motion}` | reflow one motion's worth (via `formatexpr`)            |
 | `<Space>F`   | run conform's markdown formatter                        |
-| `<Space>mp`  | toggle live `glow` preview (read-only side pane)        |
+| `<Space>mp`  | preview in a cmux markdown panel (also from nvim-tree)  |
 | `gd`         | follow wiki/standard link under cursor (else LSP definition) |
 
-`<Space>mp` opens a read-only, **full-color** preview split on the right that
-renders the buffer through [`glow`](https://github.com/charmbracelet/glow) inside a
-terminal buffer. It reflows prose *and* keeps wide tables aligned (cells wider than
-the pane are truncated with `…`, not shattered), so it sidesteps the wrap-vs-table
-problem that plain soft-wrap can't. Every link renders as just its styled text:
-wiki-style links (`[[note]]`, `[[note|alias]]`) are rewritten so glow renders them
-(it doesn't grok them natively), and standard `[text](dest)` links have their URL
-tail stripped (glow would otherwise print the full path/URL after the text). The
-links stay usable. Press `gd` on one in the preview to follow it (see below).
-It renders the **live buffer** (written to a
-private temp file, so you never have to save your document) and refreshes on save,
-when you leave insert mode, and after normal-mode edits (debounced), not on every
-keystroke, to limit the redraw flicker from re-running glow. Scroll approximately
-syncs to the source cursor (glow reflows, so the match is by % through the
-document, not line-for-line). Toggle again to close. Requires the `glow` binary
-(`brew install glow`); without it the keymap notifies once and does nothing.
+`<Space>mp` hands the file to a **cmux markdown panel**: a surface of the
+terminal Neovim itself runs inside, which renders markdown with real formatting
+and re-renders it whenever the file changes on disk. None of it is Neovim — no
+split, no terminal buffer, no window to `<C-w>` into — so the panel scrolls on
+its own and never follows your cursor.
+
+It works from the buffer and **from nvim-tree**, on the node under the cursor, so
+you can read a file without opening it first; a directory or a non-markdown node
+says so instead. The toggle is keyed on the file's path rather than on a buffer,
+so a preview opened from the tree closes from the buffer and the other way
+around.
+
+Previews stack as **tabs in one pane**, not as new splits. The first one takes a
+pane beside your editor; every later file becomes another tab in that same pane.
+Press `<Space>mp` again on a file to close its tab. Opening the second and later
+files flickers: cmux can only create a panel by splitting some pane in two, so
+the panel is split off the preview pane itself and then moved back into it —
+three round-trips, with a brief intermediate pane on the way. Splitting the
+preview pane rather than the editor's is what keeps your own windows from
+resizing on every preview.
+
+cmux renders what is **on disk**, so previewing a modified buffer shows its last
+saved state and warns you that it did. The config never writes your file for you.
+Every later `:w` re-renders the panel by itself, with nothing scheduled from
+Neovim's side.
+
+Outside a cmux session — a plain terminal, a bare `ssh` — the keymap notifies
+once and then does nothing. There is no in-Neovim renderer to fall back to.
 
 `gd` follows the link under the cursor (wiki or standard), falling back to LSP
-go-to-definition when the cursor isn't on one. It works the same in the source
-buffer and in the `glow` preview (where the rendered text is matched back to the
-source, since glow drops link destinations). Wikilinks are project-scoped:
-`[[a/b/c]]` opens `<project root>/a/b/c.md`, where the root is found by walking up
-for a `.git` / `.marksman.toml` / `tusk.toml` / `.tusk` marker. `[[target|alias]]`
+go-to-definition when the cursor isn't on one. It runs in the source buffer only:
+the preview is a terminal pane, not a Neovim buffer, so there is no cursor of
+ours in it to read. Wikilinks are project-scoped: `[[a/b/c]]` opens
+`<project root>/a/b/c.md`, where the root is found by walking up for a `.git` /
+`.marksman.toml` / `tusk.toml` / `.tusk` marker. `[[target|alias]]`
 and `[[target#heading]]` work too (alias/heading are ignored for resolution).
 Standard `[text](dest)` links follow their destination: a relative or absolute
 file path opens the file (resolved against the current file's directory), and an

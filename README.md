@@ -91,7 +91,7 @@ sudo apt install -y neovim git build-essential ripgrep fd-find nodejs npm golang
 - **Fuzzy finder:** `telescope.nvim` + `telescope-fzf-native`
 - **LSP:** native `vim.lsp` + `mason.nvim` + `mason-lspconfig.nvim` + `nvim-lspconfig` (defaults only)
 - **Git:** `gitsigns.nvim` (signs, blame, hunk navigation, review-base diffing)
-- **Markdown:** read-only, full-color `glow` preview in a side pane (`<leader>mp` — reflows prose, keeps wide tables aligned, renders wiki-style `[[links]]`; needs the [`glow`](https://github.com/charmbracelet/glow) binary). Editing stays in raw markdown.
+- **Markdown:** `<leader>mp` previews the file in a **cmux markdown panel** — a pane of the surrounding terminal that renders the file properly and re-renders it on every save, rather than anything Neovim draws. Works from the buffer and from the file tree, and every preview tabs into one pane instead of stacking splits. Needs cmux (the terminal this config is used in); anywhere else the keymap says so and no-ops. Editing stays in raw markdown.
 - **Discoverability:** `which-key.nvim` (`<leader>K` shows every mapping)
 
 ## Key bindings

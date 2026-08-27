@@ -34,27 +34,11 @@ local browser_unavailable = false
 -- not handle (file:// URIs, paths) rather than reimplementing it.
 local inner_ui_open = nil
 
---- Path to the cmux CLI, or nil when this is not a cmux session.
----
---- Detection keys on CMUX_SURFACE_ID rather than TERM_PROGRAM: cmux embeds
---- Ghostty, so TERM_PROGRAM reads "ghostty" and would also match a plain
---- Ghostty window that has no browser to open anything in.
----@return string|nil
-local function cmux_bin()
-  if not vim.env.CMUX_SURFACE_ID then
-    return nil
-  end
-  if vim.fn.executable("cmux") == 1 then
-    return "cmux"
-  end
-  -- PATH can be trimmed by a `:terminal` or a session restore even though the
-  -- surface is still a cmux one; the app exports its own CLI path for that.
-  local bundled = vim.env.CMUX_BUNDLED_CLI_PATH
-  if bundled and vim.uv.fs_stat(bundled) then
-    return bundled
-  end
-  return nil
-end
+--- Path to the cmux CLI, or nil when this is not a cmux session. Shared with
+--- config.markdown_preview, which opens rendered markdown panels the same way,
+--- so the "is this a cmux session" rule is stated once (see util.cmux).
+---@type fun(): string|nil
+local cmux_bin = require("util.cmux").bin
 
 --- Hand `url` to core's opener.
 ---

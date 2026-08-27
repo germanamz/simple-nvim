@@ -46,7 +46,7 @@ extraction was meant to remove.
 | `ft.lua` | The markdown-family filetype set, so adding a member is one edit |
 | `hl.lua` | The theme-aware muted-color recipe shared by the nvim-tree decorators |
 | `largefile.lua` | One threshold for "too large for synchronous whole-buffer work", so the treesitter guard and its callers agree |
-| `markdown.lua` | Frontmatter parsing, shared by the paragraph gutter and the glow preview |
+| `markdown.lua` | Frontmatter and fence parsing. Extracted for the paragraph gutter and the glow preview; the preview became a cmux panel that parses nothing, so the gutter is the only consumer left |
 | `project.lua` | "Is this directory an independent project root?", asked about the same tree with different markers by two callers |
 
 Module-scoped extractions that did not warrant `lua/util/`:
@@ -78,8 +78,9 @@ gaining `util.path.buf_start_dir`'s guards.
 One module from the refactor is gone. `config/markdown_rewrap.lua` — the
 `<leader>w` prose/fence/table rewrap subsystem split out of `options.lua` —
 was deleted when markdown moved to soft-wrap and per-project `.editorconfig`
-style. `render-markdown.nvim` went the same way, replaced by the
-[glow preview](markdown-preview.md).
+style. `render-markdown.nvim` went the same way, replaced by the preview pane — first
+`glow` in a Neovim terminal buffer, now a
+[cmux markdown panel](markdown-preview.md).
 
 ## The behavior contract
 

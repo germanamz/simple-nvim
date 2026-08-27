@@ -1,8 +1,13 @@
 local nvim_env = require("tests.helpers.nvim_env")
 
--- Glow-agnostic: these assert wiring and lifecycle, not glow's rendered output,
--- so they pass whether or not the `glow` binary is installed on the test machine.
-describe("smoke: markdown preview (glow)", function()
+-- Wiring only. `<leader>mp` hands the file to a cmux markdown panel, so there is
+-- no preview window, no split and no renderer of ours left to assert against —
+-- and nothing here may reach the cmux socket, which is the developer's live
+-- terminal. So this file stops at "the keymap is on the buffer it belongs on,
+-- with the right desc, and the presses that reach no cmux call do not blow up".
+-- The state machine — open / move / focus / close, and every failure branch — is
+-- driven through the `M._run` seam in tests/spec/unit/markdown_preview_spec.lua.
+describe("smoke: markdown preview (cmux panel)", function()
   local root
 
   before_each(function()
@@ -13,10 +18,64 @@ describe("smoke: markdown preview (glow)", function()
     nvim_env.teardown(root)
   end)
 
+  --- `spec` with `<leader>` resolved to the configured leader, which is the form
+  --- a mapping is stored under once it has been set.
+  local function leader_lhs(spec)
+    local leader = vim.g.mapleader or "\\"
+    return (spec:gsub("<leader>", leader))
+  end
+
+  --- The current buffer's own normal-mode mapping for `lhs`, or nil. Buffer-local
+  --- on purpose: `<leader>mp` exists only where the preview makes sense, and
+  --- nvim_buf_get_keymap never reports a global map, so a leak into every buffer
+  --- would fail these lookups rather than pass them.
+  local function buf_map(lhs)
+    for _, m in ipairs(vim.api.nvim_buf_get_keymap(0, "n")) do
+      if m.lhs == lhs then
+        return m
+      end
+    end
+    return nil
+  end
+
+  --- A markdown buffer in the current window, so config.options' markdown
+  --- FileType autocmd — the single entry point that installs the keymap — fires.
+  --- Unnamed on purpose: pressing the map on it stops at "no file on disk",
+  --- which is the one press a spec can safely make.
+  local function markdown_buf()
+    vim.cmd("enew")
+    local buf = vim.api.nvim_get_current_buf()
+    vim.bo[buf].filetype = "markdown"
+    return buf
+  end
+
+  --- Run `fn` with vim.notify captured, returning the notifications it made.
+  local function with_notify(fn)
+    local notified = {}
+    local real_notify = vim.notify
+    vim.notify = function(msg, level)
+      table.insert(notified, { msg = msg, level = level })
+    end
+    local ok, err = pcall(fn)
+    vim.notify = real_notify
+    assert.is_true(ok, "errored: " .. tostring(err))
+    return notified
+  end
+
   it("requires config.markdown_preview cleanly", function()
     package.loaded["config.markdown_preview"] = nil
     local ok, err = pcall(require, "config.markdown_preview")
     assert.is_true(ok, "failed to require: " .. tostring(err))
+  end)
+
+  it("requires config.open_url cleanly, sharing the same cmux detector", function()
+    -- The "is this a cmux session" rule moved out of open_url into util.cmux
+    -- when the preview grew a second use for it. Both consumers still have to
+    -- load, and the detector has to still be there for them to call.
+    package.loaded["config.open_url"] = nil
+    local ok, err = pcall(require, "config.open_url")
+    assert.is_true(ok, "failed to require: " .. tostring(err))
+    assert.is_function(require("util.cmux").bin)
   end)
 
   it("registers the <leader>m markdown group in which-key", function()
@@ -32,106 +91,78 @@ describe("smoke: markdown preview (glow)", function()
   end)
 
   it("maps buffer-local <leader>mp with a desc in markdown buffers", function()
-    vim.cmd("enew")
-    local buf = vim.api.nvim_get_current_buf()
-    vim.bo[buf].filetype = "markdown"
-    local map = vim.fn.maparg("<leader>mp", "n", false, true)
-    assert.is_false(vim.tbl_isempty(map), "<leader>mp not mapped in markdown buffer")
-    assert.are.equal("Toggle markdown preview", map.desc)
+    local buf = markdown_buf()
+    local m = buf_map(leader_lhs("<leader>mp"))
+    assert.is_not_nil(m, "<leader>mp not mapped in a markdown buffer")
+    assert.are.equal("Toggle markdown preview", m.desc)
+    assert.is_function(m.callback)
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
-  it("open then close returns to the baseline window count without error", function()
-    vim.cmd("enew")
-    local buf = vim.api.nvim_get_current_buf()
-    vim.bo[buf].filetype = "markdown"
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "# Title", "", "some text" })
+  it("presses <leader>mp on an unnamed buffer without erroring", function()
+    local buf = markdown_buf()
     local mp = require("config.markdown_preview")
-    local before = #vim.api.nvim_list_wins()
-    assert.has_no.errors(function()
-      mp.open(buf)
-      mp.close(buf)
-    end)
-    assert.are.equal(before, #vim.api.nvim_list_wins())
+    local m = buf_map(leader_lhs("<leader>mp"))
+    assert.is_not_nil(m, "<leader>mp not mapped in a markdown buffer")
+
+    -- A buffer with no file has nothing for cmux to render, and this guard is
+    -- what keeps the smoke lane off the socket: were it to regress, the seam
+    -- below turns a panel opening in the developer's terminal into a failure.
+    mp._run = function(args)
+      error("cmux was invoked from a spec: " .. table.concat(args, " "))
+    end
+    local notified = with_notify(m.callback)
+    mp._run = nil
+
+    assert.are.equal(1, #notified)
+    assert.is_truthy(
+      notified[1].msg:find("nothing to preview", 1, true),
+      "unexpected notification: " .. tostring(notified[1].msg)
+    )
     vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
-  -- The preview belongs to its file: it is shown only while that file is on
-  -- screen, hides when the editor window swaps to another file, and restores
-  -- when the file comes back. These need a real preview pane, so they require
-  -- glow; without it they no-op (consistent with the rest of this file).
-  it("auto-hides on switch away and restores on return", function()
-    if vim.fn.executable("glow") ~= 1 then
-      return
-    end
-    local wait = require("tests.helpers.wait")
-    vim.cmd("only")
-    vim.cmd("enew")
-    local a = vim.api.nvim_get_current_buf()
-    vim.bo[a].filetype = "markdown"
-    vim.api.nvim_buf_set_lines(a, 0, -1, false, { "# A", "", "alpha" })
-    local b = vim.api.nvim_create_buf(true, false)
-    vim.bo[b].filetype = "markdown"
-    vim.api.nvim_buf_set_lines(b, 0, -1, false, { "# B", "", "beta" })
-
+  it("maps <leader>mp on an nvim-tree buffer, and says so when there is no node", function()
+    -- The tree's copy previews the node under the cursor without opening it in a
+    -- buffer first, so it is a second, independent install of the same keymap
+    -- (nvim-tree's on_attach calls set_tree_keymap). With no tree on screen
+    -- there is no node, which is the branch a spec can press.
     local mp = require("config.markdown_preview")
-    local base = #vim.api.nvim_list_wins()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_set_current_buf(buf)
+    mp.set_tree_keymap(buf)
 
-    mp.open(a)
-    wait.wait_for(function()
-      return #vim.api.nvim_list_wins() == base + 1
-    end, 2000, "preview window never opened")
+    local m = buf_map(leader_lhs("<leader>mp"))
+    assert.is_not_nil(m, "<leader>mp not mapped on the tree buffer")
+    assert.are.equal("Toggle markdown preview", m.desc)
 
-    -- Swap the editor window to B: A leaves view -> preview hides.
-    vim.cmd("buffer " .. b)
-    wait.wait_for(function()
-      return #vim.api.nvim_list_wins() == base
-    end, 2000, "preview did not auto-hide when its file left the window")
+    -- Load nvim-tree here rather than inside the capture below. The keymap
+    -- requires nvim-tree.api on press, and under lazy.nvim that first require is
+    -- what loads the plugin and runs its setup, so anything setup chose to
+    -- notify would otherwise be counted against the keymap's own one message.
+    pcall(require, "nvim-tree.api")
 
-    -- Swap back to A: preview restores alongside it.
-    vim.cmd("buffer " .. a)
-    wait.wait_for(function()
-      return #vim.api.nvim_list_wins() == base + 1
-    end, 2000, "preview did not restore when its file returned")
+    mp._run = function(args)
+      error("cmux was invoked from a spec: " .. table.concat(args, " "))
+    end
+    local notified = with_notify(m.callback)
+    mp._run = nil
 
-    mp.close(a)
-    assert.are.equal(base, #vim.api.nvim_list_wins())
-    vim.api.nvim_buf_delete(a, { force = true })
-    vim.api.nvim_buf_delete(b, { force = true })
+    assert.are.equal(1, #notified)
+    assert.is_truthy(
+      notified[1].msg:find("no file under the cursor", 1, true),
+      "unexpected notification: " .. tostring(notified[1].msg)
+    )
+    vim.api.nvim_buf_delete(buf, { force = true })
   end)
 
-  it("closing the preview disables it: switching back does not restore", function()
-    if vim.fn.executable("glow") ~= 1 then
-      return
-    end
-    local wait = require("tests.helpers.wait")
-    vim.cmd("only")
-    vim.cmd("enew")
-    local a = vim.api.nvim_get_current_buf()
-    vim.bo[a].filetype = "markdown"
-    vim.api.nvim_buf_set_lines(a, 0, -1, false, { "# A" })
-    local b = vim.api.nvim_create_buf(true, false)
-    vim.bo[b].filetype = "markdown"
-
-    local mp = require("config.markdown_preview")
-    local base = #vim.api.nvim_list_wins()
-
-    mp.open(a)
-    wait.wait_for(function()
-      return #vim.api.nvim_list_wins() == base + 1
-    end, 2000, "preview window never opened")
-
-    -- A real close (as <leader>mp / :q on the pane does) forgets the file.
-    mp.close(a)
-    assert.are.equal(base, #vim.api.nvim_list_wins())
-
-    -- Switching away and back must NOT bring the preview back.
-    vim.cmd("buffer " .. b)
-    vim.cmd("buffer " .. a)
-    vim.wait(100)
-    assert.are.equal(base, #vim.api.nvim_list_wins())
-
-    vim.api.nvim_buf_delete(a, { force = true })
-    vim.api.nvim_buf_delete(b, { force = true })
+  it("recognizes markdown-family paths by name alone", function()
+    -- What the tree keymap judges a node by: there is no buffer to read a
+    -- filetype off. `.mdx` only resolves to a filetype once the full config is
+    -- loaded, which is why this belongs in the smoke lane and not in unit.
+    local ft = require("util.ft")
+    assert.is_true(ft.is_markdown_path("/tmp/notes/a.md"))
+    assert.is_true(ft.is_markdown_path("/tmp/notes/a.mdx"))
+    assert.is_false(ft.is_markdown_path("/tmp/notes/a.lua"))
   end)
 end)

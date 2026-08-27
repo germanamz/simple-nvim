@@ -67,6 +67,11 @@ The `ColorScheme` autocmds are load-bearing and must stay. The sibling
   `gitsigns.lua` and `markdown_preview.lua`.
 - **`markdown_preview`'s `glow_style()`** collapsed to the constant `"light"`.
 
+The last two entries are now history twice over: `markdown_preview.lua` has since
+been rewritten to hand the file to a cmux markdown panel, so it no longer renders
+anything itself and neither the autocmd nor `glow_style()` has a subject in the
+current code. The light-only decision they record still stands everywhere else.
+
 No `_dark` identifier or `background == "dark"` test remains in `lua/`.
 
 ## What the config still overrides

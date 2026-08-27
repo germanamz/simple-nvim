@@ -21,8 +21,10 @@ local function is_blank(line)
   return line:match("^%s*$") ~= nil
 end
 
--- Fence grammar shared via util.markdown (also the preview's link transform
--- and the wikilink scanner), so the predicate can't drift between them.
+-- Fence grammar via util.markdown. It sits there rather than here because the
+-- gutter and the frontmatter skip below have to agree about where a fence
+-- opens; the preview's link transform and the wikilink scanner used to share it
+-- too, and both are gone (the preview is a cmux panel now and parses nothing).
 local is_code_fence = require("util.markdown").is_fence
 
 -- Returns 1..6 if the line is an ATX heading at that level, else nil.

@@ -27,8 +27,10 @@ divergence is called out — those deltas are usually the most useful part.
 - **[telescope-pickers.md](telescope-pickers.md).** The shared picker-legend
   machinery, plus the three pickers built on it: buffers flags, folder-scoped
   grep, and the LSP client picker.
-- **[markdown-preview.md](markdown-preview.md).** The `glow`-backed preview pane
-  that replaced in-buffer markdown decoration.
+- **[markdown-preview.md](markdown-preview.md).** `<leader>mp` and the cmux
+  markdown panel behind it: why the renderer left Neovim entirely, the cmux CLI
+  findings that force every preview to be opened and then moved, and what the old
+  `glow` pane could do that a terminal pane cannot.
 - **[theme.md](theme.md).** The move to GitHub Light high-contrast, and what the
   config still overrides on top of it.
 - **[token-emphasis.md](token-emphasis.md).** Dimming comments into two tiers,

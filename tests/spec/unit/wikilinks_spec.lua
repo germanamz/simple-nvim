@@ -86,9 +86,10 @@ describe("config.wikilinks", function()
     end)
   end)
 
-  -- The standard markdown link `[text](dest)` covering the cursor column, used to
-  -- follow links directly in the raw source buffer (where the real dest is still
-  -- present). Images (`![alt](src)`) are skipped.
+  -- The standard markdown link `[text](dest)` covering the cursor column: what
+  -- `gd` follows in a markdown buffer, routed by its destination (file, URL, or
+  -- in-document anchor). Images (`![alt](src)`) are skipped, so `gd` on one
+  -- falls through to LSP instead of opening the image path.
   describe("_standard_link_at", function()
     -- "see [spec](PRODUCT.md) end" -> [spec](PRODUCT.md) spans columns 5..22
     local line = "see [spec](PRODUCT.md) end"
@@ -173,66 +174,6 @@ describe("config.wikilinks", function()
     -- "a+b.md" must not resolve to "a b.md".
     it("does not treat + as a space", function()
       assert.are.equal("/home/u/a+b.md", wl._resolve_file("a+b.md", "/home/u"))
-    end)
-  end)
-
-  describe("_links_in_lines", function()
-    it("extracts wiki, file, and url links with their kind and target", function()
-      local got = wl._links_in_lines({
-        "see [[lola/product]] and [[food/x|Tasty]] here",
-        "spec [the spec](PRODUCT.md) and site [Home](https://ex.com)",
-      })
-      assert.are.same({
-        { display = "lola/product", kind = "wiki", target = "lola/product.md" },
-        { display = "Tasty", kind = "wiki", target = "food/x.md" },
-        { display = "the spec", kind = "file", target = "PRODUCT.md" },
-        { display = "Home", kind = "url", target = "https://ex.com" },
-      }, got)
-    end)
-
-    it("skips images and in-doc anchor links", function()
-      assert.are.same({}, wl._links_in_lines({ "![alt](img.png) and [top](#heading)" }))
-    end)
-
-    it("skips links inside fenced code", function()
-      assert.are.same({}, wl._links_in_lines({ "```", "[[raw]] [a](b.md)", "```" }))
-    end)
-
-    it("skips links inside inline code spans", function()
-      -- convert_links protects inline spans, so the preview renders them raw:
-      -- there is no rendered link text to follow.
-      assert.are.same({}, wl._links_in_lines({ "see `[[raw]]` and ``[a](b.md)`` here" }))
-    end)
-
-    it("still extracts links beside an inline code span", function()
-      assert.are.same(
-        { { display = "kept", kind = "wiki", target = "kept.md" } },
-        wl._links_in_lines({ "`[[raw]]` then [[kept]]" })
-      )
-    end)
-  end)
-
-  describe("_match_at", function()
-    -- rendered preview line; "lola/product" spans cols 6..17
-    local links = {
-      { display = "lola/product", kind = "wiki", target = "lola/product.md" },
-      { display = "food/x", kind = "wiki", target = "food/x.md" },
-    }
-    local line = "docs lola/product and food/x end"
-
-    it("returns the link whose display covers the cursor column", function()
-      local m = wl._match_at(links, line, 8)
-      assert.are.equal(1, #m)
-      assert.are.equal("lola/product.md", m[1].target)
-    end)
-
-    it("returns empty when the cursor is on plain prose", function()
-      assert.are.same({}, wl._match_at(links, line, 1))
-    end)
-
-    it("matches the second link when the cursor is on it", function()
-      local m = wl._match_at(links, line, 24)
-      assert.are.equal("food/x.md", m[1].target)
     end)
   end)
 

@@ -1,517 +1,387 @@
--- Live, read-only markdown preview rendered through `glow`.
+-- Markdown preview in a cmux panel.
 --
--- The wrap-vs-table tension in-buffer is unsolvable (`wrap` is window-wide, so
--- you can't soft-wrap prose while leaving wide tables unwrapped). Instead of
--- fighting it, this hands layout to a real renderer: a side split shows the
--- current buffer rendered by `glow -w <panewidth>`, which reflows prose AND keeps
--- wide tables structurally intact (very wide cells are truncated, not shattered).
+-- This Neovim runs inside cmux, a Ghostty-based terminal whose `markdown`
+-- surface renders a file with real formatting and re-renders it whenever the
+-- file changes on disk. `<leader>mp` hands a file to one of those panels, so the
+-- reading view is a native cmux panel rather than anything Neovim draws. (It
+-- replaces an in-Neovim `glow` terminal-buffer preview, which had to re-run glow
+-- on every edit and could never render a table and prose at once.)
 --
--- glow only emits color to a real TTY (piping it yields bold/italic but no
--- color, and driving a captured pty hangs on glow's terminal-capability
--- queries). So we render glow inside a Neovim **terminal buffer** — Neovim's own
--- terminal emulator answers those queries and carries the full color. The cost
--- is that each refresh re-runs glow, so we refresh on save / leaving insert /
--- (debounced) normal-mode edits rather than on every keystroke, to limit the
--- redraw flicker.
+-- Everything is async. A preview must never block the keypress that asked for
+-- it, and every cmux call is a socket round-trip.
 --
--- Live updates without saving your file: each refresh writes the *buffer* lines
--- to a private temp file and renders that, never your file on disk. Editing
--- stays in the raw source buffer; this side pane is the reading view (it replaces
--- the former in-buffer render-markdown.nvim decoration).
+-- ## One pane, many tabs
 --
--- Links get a destination tail glow would render: wiki-style links (`[[target]]`)
--- aren't CommonMark so glow prints them raw; standard `[text](dest)` links show
--- their dest (a noisy absolute temp path for a sibling doc, the full URL for an
--- external link). All are rewritten to anchor-destination links so glow shows
--- just the link-styled text (no tail); the links stay usable via the preview's
--- `gd`, which matches the text back to the source. See transform_links.
+-- cmux has no "open a markdown panel *into* pane X" primitive: `markdown open`
+-- always splits a fresh pane, and `new-surface --type markdown` silently
+-- degrades to a plain terminal. So the second and later files are opened and
+-- then moved:
 --
--- Trigger: buffer-local `<leader>mp` in markdown/mdx buffers (see setup()).
--- `glow` is an external binary; if it is missing the toggle notifies once with
--- an install hint and no-ops, so the config still loads on a fresh machine.
+--   markdown open <file> --focus false --surface <a surface in the preview pane>
+--   move-surface --surface <the new panel> --pane <the preview pane>
+--   focus-pane --pane <the pane the keypress came from>
+--
+-- `--surface` on the open is what keeps the editor still: the transient pane is
+-- split off the preview column, not off Neovim's own window, so the editor never
+-- resizes. The trailing `focus-pane` is not optional -- `move-surface` ignores
+-- `--focus false` and takes focus every single time.
+--
+-- ## Why paths, not buffer numbers
+--
+-- State keys on the file's absolute path because `<leader>mp` also fires from
+-- nvim-tree, where there is no buffer to key on. That also makes the toggle
+-- symmetric: open a file's preview from the tree, close it from the buffer.
+-- Nothing here watches buffer lifecycle -- a cmux panel is an independent pane
+-- with its own file watcher, and wiping the buffer is not a reason to kill it.
+--
+-- ## What you see is what is on disk
+--
+-- cmux watches and renders the file on disk, so an unsaved buffer previews as
+-- its last saved state. The keymap says so rather than writing your file behind
+-- your back; every later save re-renders the panel on its own.
+
+local cmux = require("util.cmux")
+local ft_util = require("util.ft")
 
 local M = {}
 
--- src bufnr -> {
---   src, preview_win, preview_buf,
---   tmpfile, timer, job, gen, life_group, win_group, fm_lines, last_src_line
--- }
+-- Absolute file path -> the cmux surface (panel tab) currently showing it.
+local surfaces = {}
+
+-- The cmux pane every preview tabs into, plus a surface known to live in it.
+-- The surface is the anchor we split from, so a new panel is born in the preview
+-- column rather than shrinking the editor.
+local preview_pane, pane_surface = nil, nil
+
+-- The pane Neovim itself lives in, for handing focus back after a move.
 --
--- The preview belongs to its file as a group: a state persists for as long as
--- the preview is *enabled* for `src` (you toggled it on), independent of whether
--- the preview window currently exists. A state is in one of two sub-states:
---   * shown  -- preview_win is a valid window (the file is on screen)
---   * hidden -- preview_win is nil (the file left view); auto-restores when the
---               file returns to a window.
--- `life_group` (the lifecycle augroup) watches the file's visibility and lives
--- until a real close; `win_group` holds the refresh/scroll/WinClosed handlers and
--- is recreated on each show, torn down on each hide. See show/hide.
-local states = {}
+-- It CANNOT be read off the open response: `--surface <anchor>` makes the anchor
+-- the split source, so an anchored open reports the *preview* pane as
+-- source_pane_id, and focusing that would leave focus exactly where the move
+-- stranded it. So it comes from the discovery call's `caller`, or from an
+-- unanchored open, where source_pane_id really is us.
+local caller_pane = nil
+
+-- Pane discovery runs once per session, lazily, before the first open.
+local discovered = false
+
+-- "not a cmux session" is a property of the session, so say it once.
 local notified = false
 
-local notify_missing, schedule_refresh, refresh, sync_scroll
-local setup_win_autocmds, ensure_lifecycle, ensure_state, show, hide
+-- Forward declaration: close() re-opens when its surface turns out to be gone.
+local open
 
-local DEBOUNCE_MS = 300
-
--- Light-only config, so glow always renders with its light ANSI style. (glow's
--- -s style is glow's own theme, independent of the Neovim colorscheme.)
-local GLOW_STYLE = "light"
-
--- Number of leading YAML-frontmatter lines (0 if none), counting both `---`
--- fences. glow strips frontmatter from its output, so the preview's first line
--- corresponds to the first source line after it; the scroll sync offsets by this
--- so the % mapping stays aligned. Shared with the paragraph gutter via
--- util.markdown so the frontmatter format is defined once.
-local frontmatter_lines = require("util.markdown").frontmatter_end
-M._frontmatter_lines = frontmatter_lines
-
--- Fence detection shared the same way (util.markdown.is_fence), so the fence
--- grammar can't drift between the preview, the gutter, and the link scanner.
-local is_fence = require("util.markdown").is_fence
-
--- glow renders both wiki-style and standard links in ways that need rewriting
--- before it sees them:
---
---   * Wiki-style `[[target]]` / `[[target|alias]]` links aren't CommonMark, so
---     glow prints them literally.
---   * For a standard `[text](dest)` link, glow appends `dest` as a visible tail
---     -- a noisy absolute temp path for a relative sibling-doc link (resolved
---     against the temp file's dir), or the full URL for an external link.
---
--- Rewrite both so glow shows just the link-styled text: wikilinks and every
--- non-image standard link become `[text](#)` -- a bare fragment, so glow leaves
--- no tail. The links stay followable: the preview's `gd` matches the rendered
--- text back to the source (see config.wikilinks.follow_in_preview). Inline code
--- spans are protected; fenced code blocks are skipped by the caller.
-
-local function convert_links(text)
-  -- Protect inline code spans (`...`, ``...``) from rewriting.
-  local spans = {}
-  text = text:gsub("(`+)(.-)%1", function(ticks, body)
-    spans[#spans + 1] = ticks .. body .. ticks
-    return "\1" .. #spans .. "\2"
-  end)
-  -- [[target|alias]] -> [alias](#)  (show the alias)
-  text = text:gsub("%[%[[^%]|]+|([^%]]+)%]%]", function(alias)
-    return "[" .. alias .. "](#)"
-  end)
-  -- [[target]] -> [target](#)  (show the target text)
-  text = text:gsub("%[%[([^%]|]+)%]%]", function(target)
-    return "[" .. target .. "](#)"
-  end)
-  -- [text](dest) -> [text](#)  (drop the tail glow would append, for local paths
-  -- and external URLs alike). The leading `.?` captures the char before `[` so an
-  -- image (`![alt](src)`) is detected and left untouched.
-  text = text:gsub("(.?)(%[[^%]]*%])%([^%)]*%)", function(prefix, label)
-    if prefix == "!" then
-      return nil
-    end
-    return prefix .. label .. "(#)"
-  end)
-  -- Restore protected code spans.
-  text = text:gsub("\1(%d+)\2", function(i)
-    return spans[tonumber(i)]
-  end)
-  return text
+local function notify(msg, level)
+  vim.notify(msg, level or vim.log.levels.INFO, { title = "markdown preview" })
 end
 
--- Apply convert_links line by line, leaving fenced code blocks untouched.
-local function transform_links(lines)
-  local out, in_fence = {}, false
-  for _, line in ipairs(lines) do
-    if is_fence(line) then
-      in_fence = not in_fence
-      out[#out + 1] = line
-    elseif in_fence then
-      out[#out + 1] = line
-    else
-      out[#out + 1] = convert_links(line)
-    end
-  end
-  return out
-end
-M._transform_links = transform_links
-
-notify_missing = function()
+local function notify_no_cmux()
   if notified then
     return
   end
   notified = true
-  vim.notify(
-    "markdown preview: `glow` not found on PATH.\n"
-      .. "Install it with `brew install glow` "
-      .. "(or `go install github.com/charmbracelet/glow@latest`).",
-    vim.log.levels.WARN,
-    { title = "markdown_preview" }
+  notify(
+    "markdown preview needs cmux: no cmux session detected.\n"
+      .. "`<leader>mp` renders through a cmux markdown panel.",
+    vim.log.levels.WARN
   )
 end
 
--- Approximate scroll sync: place the preview at the same fraction through its
--- (reflowed) line count as the source cursor. glow reflows, so exact source
--- line -> rendered line mapping is impossible; percentage is the best we can do.
-sync_scroll = function(state)
-  local pw, pb = state.preview_win, state.preview_buf
-  if not (pw and vim.api.nvim_win_is_valid(pw)) then
-    return
-  end
-  if not (pb and vim.api.nvim_buf_is_valid(pb)) then
-    return
-  end
-  if not vim.api.nvim_buf_is_valid(state.src) then
-    return
-  end
-  local src_win = vim.fn.bufwinid(state.src)
-  if src_win == -1 then
-    return
-  end
-  -- glow drops YAML frontmatter, so the preview starts at the first source line
-  -- after it; offset the source position by the frontmatter length so the cursor
-  -- maps to the right fraction of the (frontmatter-less) preview.
-  local first = (state.fm_lines or 0) + 1
-  local src_total = vim.api.nvim_buf_line_count(state.src)
-  local src_line = vim.api.nvim_win_get_cursor(src_win)[1]
-  -- Record the line we synced to so the CursorMoved handler can skip purely
-  -- horizontal moves (same line). on_exit calls sync_scroll directly, bypassing
-  -- that guard, so a preview-length change still re-syncs.
-  state.last_src_line = src_line
-  local denom = src_total - first
-  local pct = denom > 0 and (src_line - first) / denom or 0
-  pct = math.max(0, math.min(1, pct))
-  local p_total = vim.api.nvim_buf_line_count(pb)
-  local target = math.max(1, math.min(p_total, math.floor(pct * (p_total - 1)) + 1))
-  vim.api.nvim_win_call(pw, function()
-    pcall(vim.api.nvim_win_set_cursor, pw, { target, 0 })
-    vim.cmd("normal! zz")
-  end)
-end
+-- Test seam: every cmux invocation funnels through here, so a spec can drive the
+-- whole state machine -- open, move, focus, and each failure branch -- with no
+-- cmux socket in sight. nil in normal use.
+---@type nil|fun(args: string[], on_done: fun(code: integer, stdout: string))
+M._run = nil
 
-refresh = function(src)
-  local state = states[src]
-  if not state then
-    return
+---@param bin string
+---@param args string[]
+---@param on_done fun(code: integer, stdout: string)
+local function run(bin, args, on_done)
+  if M._run then
+    return M._run(args, on_done)
   end
-  if not (state.preview_win and vim.api.nvim_win_is_valid(state.preview_win)) then
-    return
-  end
-  if not vim.api.nvim_buf_is_valid(src) then
-    return
-  end
-
-  -- Render the live (possibly unsaved) buffer via a private temp file, rewriting
-  -- wiki-style and local-file links so glow renders them without a temp-path tail.
-  -- Record the frontmatter length (glow strips it) for the scroll sync.
-  local raw = vim.api.nvim_buf_get_lines(src, 0, -1, false)
-  state.fm_lines = frontmatter_lines(raw)
-  vim.fn.writefile(transform_links(raw), state.tmpfile)
-
-  -- glow lays out to roughly `-w` + a left margin (~6 cols); target the pane
-  -- width minus that so the rendered frame doesn't overflow horizontally.
-  local width = math.max(20, vim.api.nvim_win_get_width(state.preview_win) - 6)
-
-  local tbuf = vim.api.nvim_create_buf(false, true)
-  -- `gd` in the preview follows the wikilink under the cursor (matched back to
-  -- the source, since glow's output is reflowed and target-less).
-  vim.keymap.set("n", "gd", function()
-    require("config.wikilinks").follow_in_preview(src)
-  end, { buffer = tbuf, silent = true, desc = "Follow wikilink (preview)" })
-  -- `<leader>mp` only lives on the source buffer, so once focus is in the preview
-  -- window it can't toggle the pane shut. Mirror it here (closing the source's
-  -- preview) so the same key dismisses it from either side.
-  vim.keymap.set("n", "<leader>mp", function()
-    M.close(src)
-  end, { buffer = tbuf, silent = true, desc = "Toggle markdown preview" })
-  local old_buf = state.preview_buf
-  state.gen = state.gen + 1
-  local gen = state.gen
-  local cmd = { "glow", "-s", GLOW_STYLE, "-w", tostring(width), state.tmpfile }
-
-  -- Run glow in a terminal buffer hosted by the preview window (so Neovim's
-  -- terminal emulator answers glow's queries and sizes it), without stealing
-  -- focus from the source buffer.
-  vim.api.nvim_win_call(state.preview_win, function()
-    vim.api.nvim_set_current_buf(tbuf)
-    state.job = vim.fn.jobstart(cmd, {
-      term = true,
-      on_exit = function()
-        vim.schedule(function()
-          local s = states[src]
-          if not s or s.gen ~= gen then
-            return
-          end
-          if not (s.preview_buf == tbuf and vim.api.nvim_buf_is_valid(tbuf)) then
-            return
-          end
-          -- Drop Neovim's trailing "[Process exited N]" terminal line.
-          local n = vim.api.nvim_buf_line_count(tbuf)
-          local last = vim.api.nvim_buf_get_lines(tbuf, math.max(0, n - 1), n, false)[1] or ""
-          if last:match("%[Process exited") then
-            vim.bo[tbuf].modifiable = true
-            vim.api.nvim_buf_set_lines(tbuf, n - 1, n, false, {})
-            vim.bo[tbuf].modifiable = false
-          end
-          sync_scroll(s)
-        end)
-      end,
-    })
-  end)
-
-  state.preview_buf = tbuf
-  if old_buf and old_buf ~= tbuf and vim.api.nvim_buf_is_valid(old_buf) then
-    pcall(vim.api.nvim_buf_delete, old_buf, { force = true })
-  end
-end
-
-schedule_refresh = function(state)
-  if not state.timer then
-    state.timer = vim.uv.new_timer()
-  end
-  state.timer:stop()
-  state.timer:start(
-    DEBOUNCE_MS,
-    0,
-    vim.schedule_wrap(function()
-      refresh(state.src)
+  local cmd = { bin }
+  vim.list_extend(cmd, args)
+  vim.system(cmd, { text = true }, function(res)
+    -- vim.system's callback lands in a luv context; hop to the main loop so
+    -- handlers can notify and touch the editor freely.
+    vim.schedule(function()
+      on_done(res.code, res.stdout or "")
     end)
-  )
+  end)
 end
 
--- Window-scoped autocmds: live only while the preview pane is shown, recreated on
--- each show() and torn down on each hide(). They drive the rendered output and
--- handle the user closing the pane directly.
-setup_win_autocmds = function(state)
-  local grp = vim.api.nvim_create_augroup("markdown_preview_win_" .. state.src, { clear = true })
-  state.win_group = grp
-
-  -- Refresh on save, on leaving insert, and on debounced normal-mode edits --
-  -- deliberately NOT TextChangedI, so it doesn't flicker on every keystroke.
-  vim.api.nvim_create_autocmd({ "BufWritePost", "InsertLeave", "TextChanged" }, {
-    group = grp,
-    buffer = state.src,
-    callback = function()
-      schedule_refresh(state)
-    end,
-  })
-  vim.api.nvim_create_autocmd({ "VimResized", "WinResized" }, {
-    group = grp,
-    callback = function()
-      schedule_refresh(state)
-    end,
-  })
-  -- glow's -s style is fixed to "light" now (light-only config), so there's no
-  -- background/colorscheme switch to re-match the preview against — the old
-  -- ColorScheme / OptionSet re-render autocmds were dead and have been removed.
-  vim.api.nvim_create_autocmd("CursorMoved", {
-    group = grp,
-    buffer = state.src,
-    callback = function()
-      -- sync_scroll maps the source *line* to a preview %, so a horizontal move
-      -- that leaves the line unchanged would recompute the identical position.
-      -- Early-return on it; the full sync runs only when the line actually moves.
-      local src_win = vim.fn.bufwinid(state.src)
-      if src_win ~= -1 and vim.api.nvim_win_get_cursor(src_win)[1] == state.last_src_line then
-        return
-      end
-      sync_scroll(state)
-    end,
-  })
-  -- Closing the preview window directly (`:q` in the pane) is a real disable, not
-  -- a hide -- the file is no longer in the preview group.
-  vim.api.nvim_create_autocmd("WinClosed", {
-    group = grp,
-    callback = function(ev)
-      if tonumber(ev.match) == state.preview_win then
-        M.close(state.src)
-      end
-    end,
-  })
+---@return table|nil
+local function decode(stdout)
+  local ok, value = pcall(vim.json.decode, stdout)
+  if ok and type(value) == "table" then
+    return value
+  end
+  return nil
 end
 
--- Lifecycle autocmds: created once when the preview is first enabled, removed only
--- on a real close. They tie the pane's existence to the file's visibility so the
--- two move as a group.
-ensure_lifecycle = function(state)
-  local grp = vim.api.nvim_create_augroup("markdown_preview_life_" .. state.src, { clear = true })
-  state.life_group = grp
+-- One canonical spelling of a path, since it is the state key and reaches us
+-- from two places -- a buffer name and an nvim-tree node -- that need not agree
+-- about symlinks. On macOS /tmp is a symlink to /private/tmp, so the same file
+-- can arrive under two names and desync the toggle into opening a second tab it
+-- then cannot close. fs_realpath settles it.
+--
+-- It settles it only for a path that EXISTS, though: realpath fails outright on
+-- a file not yet written, which is a real case here (a markdown buffer for a
+-- file you have not saved). So when the whole path will not resolve, walk up to
+-- the deepest ancestor that does, resolve that, and re-attach the tail -- which
+-- collapses /tmp/new.md and /private/tmp/new.md just the same. Only a path with
+-- no resolvable ancestor at all falls back to plain normalization.
+local function canonical(path)
+  local full = vim.fs.normalize(vim.fn.fnamemodify(path, ":p"))
+  local resolved = vim.uv.fs_realpath(full)
+  if resolved then
+    return resolved
+  end
+  local tail, dir = {}, full
+  while true do
+    local parent = vim.fs.dirname(dir)
+    if parent == dir then
+      return full
+    end
+    table.insert(tail, 1, vim.fs.basename(dir))
+    local real = vim.uv.fs_realpath(parent)
+    if real then
+      return vim.fs.normalize(real .. "/" .. table.concat(tail, "/"))
+    end
+    dir = parent
+  end
+end
 
-  -- File left a window -> hide the pane, but only once the file is gone from
-  -- *every* window (closing one split of a file shown in two keeps the preview).
-  vim.api.nvim_create_autocmd("BufWinLeave", {
-    group = grp,
-    buffer = state.src,
-    callback = function()
-      local src = state.src
-      vim.schedule(function()
-        if states[src] and vim.fn.bufwinid(src) == -1 then
-          hide(src)
+-- The id of a surface in `pane` when every surface in it is a cmux markdown
+-- panel, else nil. An empty pane doesn't qualify.
+local function markdown_anchor(pane)
+  local list = pane.surfaces or {}
+  if #list == 0 then
+    return nil
+  end
+  for _, surface in ipairs(list) do
+    if surface.type ~= "markdown" then
+      return nil
+    end
+  end
+  return list[1].id
+end
+
+-- Adopt an all-markdown pane in the caller's workspace as the preview pane, so a
+-- Neovim restart tabs back into the panel column it was already using instead of
+-- splitting a second one beside it.
+--
+-- Pane-level only: a surface's JSON carries a basename title and a null `url`,
+-- never the file it renders, so panels opened before this session cannot be
+-- matched back to their paths. Re-previewing one of those files opens a second
+-- tab for it. Reusing the *wrong* file's tab would be worse than that, and
+-- basenames collide (every repo has a README.md), so we don't guess.
+local function discover(bin, done)
+  if discovered then
+    return done()
+  end
+  discovered = true
+  run(bin, { "--json", "--id-format", "both", "tree" }, function(code, stdout)
+    local tree = code == 0 and decode(stdout) or nil
+    local caller = tree and tree.caller
+    caller_pane = (caller and caller.pane_id) or caller_pane
+    local workspace = caller and caller.workspace_id
+    if not workspace then
+      return done()
+    end
+    for _, window in ipairs(tree.windows or {}) do
+      for _, ws in ipairs(window.workspaces or {}) do
+        if ws.id == workspace then
+          for _, pane in ipairs(ws.panes or {}) do
+            local anchor = markdown_anchor(pane)
+            if anchor then
+              preview_pane, pane_surface = pane.id, anchor
+              return done()
+            end
+          end
         end
-      end)
-    end,
-  })
-  -- File came back to a window -> restore the pane next to it.
-  vim.api.nvim_create_autocmd("BufWinEnter", {
-    group = grp,
-    buffer = state.src,
-    callback = function()
-      local src = state.src
-      vim.schedule(function()
-        if states[src] then
-          show(src, vim.fn.bufwinid(src))
+      end
+    end
+    done()
+  end)
+end
+
+-- cmux renders the file on disk, so a modified buffer would preview as its last
+-- saved state. Say so; don't write the user's file for them.
+local function warn_if_modified(path)
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    -- Canonicalize both sides. `path` has already been through canonical(), so
+    -- comparing a raw buffer name against it would silently miss the buffer
+    -- whenever Neovim hands the name back unresolved, and skip the warning on
+    -- exactly the symlinked files canonical() exists to reconcile.
+    local name = vim.api.nvim_buf_get_name(buf)
+    if vim.api.nvim_buf_is_loaded(buf) and name ~= "" and canonical(name) == path then
+      if vim.bo[buf].modified then
+        notify(
+          "showing the last saved version — the buffer has unsaved changes",
+          vim.log.levels.WARN
+        )
+      end
+      return
+    end
+  end
+end
+
+-- Hand `path` to a cmux markdown panel and tab it into the preview pane.
+open = function(path)
+  local bin = cmux.bin()
+  if not bin then
+    return notify_no_cmux()
+  end
+  warn_if_modified(path)
+  discover(bin, function()
+    local attempt
+    attempt = function(use_anchor)
+      local args = { "--json", "--id-format", "both", "markdown", "open", path, "--focus", "false" }
+      local anchor = use_anchor and pane_surface or nil
+      if anchor then
+        vim.list_extend(args, { "--surface", anchor })
+      end
+      run(bin, args, function(code, stdout)
+        local res = code == 0 and decode(stdout) or nil
+        if not (res and res.surface_id) then
+          if anchor then
+            -- The anchor tab is gone. Keep the pane -- its other tabs may well
+            -- be alive -- and retry from the caller's own surface; the move
+            -- below still lands the panel in the right column.
+            pane_surface = nil
+            return attempt(false)
+          end
+          return notify(
+            "cmux could not open " .. vim.fn.fnamemodify(path, ":t"),
+            vim.log.levels.WARN
+          )
         end
+        -- An unanchored open split from us, so its source IS our pane. Worth
+        -- recording: it is the only route to the caller when discovery failed.
+        if not anchor and res.source_pane_id then
+          caller_pane = res.source_pane_id
+        end
+        surfaces[path] = res.surface_id
+        if not preview_pane or res.target_pane_id == preview_pane then
+          preview_pane, pane_surface = res.target_pane_id, res.surface_id
+          return
+        end
+        local move = { "move-surface", "--surface", res.surface_id, "--pane", preview_pane }
+        run(bin, move, function(move_code)
+          if move_code ~= 0 then
+            -- The preview pane is gone. The panel is already open where it
+            -- landed, so that becomes the preview pane -- and nothing stole
+            -- focus, so there is nothing to put back.
+            preview_pane, pane_surface = res.target_pane_id, res.surface_id
+            return
+          end
+          pane_surface = res.surface_id
+          -- move-surface ignores `--focus false`, so focus is sitting in the
+          -- preview pane now. Put it back where the keypress came from. Not
+          -- knowing where that is beats guessing: focusing the wrong pane would
+          -- yank the user somewhere they never asked to go.
+          if caller_pane then
+            run(bin, { "focus-pane", "--pane", caller_pane }, function() end)
+          end
+        end)
       end)
-    end,
-  })
-  -- The file itself is gone -> tear the whole group down.
-  vim.api.nvim_create_autocmd({ "BufWipeout", "BufDelete" }, {
-    group = grp,
-    buffer = state.src,
-    callback = function()
-      M.close(state.src)
-    end,
-  })
+    end
+    attempt(true)
+  end)
 end
 
--- Create (once) the persistent state for an enabled preview, along with the
--- lifecycle autocmds. Does not open any window -- that's show()'s job.
-ensure_state = function(src)
-  local state = states[src]
-  if state then
-    return state
+-- Close `path`'s panel tab.
+local function close(path)
+  local id = surfaces[path]
+  surfaces[path] = nil
+  local bin = cmux.bin()
+  if not (bin and id) then
+    return
   end
-  state = {
-    src = src,
-    preview_win = nil,
-    preview_buf = nil,
-    tmpfile = vim.fn.tempname() .. ".md",
-    gen = 0,
-    fm_lines = 0,
-  }
-  states[src] = state
-  ensure_lifecycle(state)
-  return state
+  if pane_surface == id then
+    pane_surface = nil
+  end
+  run(bin, { "close-surface", "--surface", id }, function(code)
+    -- Exit 1 is "Surface not found": that tab had already been closed by hand,
+    -- so the toggle was a press behind. Open it rather than making you press
+    -- again to get back to where you thought you were.
+    if code ~= 0 then
+      open(path)
+    end
+  end)
 end
 
--- Open the preview pane for an already-enabled file in a split to the right of
--- `target_win` (the window showing the file). No-op if already shown.
-show = function(src, target_win)
-  local state = states[src]
-  if not state then
+--- Toggle the cmux preview panel for an absolute file path.
+---@param path string
+function M.toggle(path)
+  if type(path) ~= "string" or path == "" then
     return
   end
-  if state.preview_win and vim.api.nvim_win_is_valid(state.preview_win) then
-    return
-  end
-  if not vim.api.nvim_buf_is_valid(src) then
-    return
-  end
-  if not (target_win and target_win ~= -1 and vim.api.nvim_win_is_valid(target_win)) then
-    return
-  end
-
-  -- Placeholder buffer to create the split; replaced by the terminal on refresh.
-  local placeholder = vim.api.nvim_create_buf(false, true)
-  local win = vim.api.nvim_open_win(placeholder, false, { win = target_win, split = "right" })
-
-  vim.wo[win].number = false
-  vim.wo[win].relativenumber = false
-  vim.wo[win].signcolumn = "no"
-  vim.wo[win].statuscolumn = ""
-  vim.wo[win].colorcolumn = ""
-  vim.wo[win].foldcolumn = "0"
-  vim.wo[win].cursorline = false
-  vim.wo[win].list = false
-  vim.wo[win].wrap = false -- glow already wraps to the target width
-  vim.wo[win].spell = false
-  vim.wo[win].winfixwidth = true
-
-  state.preview_win = win
-  state.preview_buf = placeholder
-  setup_win_autocmds(state)
-  refresh(src)
-end
-
--- Tear down the preview pane while keeping the file enabled (state + lifecycle
--- survive, so it auto-restores when the file is back on screen).
-hide = function(src)
-  local state = states[src]
-  if not state then
-    return
-  end
-  -- Drop the window-scoped autocmds FIRST so closing the pane doesn't trip
-  -- WinClosed -> M.close, which would forget the file was enabled.
-  if state.win_group then
-    pcall(vim.api.nvim_del_augroup_by_id, state.win_group)
-    state.win_group = nil
-  end
-  if state.timer then
-    state.timer:stop()
-  end
-  if state.job then
-    pcall(vim.fn.jobstop, state.job)
-    state.job = nil
-  end
-  if state.preview_win and vim.api.nvim_win_is_valid(state.preview_win) then
-    pcall(vim.api.nvim_win_close, state.preview_win, true)
-  end
-  if state.preview_buf and vim.api.nvim_buf_is_valid(state.preview_buf) then
-    pcall(vim.api.nvim_buf_delete, state.preview_buf, { force = true })
-  end
-  state.preview_win = nil
-  state.preview_buf = nil
-end
-
-function M.open(src)
-  if vim.fn.executable("glow") ~= 1 then
-    notify_missing()
-    return
-  end
-  src = src or vim.api.nvim_get_current_buf()
-  ensure_state(src)
-  show(src, vim.api.nvim_get_current_win())
-end
-
-function M.close(src)
-  src = src or vim.api.nvim_get_current_buf()
-  local state = states[src]
-  if not state then
-    return
-  end
-  -- Delete the lifecycle group first so tearing the file down doesn't re-enter
-  -- via the lifecycle autocmds; hide() owns the rest of the pane teardown
-  -- (win_group before window for the WinClosed re-entry ordering, timer stop,
-  -- job stop, window + buffer close) so the sequence lives in one place.
-  if state.life_group then
-    pcall(vim.api.nvim_del_augroup_by_id, state.life_group)
-  end
-  hide(src)
-  if state.timer then
-    state.timer:close()
-    state.timer = nil
-  end
-  if state.tmpfile then
-    pcall(vim.fn.delete, state.tmpfile)
-  end
-  states[src] = nil
-end
-
-function M.toggle()
-  local src = vim.api.nvim_get_current_buf()
-  local state = states[src]
-  if state and state.preview_win and vim.api.nvim_win_is_valid(state.preview_win) then
-    M.close(src)
+  if surfaces[path] then
+    close(path)
   else
-    M.open(src)
+    open(path)
   end
 end
 
--- Install the buffer-local preview toggle. Called from config.options' single
--- markdown FileType autocmd (the one entry point for the markdown family), not
+-- Install `<leader>mp` on a markdown-family buffer. Called from config.options'
+-- single markdown FileType autocmd (the one entry point for the family), not
 -- from a FileType autocmd here.
 function M.set_keymap(buf)
-  vim.keymap.set("n", "<leader>mp", M.toggle, {
-    buffer = buf,
-    desc = "Toggle markdown preview",
-  })
+  vim.keymap.set("n", "<leader>mp", function()
+    local name = vim.api.nvim_buf_get_name(buf)
+    if name == "" then
+      return notify("nothing to preview: this buffer has no file on disk")
+    end
+    M.toggle(canonical(name))
+  end, { buffer = buf, desc = "Toggle markdown preview" })
+end
+
+-- Install `<leader>mp` on the nvim-tree buffer, previewing the node under the
+-- cursor without opening it in a buffer first. Called from nvim-tree's
+-- on_attach (see lua/plugins/nvim-tree.lua).
+function M.set_tree_keymap(buf)
+  vim.keymap.set("n", "<leader>mp", function()
+    local ok, api = pcall(require, "nvim-tree.api")
+    local node = ok and api.tree.get_node_under_cursor() or nil
+    -- nvim-tree hands out field-only CLONES of its nodes -- fields, no methods
+    -- (see config.nvim_tree_hl_decorator) -- so read absolute_path and ask the
+    -- filesystem, rather than calling node:is_dir() and friends.
+    local path = type(node) == "table" and node.absolute_path or nil
+    if type(path) ~= "string" or path == "" then
+      return notify("no file under the cursor")
+    end
+    local stat = vim.uv.fs_stat(path)
+    if not stat or stat.type ~= "file" then
+      return notify("not a file: " .. vim.fn.fnamemodify(path, ":t"))
+    end
+    if not ft_util.is_markdown_path(path) then
+      return notify("not a markdown file: " .. vim.fn.fnamemodify(path, ":t"))
+    end
+    M.toggle(canonical(path))
+  end, { buffer = buf, nowait = true, desc = "Toggle markdown preview" })
+end
+
+M.open = function(path)
+  open(path)
+end
+M.close = close
+M._canonical = canonical
+M._markdown_anchor = markdown_anchor
+
+--- Test seam: forget every tracked panel, the preview pane, and the one-shot
+--- notices, so each spec starts from a clean session.
+function M._reset()
+  surfaces = {}
+  preview_pane, pane_surface, caller_pane = nil, nil, nil
+  discovered, notified = false, false
+end
+
+--- Test seam: the state machine's current view of the world.
+function M._state()
+  return { pane = preview_pane, anchor = pane_surface, caller = caller_pane, surfaces = surfaces }
 end
 
 return M
