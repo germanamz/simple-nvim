@@ -5,10 +5,11 @@ you walk out through every search, every `}`, every `G` you made while reading.
 This document explains why, why the fix is a *second* key rather than a smarter
 `<C-o>`, and what this config does to make that second key trustworthy.
 
-**The punchline, if you read nothing else:** `<C-t>` already pops straight back
-to the call site in one press, skipping everything you did while reading.
-`3<C-t>` unwinds three levels of `gd` at once. The work described here is about
-closing the holes where that key silently did nothing.
+**The punchline, if you read nothing else:** `<C-t>` pops straight back to the
+call site in one press, skipping everything you did while reading. `3<C-t>`
+unwinds three levels of `gd` at once, and `<leader>j` opens a picker over the
+whole chain. `lua/config/tagstack.lua` exists to make that key trustworthy on
+every path that navigates; this document explains what it does and why.
 
 ## Root cause: two back-histories, and `<C-o>` is the wrong one
 
@@ -80,16 +81,16 @@ looked at both and chose **Vim's exact-line dedup instead**
 (`MAX_NAVIGATION_HISTORY_LEN = 1024`, commented "Neovim-style deduplication").
 There is no consensus to inherit, and it is the jumplist's problem regardless.
 
-On the picker: the instinct that there should be a way to *see* the chain and
-jump to a level is well-supported. **Helix ships one in core** — `Space j` is
+The picker has the same pedigree. **Helix ships one in core** — `Space j` is
 `jumplist_picker`. Eclipse has a Back dropdown, Xcode press-and-hold, IntelliJ
 *Recent Locations* (`Cmd+Shift+E`) with code snippets. It is the browser
 long-press-back affordance, and it is the right answer for "go back three
 levels" — but not for the 90% case of one level, which stays a keypress.
 
-## Coverage gaps in this config
+## Why a module is needed at all
 
-Four places where `<C-t>` was dead or wrong.
+Out of the box, `<C-t>` was dead or lying in four places. Each is the reason a
+corresponding piece of `config.tagstack` exists.
 
 1. **Multi-result `gd`.** Core returns before the push (`buf.lua:263`).
    Separately, **`grr` has never pushed a frame at all**: `M.references`
@@ -97,20 +98,22 @@ Four places where `<C-t>` was dead or wrong.
    `get_locations`, so unlike `gd`/`gri`/`grt` it has no single-result push to
    inherit — there is nothing to extend, only something to add.
 2. **Wikilink follow.** `lua/config/wikilinks.lua:157` (`open_path`) and `:175`
-   (`open_or_create`) navigate with `vim.cmd.edit`. They push *neither* stack —
-   the only `gd` branch that is invisible to both back-keys.
-3. **ts_ls source-definition captures the origin at the wrong time.**
-   `lua/plugins/lsp.lua:185` calls `show_document` from inside an async
-   `client:request` callback. `show_document` evaluates `vim.fn.bufnr('%')`,
+   (`open_or_create`) navigate with `vim.cmd.edit`, and pushed *neither* stack —
+   the only `gd` branch that was invisible to both back-keys. They now take a
+   captured origin and push on success.
+3. **ts_ls source-definition captured the origin at the wrong time.** It used to
+   reach `show_document` from inside an async `client:request` callback, and
+   `show_document` evaluates `vim.fn.bufnr('%')`,
    `vim.fn.line('.')` and `vim.fn.win_getid()` **when the response arrives**
    (`util.lua:1035-1041`), where core's own path captures them *before* the
    request (`buf.lua:227-229`). Move the cursor or change windows while tsserver
-   is thinking and the recorded return point is wrong — and because
-   `win_getid()` is called with no argument, the frame can be written into a
-   different window than the one you jumped from. The fallback at
-   `lsp.lua:182` has the same defect for the same reason.
-4. **Scroll position is not restored.** `jumpoptions` is unset, so a pop lands on
-   the right line at whatever scroll offset happens to result.
+   is thinking and the recorded return point was wrong — and because
+   `win_getid()` is called with no argument, the frame could be written into a
+   different window than the one you jumped from. The fallback had the same
+   defect for the same reason. `M.ts_source_definition` replaces both halves.
+4. **Scroll position was not restored.** `jumpoptions` was unset, so a pop landed
+   on the right line at whatever scroll offset happened to result. It is now
+   `clean,view`.
 
 Not a gap, but worth recording: **`:bwipeout` empties the entire tagstack** and
 `<C-t>` then raises `E73` with no skip-to-next, where the jumplist would skip
@@ -122,13 +125,13 @@ tagstack would have to be shadowed by a path-based structure to be trustworthy,
 and that shadow would drift from the real stack the moment any plugin called
 `vim.lsp.buf.definition` directly.
 
-## Fix design
+## How it works
 
-### Decisions taken
+### The shape, and why it is this shape
 
 - **Two-tier, not one smart key.** `<C-o>` keeps its native fine-grained
-  behaviour. `<C-t>` becomes the reliable coarse "unwind one hop". This is the
-  shape every other editor converged on.
+  behaviour; `<C-t>` is the coarse "unwind one hop". This is the shape every
+  other editor converged on, and it is why nothing here remaps `<C-o>`.
 - **Semantic jumps push; file pickers do not.** `gd` (all four branches),
   `grr`, `gri`, `grt`. Telescope file pickers, nvim-tree opens and quickfix
   jumps stay jumplist-only. The stack holds 20 frames; filling it with "I chose
@@ -301,22 +304,26 @@ unchanged; only its scroll restoration improves.
 with no undo, and `jumpoptions` is global, so it could not be scoped to code
 buffers while leaving markdown and the docs reader alone.
 
-## Files
+## Where it lives
 
-| File                              | Change                                                                 |
-| --------------------------------- | ---------------------------------------------------------------------- |
-| `lua/config/tagstack.lua`         | **new** — model: `capture`, `push`, `jump`, `frames`, `pop`, and the `gd`/`grr`/`gri`/`grt` wrappers |
-| `lua/config/tagstack_picker.lua`  | **new** — Telescope view: `open`, plus `rows`/`format` as the test seam |
-| `lua/config/options.lua`          | `jumpoptions`, the `<C-t>` remap, `<leader>j`                          |
-| `lua/plugins/lsp.lua`             | route `gd` (all four branches) and buffer-local `grr`/`gri`/`grt` through the wrappers; drop `show_document` |
-| `lua/config/wikilinks.lua`        | push on successful follow in `open_path` / `open_or_create`; route the LSP fallback through the wrapper |
-| `tests/spec/unit/tagstack_spec.lua` | **new** — 25 examples over the model                                 |
-| `docs/keybindings.md`             | document `<C-t>`, `<leader>j`, and the two-history model (hand-written) |
-| `docs/README.md`                  | add this document to the Contents list                                 |
+| File                                | Responsibility                                                       |
+| ----------------------------------- | -------------------------------------------------------------------- |
+| `lua/config/tagstack.lua`           | The model, and the only code here that calls `settagstack`. `capture` / `push` / `jump` / `frames` / `pop` / `goto_frame` / `drop_frame`, plus the `gd`, `grr`, `gri`, `grt` and ts_ls wrappers |
+| `lua/config/tagstack_picker.lua`    | The `<leader>j` Telescope view. `open`, with `rows` / `widths` / `format` as the pure test seam |
+| `lua/config/options.lua`            | `jumpoptions`, the global `<C-t>` map, `<leader>j`                    |
+| `lua/plugins/lsp.lua`               | `LspAttach` routes all four `gd` branches and buffer-local `grr` / `gri` / `grt` through the wrappers |
+| `lua/config/wikilinks.lua`          | Threads one captured origin through both follow paths and the LSP fallback |
+| `tests/spec/unit/tagstack_spec.lua` | 25 examples over the model                                            |
 
-## Testing
+Two things deliberately absent. Nothing calls `vim.lsp.util.show_document` any
+more — it was the ts_ls path's late-capture bug, and `M.jump` replaces it.
+`lua/plugins/which-key.lua` is untouched: it registers prefix *groups*, and
+`<leader>j` is a leaf that carries its own `desc`.
 
-`tests/spec/unit/tagstack_spec.lua`, following the `lsp_refs_spec.lua` idiom:
+## What the specs cover
+
+`tests/spec/unit/tagstack_spec.lua` — 25 examples, following the
+`lsp_refs_spec.lua` idiom:
 
 - `M.frames()` normalization and the curidx → pop/tag arithmetic, including the
   fresh-push case where `curidx == length + 1`
