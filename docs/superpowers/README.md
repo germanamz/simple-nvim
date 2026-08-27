@@ -48,6 +48,17 @@ confirmed nothing of forward value survived only in them — the durable parts a
 above, and the rest was TDD scaffolding, acceptance criteria for finished work,
 and `file:line` references that had already drifted.
 
+One straggler, `2026-08-17-openfga-fga-support-design.md`, landed after that
+sweep and went the same way on 2026-08-27. Its durable content was already in
+`../openfga.md`, bar three things folded in at the time: what the runtime ships
+for `.fga` on its own, that upstream commits `src/parser.c` (so the build needs
+no tree-sitter CLI), and CEL injection as a known gap.
+
+**The rule this leaves:** specs and plans are working documents and do not get
+committed. Documentation of how something currently works does. When a spec has
+served its purpose, rewrite the durable parts into implementation voice and let
+git hold the original.
+
 Git still has them:
 
 ```sh

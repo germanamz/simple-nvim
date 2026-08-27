@@ -66,6 +66,10 @@ keyword (`indent.increment 2`, i.e. it assumes the config's `shiftwidth=2`).
 
 ## How the parser is registered
 
+Neovim 0.12's runtime already maps `*.fga` to `filetype=fga` and ships
+`ftplugin/fga.vim` (`comments=:#`, `commentstring=# %s`). It ships no syntax
+file, no parser and no indent script, which is what everything below supplies.
+
 nvim-treesitter's registry does not carry `fga`, so `lua/plugins/treesitter.lua`
 passes an `out_of_tree` table to `config.ts_pinned.setup(revisions, out_of_tree)`.
 On the same `User TSUpdate` event it already uses for pinning, `ts_pinned`
@@ -83,7 +87,18 @@ those files are the *base* queries; nothing is copied into `site/queries/fga`.
 
 To move the grammar to a newer commit: edit `fga = "…"` in
 `parser-revisions.lua`, run `make warm`, and re-check `queries/fga/*.scm`
-against the new `grammar.js` (node names are the contract).
+against the new `grammar.js` (node names are the contract). Upstream commits
+`src/parser.c`, so the build is a plain `cc` with no tree-sitter CLI or node
+toolchain in the loop — which is why an out-of-tree grammar costs nothing
+beyond the registry entry.
+
+## Not covered
+
+CEL expressions inside `condition … { … }` bodies are highlighted as plain
+tokens by the fga grammar rather than as CEL. A treesitter language injection
+would fix it, but there is no CEL parser in `parser-revisions.lua` and pinning
+a second grammar for the inside of one block has not been worth it. The other
+known gap — `schema` under `model` — is in the indent row of the table above.
 
 ## Why no language server
 
