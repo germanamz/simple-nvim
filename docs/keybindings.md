@@ -55,6 +55,7 @@ Leader = `<Space>` · Local leader = `\`
 | `<Space>e`        | nvim-tree file tree (reveals current file)            |
 | `<Space>E`        | Open netrw file tree in current window                |
 | `gd`              | Go to definition (LSP)                                |
+| `<C-t>`           | Back one `gd` hop (skips everything you read there)   |
 | `K`               | Hover docs (LSP default)                              |
 | `gK`              | Open the *real* docs for the thing under the cursor   |
 | `]c` / `[c`       | Next / previous git hunk                              |
@@ -264,6 +265,26 @@ Useful auto-marks: `` `. `` = last edit, `` `^ `` = last insert, `` `[ `` /
 | `<C-o>`  | jump *back* in jumplist                 |
 | `<C-i>`  | jump *forward* (same as `<Tab>`)        |
 | `:jumps` | list                                    |
+
+### Definition stack (`gd` history)
+
+There are **two** back-histories and they answer different questions. The
+jumplist above records *every* far motion — each `/`, `}`, `G` — so after `gd`
+into a definition, reading around inside it means `<C-o>` walks you back out
+through everything you read. The definition stack records only the hops
+themselves.
+
+| Keys        | Action                                                     |
+| ----------- | ---------------------------------------------------------- |
+| `<C-t>`     | pop one hop — straight back to where you pressed `gd`      |
+| `3<C-t>`    | unwind three hops at once                                  |
+| `<Space>j`  | picker over the whole chain: `<CR>` pops to a level, `<C-x>` drops a frame |
+| `:tags`     | list                                                       |
+
+`gd`, `grr`, `gri` and `grt` all push a frame, so `<C-t>` means the same thing
+after any of them. Nothing else does — file pickers and the tree stay
+jumplist-only, deliberately, so the stack stays coarse. See
+[navigation-stack.md](navigation-stack.md).
 
 ### Change list
 
@@ -577,9 +598,11 @@ Buffer-local: these only exist in buffers with an attached LSP client.
 | Keys         | Action                                                  |
 | ------------ | ------------------------------------------------------- |
 | `gd`         | go to definition (ts_ls: source via `_typescript.goToSourceDefinition`) |
+| `<C-t>`      | back one hop; `<Space>j` picks a level out of the whole chain |
 | `gD`         | go to **declaration** (Nvim 0.11 default)               |
-| `grr`        | references (Nvim 0.11 default, opens loclist)          |
-| `gri`        | implementations (Nvim 0.11 default)                     |
+| `grr`        | references (opens quickfix; pushes the definition stack on select) |
+| `gri`        | implementations                                         |
+| `grt`        | type definition                                         |
 | `grn`        | rename symbol (Nvim 0.11 default)                       |
 | `gra`        | code action (Nvim 0.11 default)                         |
 | `K`          | hover docs (Nvim 0.11 default)                          |

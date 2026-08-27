@@ -24,6 +24,10 @@ beyond the code.
   per-project pyright rule severities: why `typeCheckingMode = "basic"` does
   nothing for annotated-but-sloppy codebases, which five rules Pydantic actually
   trips, and the silent aliasing trap in delivering per-root LSP settings.
+- **[navigation-stack.md](navigation-stack.md).** Why `<C-o>` walks you back
+  through everything you read after a `gd`, why the fix is `<C-t>` rather than a
+  smarter `<C-o>` (every other editor reached the same conclusion), and the
+  `<leader>j` picker over the whole hop chain.
 - **[lsp-fs-sync.md](lsp-fs-sync.md).** Why deleting or renaming files from the
   file tree sent gopls and ts_ls into error storms with watchers off, and the
   in-editor notification path that replaces them.

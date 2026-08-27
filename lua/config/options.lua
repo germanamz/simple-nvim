@@ -223,6 +223,27 @@ if in_container or vim.env.SSH_TTY then
   }
 end
 
+-- `view` on top of the inherited `clean`: restore the saved view when moving
+-- through the jumplist or changelist, and when popping the tagstack, so landing
+-- back on a line also lands back on the screen position you were reading it at.
+-- `stack` is deliberately absent — it discards the forward branch permanently,
+-- and 'jumpoptions' is global, so it could not be scoped to code buffers while
+-- leaving markdown and the docs reader alone. See docs/navigation-stack.md.
+opt.jumpoptions = "clean,view"
+
+-- `<C-t>` pops the definition stack: one press back to where `gd` was typed,
+-- skipping everything done while reading. Wrapped only for the message — bare
+-- `<C-t>` on an empty stack raises `E73: Tag stack empty`, which reads like a
+-- malfunction. Counts still work (`3<C-t>` unwinds three hops).
+vim.keymap.set("n", "<C-t>", function()
+  require("config.tagstack").pop(vim.v.count1)
+end, { desc = "Pop definition stack" })
+
+-- The whole chain at once, when one level back isn't where you want to land.
+vim.keymap.set("n", "<leader>j", function()
+  require("config.tagstack_picker").open()
+end, { desc = "Definition stack" })
+
 opt.undofile = true
 opt.updatetime = 250
 opt.timeoutlen = 400

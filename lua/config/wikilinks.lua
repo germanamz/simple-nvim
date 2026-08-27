@@ -202,7 +202,7 @@ end
 -- Try to follow the wikilink under the cursor. Returns true when the cursor was
 -- on a wikilink (whether the target opened or was reported missing), false when
 -- there was nothing to follow -- so the caller can fall back to LSP.
-local function try_follow()
+local function try_follow(origin)
   local line = vim.api.nvim_get_current_line()
   local col = vim.api.nvim_win_get_cursor(0)[2] + 1
   local inner = wikilink_at(line, col)
@@ -213,7 +213,12 @@ local function try_follow()
   if not target then
     return false
   end
-  open_target(target, project_root())
+  -- Record the definition-stack frame only once the file is actually open:
+  -- open_or_create returns false for a declined "Create?" prompt, and pushing
+  -- before the jump would leave `<C-t>` pointing at a hop that never happened.
+  if open_target(target, project_root()) then
+    require("config.tagstack").push(origin, "link")
+  end
   return true
 end
 
@@ -221,7 +226,7 @@ end
 -- when the cursor was on a followable link -- a file opens, a URL opens
 -- externally -- and false otherwise (including in-document anchors), so the
 -- caller can fall back to LSP.
-local function try_follow_standard()
+local function try_follow_standard(origin)
   local line = vim.api.nvim_get_current_line()
   local col = vim.api.nvim_win_get_cursor(0)[2] + 1
   local link = standard_link_at(line, col)
@@ -230,14 +235,18 @@ local function try_follow_standard()
   end
   local kind = classify_dest(link.dest)
   if kind == "url" then
+    -- Hands off to the system handler; the cursor never leaves this buffer, so
+    -- there is nothing to come back from.
     open_url(link.dest)
     return true
   elseif kind == "file" then
     local name = vim.api.nvim_buf_get_name(0)
     local src_dir = name ~= "" and vim.fs.dirname(name) or vim.fn.getcwd()
     local path = resolve_file(link.dest, src_dir)
-    if path then
-      open_path(path)
+    -- open_path returns false (and notifies) for an unreadable target, so the
+    -- frame goes in only when the jump happened.
+    if path and open_path(path) then
+      require("config.tagstack").push(origin, "link")
     end
     return true
   end
@@ -246,10 +255,14 @@ end
 
 -- Smart `gd`: follow a wiki or standard link if the cursor is on one, else LSP.
 function M.goto_definition()
-  if try_follow() or try_follow_standard() then
+  local tagstack = require("config.tagstack")
+  -- Captured once, up front, and threaded through every branch: whichever one
+  -- fires, the frame has to record where the cursor was when `gd` was pressed.
+  local origin = tagstack.capture()
+  if try_follow(origin) or try_follow_standard(origin) then
     return
   end
-  vim.lsp.buf.definition()
+  tagstack.definition(origin)
 end
 
 -- Install the buffer-local smart `gd` (follow link, else LSP go-to). Called from

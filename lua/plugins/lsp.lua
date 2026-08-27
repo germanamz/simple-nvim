@@ -171,20 +171,10 @@ local servers = {
 -- on the import binding, not the real source. ts_ls exposes a custom command
 -- `_typescript.goToSourceDefinition` that follows imports through to the
 -- defining file; we prefer it for ts_ls buffers and fall back to the standard
--- definition if it returns nothing.
-local function ts_goto_source_definition(client, bufnr)
-  local params = vim.lsp.util.make_position_params(0, client.offset_encoding)
-  client:request("workspace/executeCommand", {
-    command = "_typescript.goToSourceDefinition",
-    arguments = { params.textDocument.uri, params.position },
-  }, function(err, result)
-    if err or not result or vim.tbl_isempty(result) then
-      vim.lsp.buf.definition()
-      return
-    end
-    vim.lsp.util.show_document(result[1], client.offset_encoding, { focus = true })
-  end, bufnr)
-end
+-- definition if it returns nothing. Both halves live in config.tagstack, which
+-- captures the return position BEFORE the request — `show_document`, which this
+-- used to call, captures it when the reply lands, so a cursor that moved while
+-- tsserver was thinking left `<C-t>` pointing at the wrong place.
 
 -- A named group so these top-level autocmds are replaced (not stacked) if this
 -- spec is ever re-evaluated (:Lazy reload, a test clearing package.loaded).
@@ -234,6 +224,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
   group = lsp_group,
   callback = function(args)
     local client = vim.lsp.get_client_by_id(args.data.client_id)
+    local tagstack = require("config.tagstack")
     local function map(lhs, rhs, desc)
       vim.keymap.set("n", lhs, rhs, { buffer = args.buf, silent = true, desc = desc })
     end
@@ -241,7 +232,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
     local ft = vim.bo[args.buf].filetype
     if client and client.name == "ts_ls" then
       map("gd", function()
-        ts_goto_source_definition(client, args.buf)
+        require("config.tagstack").ts_source_definition(client, args.buf)
       end, "Goto source definition (ts_ls)")
       -- tsserver hosts ONE TypeScript per process and Neovim starts one client
       -- per root_dir, so in a monorepo whose packages pin different versions this
@@ -251,7 +242,7 @@ vim.api.nvim_create_autocmd("LspAttach", {
       -- package's own build. See lua/config/lsp_tsdk.lua.
       require("config.lsp_tsdk").warn_mismatch(args.buf, client)
     elseif client and client.name == "pyright" then
-      map("gd", vim.lsp.buf.definition, "Goto definition")
+      map("gd", tagstack.definition, "Goto definition")
       -- Buffer-local and pyright-gated for the same reason the ts_ls maps above
       -- are: the picker acts on the pyright client serving THIS buffer, so the
       -- key is a no-op anywhere else and shouldn't advertise itself there.
@@ -267,8 +258,18 @@ vim.api.nvim_create_autocmd("LspAttach", {
       -- Re-asserted here so marksman's attach doesn't overwrite the FileType map.
       map("gd", require("config.wikilinks").goto_definition, "Goto wikilink / definition")
     else
-      map("gd", vim.lsp.buf.definition, "Goto definition")
+      map("gd", tagstack.definition, "Goto definition")
     end
+
+    -- `grr` / `gri` / `grt` are Neovim 0.11+ global defaults calling
+    -- vim.lsp.buf.* directly, so they inherit core's tagstack behaviour: nothing
+    -- at all for references (buf.lua:868 is its own implementation and never
+    -- pushes), and for the other two only when the server returns exactly one
+    -- location. Overriding them buffer-locally routes all three through the one
+    -- writer, so `<C-t>` means the same thing after any of them.
+    map("grr", tagstack.references, "References")
+    map("gri", tagstack.implementation, "Implementation")
+    map("grt", tagstack.type_definition, "Type definition")
 
     local lsp_refs = require("config.lsp_refs")
     map("]r", lsp_refs.next, "Next LSP reference")
