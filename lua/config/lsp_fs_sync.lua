@@ -16,7 +16,9 @@
 --   • rename → workspace/willRenameFiles request first, applying the returned
 --     import-rewrite edit (ts_ls), then didRenameFiles after
 --   • create → workspace/didCreateFiles to servers advertising it (gopls's
---     package-clause stub)
+--     package-clause stub), coalesced to one announcement per tree create, held
+--     for the next server's on_init when none covers the path yet, and the
+--     returned stub written to disk when it lands in a buffer nobody has open
 --   • rename of open buffers → detach clients while buffer names still carry
 --     the old path, so didClose goes out under the URI the server knows;
 --     nvim-tree's own post-rename :edit refires FileType and vim.lsp.enable
@@ -114,20 +116,210 @@ function M.on_removed(path)
   })
 end
 
---- FileCreated / FolderCreated.
----@param path string
-function M.on_created(path)
-  local uri = vim.uri_from_fname(path)
-  notify_watched(path, {
-    { uri = uri, type = vim.lsp.protocol.FileChangeType.Created },
-  })
-  local is_dir = vim.fn.isdirectory(path) == 1
-  for _, client in ipairs(watched_clients(path)) do
-    local op = file_op(client, "didCreate")
-    if op and filters_match(op.filters, path, is_dir) then
-      client:notify("workspace/didCreateFiles", { files = { { uri = uri } } })
+-- gopls returns its package-clause stub as a workspace/applyEdit, and
+-- vim.lsp.util.apply_text_edits applies it to a buffer it loads for the
+-- occasion without ever writing that buffer. For a file nobody has opened, the
+-- clause therefore lives only in a hidden modified buffer while the file on
+-- disk stays empty — wipe the buffer, or open the repo from anywhere else, and
+-- the stub is simply gone. So write it ourselves, and only while the file sits
+-- in no window: once the user has it on screen the buffer is theirs, and
+-- flushing their unsaved edits behind their back is not ours to do.
+--
+-- The hook is BufNew, from the vim.uri_to_bufnr apply_workspace_edit opens
+-- with, because the obvious alternatives do not fire at all: apply_text_edits
+-- reaches a hidden buffer through nvim_buf_set_lines, and an API write to a
+-- non-current buffer emits neither BufModifiedSet nor TextChanged (verified).
+-- Holds both halves of the stub plumbing: the per-create BufNew watchers
+-- below, and the LspAttach deferral further down.
+local stub_group = vim.api.nvim_create_augroup("LspFsSyncStub", { clear = true })
+
+-- How long to keep waiting for the server's edit before giving up on it. A
+-- server may decline to stub at all, and an armed autocmd must not outlive the
+-- create that armed it.
+local STUB_TIMEOUT_MS = 30000
+
+-- Buffer names are RESOLVED: vim.uri_to_bufnr hands nvim the path and nvim
+-- stores its realpath, so a repo reached through a symlink (anything under
+-- macOS's /var/..., for one) never matches the path nvim-tree announced. Match
+-- on the resolved form at both ends.
+---@param path string absolute path
+---@return string
+local function resolved(path)
+  return vim.uv.fs_realpath(path) or path
+end
+
+---@param path string absolute path of a file a server was asked to stub
+local function persist_stub(path)
+  local target = resolved(path)
+  local autocmd_id, timer
+
+  local function disarm()
+    if autocmd_id then
+      pcall(vim.api.nvim_del_autocmd, autocmd_id)
+      autocmd_id = nil
+    end
+    if timer then
+      timer:stop()
+      timer:close()
+      timer = nil
     end
   end
+
+  autocmd_id = vim.api.nvim_create_autocmd("BufNew", {
+    group = stub_group,
+    desc = "persist an LSP package-clause stub landing in an unopened buffer",
+    callback = function(args)
+      if resolved(vim.api.nvim_buf_get_name(args.buf)) ~= target then
+        return false
+      end
+      local buf = args.buf
+      autocmd_id = nil -- returning true below deletes it
+      disarm()
+      -- Deferred, not immediate: at BufNew the buffer is still unloaded (which
+      -- is also why nvim_buf_attach is no use here — it refuses an unloaded
+      -- buffer and reports it only through its return value). One
+      -- apply_workspace_edit opens the buffer and applies the edit within a
+      -- single tick, so by the next one the stub is either in there or was
+      -- never coming.
+      vim.schedule(function()
+        if not vim.api.nvim_buf_is_loaded(buf) or not vim.bo[buf].modified then
+          return
+        end
+        if #vim.fn.win_findbuf(buf) > 0 then
+          return -- on screen: the user's buffer, and the user's :w
+        end
+        -- noautocmd: this is the server's stub, not a user save, and it should
+        -- not drag format-on-save and the linters in behind it.
+        vim.api.nvim_buf_call(buf, function()
+          pcall(vim.cmd, "silent noautocmd write")
+        end)
+      end)
+      return true
+    end,
+  })
+
+  timer = vim.uv.new_timer()
+  timer:start(STUB_TIMEOUT_MS, 0, vim.schedule_wrap(disarm))
+end
+
+--- Ask `client` for the stub, if it takes files like this one.
+---@param client vim.lsp.Client
+---@param path string
+---@return boolean asked
+local function request_stub(client, path)
+  local op = file_op(client, "didCreate")
+  if not (op and filters_match(op.filters, path, vim.fn.isdirectory(path) == 1)) then
+    return false
+  end
+  client:notify("workspace/didCreateFiles", { files = { { uri = vim.uri_from_fname(path) } } })
+  return true
+end
+
+--- A file the server still owes a stub: on disk, and still untouched.
+---@param path string
+---@return boolean
+local function awaits_stub(path)
+  local stat = vim.uv.fs_stat(path)
+  return stat ~= nil and stat.type == "file" and stat.size == 0
+end
+
+-- Creates nobody could stub when they happened. gopls is the only thing that
+-- knows which `package` line a new .go file wants, and in a fresh session it is
+-- usually not running yet: open the tree and create a file before opening any
+-- Go buffer and there is simply no client to ask, so the file stays empty. Hold
+-- the create instead of dropping it and ask the first server that turns up
+-- covering it — which is the moment the user opens the file. Only paths NO
+-- running client covers are held: a covering server that declined the filter
+-- has already answered the question.
+local unstubbed = {}
+
+-- Enough for a burst of tree creates before any server is up. A path nothing
+-- ever claims would otherwise sit here for the rest of the session.
+local UNSTUBBED_LIMIT = 64
+
+---@param client vim.lsp.Client newly attached
+local function stub_waiting_creates(client)
+  local keep = {}
+  for _, path in ipairs(unstubbed) do
+    -- A file the user has since written is theirs; a stub now would land on top
+    -- of their first line.
+    if awaits_stub(path) then
+      if root_covers(client, path) and request_stub(client, path) then
+        persist_stub(path)
+      else
+        keep[#keep + 1] = path
+      end
+    end
+  end
+  unstubbed = keep
+end
+
+--- A server has finished initializing: ask it for any stub that was waiting on
+--- a server like it. Called from every server's `on_init` in
+--- lua/plugins/lsp.lua, and `on_init` specifically rather than `LspAttach`,
+--- because gopls will not stub a file it already has open — and by LspAttach
+--- the buffer that started the server has been sent as `textDocument/didOpen`
+--- (verified: asking at LspAttach for a file the user just opened returns no
+--- edit at all; asking at on_init for the same file returns the package clause).
+---@param client vim.lsp.Client
+function M.on_client_init(client)
+  if #unstubbed > 0 then
+    stub_waiting_creates(client)
+  end
+end
+
+---@param path string
+local function announce_created(path)
+  notify_watched(path, {
+    { uri = vim.uri_from_fname(path), type = vim.lsp.protocol.FileChangeType.Created },
+  })
+  local covered, asked = false, false
+  for _, client in ipairs(watched_clients(path)) do
+    covered = true
+    if request_stub(client, path) then
+      asked = true
+    end
+  end
+  if asked then
+    persist_stub(path)
+  elseif not covered and awaits_stub(path) then
+    if #unstubbed >= UNSTUBBED_LIMIT then
+      table.remove(unstubbed, 1)
+    end
+    unstubbed[#unstubbed + 1] = path
+  end
+end
+
+-- Paths announced so far in this event-loop tick, or nil when none are pending.
+local pending_creates = nil
+
+--- FileCreated / FolderCreated.
+---
+--- One tree create, one announcement. nvim-tree fires FolderCreated once per
+--- directory it had to make and hands every one of them the WHOLE target path
+--- instead of the folder just created (actions/fs/create-file.lua:93 passes
+--- `new_file_path`), then fires FileCreated for that same path — so creating
+--- `internal/nice/better/better.go` announced better.go three times and gopls
+--- stubbed `package better` into it three times over. Coalescing per tick also
+--- fixes the ordering it exposed: every folder dispatch runs BEFORE the file is
+--- written, and a server will not stub a path it cannot stat yet.
+---@param path string
+function M.on_created(path)
+  if pending_creates then
+    pending_creates[path] = true
+    return
+  end
+  pending_creates = { [path] = true }
+  -- The tree's create loop is synchronous, so the whole path exists by the time
+  -- this runs.
+  vim.schedule(function()
+    local paths = vim.tbl_keys(pending_creates)
+    pending_creates = nil
+    table.sort(paths)
+    for _, p in ipairs(paths) do
+      announce_created(p)
+    end
+  end)
 end
 
 -- Renames whose detach still awaits confirmation: old path -> detached

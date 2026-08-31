@@ -153,7 +153,77 @@ Shipped as designed, plus three fixes out of an adversarial review:
   not a boolean — a reload wipes nvim-tree's handler table, and a fresh
   `api.events` must re-subscribe while a same-table re-run must not double up.
 
-Refuted-by-review non-issues worth remembering: overlapping-root double-apply
-cannot occur here (single client per root; union dedupes by id), and
-`FolderCreated`'s payload quirks are inherited nvim-tree behavior with no
-user-visible consequence.
+Refuted-by-review non-issue worth remembering: overlapping-root double-apply
+cannot occur here (single client per root; union dedupes by id).
+
+## `FolderCreated`'s payload quirk was not harmless (2026-08-31)
+
+The original review waved `FolderCreated`'s payload through as "inherited
+nvim-tree behavior with no user-visible consequence". It had two, reported as
+"creating `internal/nice/better/better.go` from the tree gives me the package
+line once per directory" and "sometimes the package line is not added at all".
+
+**Duplicate stubs.** nvim-tree's create loop makes each missing directory in
+turn and dispatches `FolderCreated` after every `mkdir` — passing
+`new_file_path`, the whole target path, rather than the folder it just made
+(`actions/fs/create-file.lua:93`; it is the event's only dispatch site). So
+creating `a/b/c.go` with `a/` and `a/b/` missing announces `c.go` three times:
+twice as a folder, once as the file. Each one reached gopls as
+`workspace/didCreateFiles`, and gopls answers every one of them with a package
+clause. Live repro (real gopls, `internal/nice/better/better.go`): three
+announcements, two `applyEdit`s, `package better` twice in the file.
+`pkg/a/b/c/deep.go` announced five times.
+
+Fixed by coalescing per event-loop tick in `on_created` — one tree create, one
+announcement. The tree's create loop is synchronous, so the deferred flush also
+lands after the file exists, which matters: every folder dispatch fires *before*
+the file is written, and gopls will not stub a path it cannot stat.
+
+**Stubs that never reached disk.** gopls returns the clause as a
+`workspace/applyEdit`, and `vim.lsp.util.apply_text_edits` applies it to a
+buffer without ever writing it (same family as the rename-time dirty-buffer
+liability above). For a file nobody had opened, the clause lived only in a
+hidden modified buffer — the file on disk stayed empty, which is what "the
+package line was never added" looks like from outside. `on_created` now writes
+that buffer itself, but only while the file is in no window; once it is on
+screen it is the user's buffer and the user's `:w`.
+
+Three findings from building it, all verified, none of them guessable:
+
+- `nvim_buf_set_lines` on a non-current buffer sets `'modified'` but fires
+  **neither `BufModifiedSet` nor `TextChanged`** — the obvious hook is dead.
+- `nvim_buf_attach` **refuses an unloaded buffer**, and says so only through its
+  return value. At `BufNew` the buffer is always unloaded, so attaching there
+  silently does nothing. `BufNew` plus a `vim.schedule`d check works instead:
+  `apply_workspace_edit` opens the buffer and applies the edit inside one tick.
+- Buffer names are **resolved**: `vim.uri_to_bufnr` stores the realpath, so a
+  path reached through a symlink never equals the name nvim-tree announced.
+  Both ends have to be compared in resolved form.
+
+**Creates with no server to ask.** The other half of "the package line was
+never added": a `.go` file created while no client covers the path — a fresh
+session with the tree open and no Go buffer yet — had nobody to send
+`didCreateFiles` to, so the create was simply dropped. The clause is gopls's to
+compute, so rather than guess at it, `on_created` now *holds* such a path and
+collects when a covering server turns up. Only paths no running client covers
+are held: a covering server that declined the filter has already answered. A
+held path is dropped once it stops being an untouched empty file, and the queue
+is capped.
+
+The hook is each server's **`on_init`** (wired in `lua/plugins/lsp.lua`, beside
+the existing capabilities merge), and that choice is the whole trick —
+`LspAttach` does not work:
+
+> gopls will not stub a file it already has open. By `LspAttach` the buffer
+> that started the server has already gone out as `textDocument/didOpen`
+> (`text = "\n"`, since nvim always sends at least one line), and the
+> `didCreateFiles` that follows returns **no edit at all**. Verified both ways
+> on the same file: asked at `LspAttach`, zero `applyEdit`s; asked at
+> `on_init`, `package thing` comes straight back.
+
+Both orderings end up right for the user:
+
+| after the create, the user opens… | where the clause lands |
+| --- | --- |
+| the new file itself | their visible buffer, unsaved — theirs to `:w` |
+| some other Go file | written to disk, buffer never shown |

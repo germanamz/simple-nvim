@@ -37,6 +37,31 @@ local function notifications_of(client, method)
   end, client.notifications)
 end
 
+-- on_created coalesces per event-loop tick, so its notifications land on the
+-- next scheduled callback rather than inside the call.
+local function flush()
+  vim.wait(20)
+end
+
+local function read_file(path)
+  local fd = io.open(path, "r")
+  if not fd then
+    return nil
+  end
+  local content = fd:read("*a")
+  fd:close()
+  return content
+end
+
+-- gopls's create advertisement: the package-clause stub, .go files only.
+local GO_CREATE_CAPS = {
+  workspace = {
+    fileOperations = {
+      didCreate = { filters = { { scheme = "file", pattern = { glob = "**/*.go" } } } },
+    },
+  },
+}
+
 describe("config.lsp_fs_sync", function()
   local env_root, M
   local orig_get_clients, orig_detach, orig_attach, orig_notify
@@ -126,6 +151,7 @@ describe("config.lsp_fs_sync", function()
       local go = fake_client({ id = 1, root_dir = "/ws/server" })
       clients = { go }
       M.on_created("/ws/server/internal/new.go")
+      flush()
       local sent = notifications_of(go, "workspace/didChangeWatchedFiles")
       assert.are.equal(1, #sent)
       assert.are.same({
@@ -134,19 +160,11 @@ describe("config.lsp_fs_sync", function()
     end)
 
     it("also sends didCreateFiles to servers advertising a matching didCreate filter", function()
-      local go = fake_client({
-        id = 1,
-        root_dir = "/ws/server",
-        server_capabilities = {
-          workspace = {
-            fileOperations = {
-              didCreate = { filters = { { scheme = "file", pattern = { glob = "**/*.go" } } } },
-            },
-          },
-        },
-      })
+      local go =
+        fake_client({ id = 1, root_dir = "/ws/server", server_capabilities = GO_CREATE_CAPS })
       clients = { go }
       M.on_created("/ws/server/internal/new.go")
+      flush()
       local sent = notifications_of(go, "workspace/didCreateFiles")
       assert.are.equal(1, #sent)
       assert.are.same(
@@ -156,21 +174,157 @@ describe("config.lsp_fs_sync", function()
     end)
 
     it("does not send didCreateFiles when the filter does not match", function()
-      local go = fake_client({
-        id = 1,
-        root_dir = "/ws/server",
-        server_capabilities = {
-          workspace = {
-            fileOperations = {
-              didCreate = { filters = { { scheme = "file", pattern = { glob = "**/*.go" } } } },
-            },
-          },
-        },
-      })
+      local go =
+        fake_client({ id = 1, root_dir = "/ws/server", server_capabilities = GO_CREATE_CAPS })
       clients = { go }
       M.on_created("/ws/server/notes.txt")
+      flush()
       assert.are.equal(0, #notifications_of(go, "workspace/didCreateFiles"))
       assert.are.equal(1, #notifications_of(go, "workspace/didChangeWatchedFiles"))
+    end)
+
+    -- One create, one announcement. nvim-tree fires FolderCreated once per
+    -- directory it had to make and hands each one the WHOLE target path rather
+    -- than the folder (actions/fs/create-file.lua:93 passes `new_file_path`),
+    -- then fires FileCreated for that same path. gopls answers every
+    -- didCreateFiles with a package clause, so `internal/nice/better/better.go`
+    -- came out holding `package better` once per path element.
+    it("collapses one tree create's repeated announcements into a single notification", function()
+      local go =
+        fake_client({ id = 1, root_dir = "/ws/server", server_capabilities = GO_CREATE_CAPS })
+      clients = { go }
+      local path = "/ws/server/internal/nice/better/better.go"
+      M.on_created(path) -- FolderCreated, after mkdir internal/nice
+      M.on_created(path) -- FolderCreated, after mkdir internal/nice/better
+      M.on_created(path) -- FileCreated
+      flush()
+      assert.are.equal(1, #notifications_of(go, "workspace/didCreateFiles"))
+      assert.are.equal(1, #notifications_of(go, "workspace/didChangeWatchedFiles"))
+    end)
+
+    it("still announces two genuinely distinct creates", function()
+      local go =
+        fake_client({ id = 1, root_dir = "/ws/server", server_capabilities = GO_CREATE_CAPS })
+      clients = { go }
+      M.on_created("/ws/server/a.go")
+      M.on_created("/ws/server/b.go")
+      flush()
+      assert.are.equal(2, #notifications_of(go, "workspace/didCreateFiles"))
+    end)
+
+    -- gopls returns the package clause as a workspace/applyEdit, and
+    -- vim.lsp.util.apply_text_edits applies it to a buffer without ever writing
+    -- it. For a file the user has not opened that leaves the clause in a hidden
+    -- modified buffer while the file on disk stays empty -- indistinguishable,
+    -- from the user's side, from gopls never having stubbed it.
+    describe("stub persistence", function()
+      local path
+
+      before_each(function()
+        path = env_root .. "/stub.go"
+        assert(io.open(path, "w")):close()
+      end)
+
+      after_each(function()
+        local buf = vim.fn.bufnr(path)
+        if buf ~= -1 then
+          pcall(vim.api.nvim_buf_delete, buf, { force = true })
+        end
+      end)
+
+      --- Stand in for gopls answering didCreateFiles: load the file into a
+      --- buffer and insert the clause, exactly as apply_text_edits leaves it.
+      local function server_stubs_the_clause()
+        local buf = vim.uri_to_bufnr(vim.uri_from_fname(path))
+        vim.fn.bufload(buf)
+        vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "package stub", "" })
+        return buf
+      end
+
+      it("writes the stub to disk while the new file is in no window", function()
+        local go =
+          fake_client({ id = 1, root_dir = env_root, server_capabilities = GO_CREATE_CAPS })
+        clients = { go }
+        M.on_created(path)
+        flush()
+        server_stubs_the_clause()
+        flush()
+        assert.are.equal("package stub\n\n", read_file(path))
+      end)
+
+      it("leaves the buffer alone once the user has the file open in a window", function()
+        local go =
+          fake_client({ id = 1, root_dir = env_root, server_capabilities = GO_CREATE_CAPS })
+        clients = { go }
+        M.on_created(path)
+        flush()
+        vim.cmd("edit " .. vim.fn.fnameescape(path))
+        local buf = server_stubs_the_clause()
+        flush()
+        assert.is_true(vim.bo[buf].modified)
+        assert.are.equal("", read_file(path))
+      end)
+
+      -- gopls is the only thing that knows which `package` line a new .go file
+      -- wants, and in a fresh session it is usually not running yet: open the
+      -- tree, create a file before opening any Go buffer, and there is no
+      -- client to ask. The create waits for one instead of being dropped.
+      it("asks the first covering server to start after an unstubbable create", function()
+        clients = {} -- nothing running when the file is created
+        M.on_created(path)
+        flush()
+        local go =
+          fake_client({ id = 1, root_dir = env_root, server_capabilities = GO_CREATE_CAPS })
+        clients = { go }
+        M.on_client_init(go)
+        flush()
+        assert.are.equal(1, #notifications_of(go, "workspace/didCreateFiles"))
+        assert.are.same(
+          { files = { { uri = vim.uri_from_fname(path) } } },
+          notifications_of(go, "workspace/didCreateFiles")[1].params
+        )
+      end)
+
+      it("drops a waiting create once the file has content of its own", function()
+        clients = {}
+        M.on_created(path)
+        flush()
+        local fd = assert(io.open(path, "w"))
+        fd:write("package written_by_hand\n")
+        fd:close()
+        local go =
+          fake_client({ id = 1, root_dir = env_root, server_capabilities = GO_CREATE_CAPS })
+        clients = { go }
+        M.on_client_init(go)
+        flush()
+        assert.are.equal(0, #notifications_of(go, "workspace/didCreateFiles"))
+      end)
+
+      it("does not wait on a create a covering server already declined", function()
+        local notes = env_root .. "/notes.txt"
+        assert(io.open(notes, "w")):close()
+        local first =
+          fake_client({ id = 1, root_dir = env_root, server_capabilities = GO_CREATE_CAPS })
+        clients = { first }
+        M.on_created(notes) -- covered, and gopls's **/*.go filter declines it
+        flush()
+        local second =
+          fake_client({ id = 2, root_dir = env_root, server_capabilities = GO_CREATE_CAPS })
+        clients = { first, second }
+        M.on_client_init(second)
+        flush()
+        assert.are.equal(0, #notifications_of(second, "workspace/didCreateFiles"))
+      end)
+
+      it("does not write for a path no server was asked to stub", function()
+        local plain = fake_client({ id = 1, root_dir = env_root })
+        clients = { plain }
+        M.on_created(path)
+        flush()
+        server_stubs_the_clause()
+        flush()
+        assert.are.equal("", read_file(path))
+      end)
     end)
   end)
 
@@ -520,14 +674,15 @@ describe("config.lsp_fs_sync", function()
       handlers.FolderCreated({ folder_name = "/ws/server/pkg2" })
       handlers.WillRenameNode({ old_name = "/ws/server/e.go", new_name = "/ws/server/f.go" })
       handlers.NodeRenamed({ old_name = "/ws/server/c.go", new_name = "/ws/server/d.go" })
+      flush() -- the two creates are coalesced onto the next tick, so they land last
 
       local watched = notifications_of(go, "workspace/didChangeWatchedFiles")
       assert.are.equal(5, #watched)
       assert.are.equal(vim.uri_from_fname("/ws/server/a.go"), watched[1].params.changes[1].uri)
       assert.are.equal(vim.uri_from_fname("/ws/server/pkg"), watched[2].params.changes[1].uri)
-      assert.are.equal(vim.uri_from_fname("/ws/server/b.go"), watched[3].params.changes[1].uri)
-      assert.are.equal(vim.uri_from_fname("/ws/server/pkg2"), watched[4].params.changes[1].uri)
-      assert.are.equal(2, #watched[5].params.changes)
+      assert.are.equal(2, #watched[3].params.changes)
+      assert.are.equal(vim.uri_from_fname("/ws/server/b.go"), watched[4].params.changes[1].uri)
+      assert.are.equal(vim.uri_from_fname("/ws/server/pkg2"), watched[5].params.changes[1].uri)
 
       -- WillRenameNode plumbing: old/new must land in oldUri/newUri, in order.
       assert.are.equal(1, #go.requests)

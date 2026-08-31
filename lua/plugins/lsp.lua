@@ -432,10 +432,25 @@ return {
       -- for a quiet UI thread. mdx_analyzer already sets this for its own reason;
       -- merged before cfg.capabilities so any explicit per-server value wins.
       local no_watch = { workspace = { didChangeWatchedFiles = { dynamicRegistration = false } } }
+
+      -- A tree create with no server yet to ask (a fresh session, the tree
+      -- open, no Go buffer) leaves gopls's package clause owed. lsp_fs_sync
+      -- holds those and collects on them here, at on_init rather than
+      -- LspAttach: by LspAttach the buffer that started the server has already
+      -- gone out as didOpen, and gopls will not stub a file it has open. See
+      -- docs/lsp-fs-sync.md.
+      local fs_sync = require("config.lsp_fs_sync")
       for name, cfg in pairs(servers) do
         cfg.capabilities = blink.get_lsp_capabilities(
           vim.tbl_deep_extend("force", file_ops_caps, no_watch, cfg.capabilities or {})
         )
+        local server_on_init = cfg.on_init
+        cfg.on_init = function(client, ...)
+          fs_sync.on_client_init(client)
+          if server_on_init then
+            return server_on_init(client, ...)
+          end
+        end
         vim.lsp.config(name, cfg)
         vim.lsp.enable(name)
       end
