@@ -36,6 +36,10 @@ beyond the code.
   *faster* local model makes that worse rather than better, and the two-part fix
   (trailing-edge pacing plus a buffer-freshness guard) that neither half achieves
   alone.
+- **[ai-accept-multicursor.md](ai-accept-multicursor.md).** Why accepting an AI
+  suggestion with several cursors alive put the text at one cursor only, why
+  `<Esc>` never caught the others up (multicursor replays the *redo record*, and
+  an API buffer edit never enters it), and the one-primitive swap that fixes it.
 - **[js-toolchain.md](js-toolchain.md).** How a JavaScript/TypeScript project's
   formatter and linter are detected, why prettier no longer runs in projects that
   never configured it, and how to diagnose which tool owns a buffer. Also the

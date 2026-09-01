@@ -172,6 +172,20 @@ return {
       )
     end
 
+    -- Multiple cursors: minuet's accept writes the suggestion with
+    -- nvim_buf_set_text, and an API edit never enters the redo record, which is
+    -- exactly what multicursor replays at the other cursors. Without this the
+    -- suggestion lands at the main cursor only and <Esc> never catches the rest
+    -- up. Re-expresses that one insertion as nvim_paste while cursors are
+    -- alive; the single-cursor path is untouched. Full rationale, and why
+    -- keymap.accept above must stay nil, in lua/config/minuet_multicursor.lua.
+    if not require("config.minuet_multicursor").install() then
+      vim.notify(
+        "minuet multicursor accept did not attach — AI accepts will land at one cursor only",
+        vim.log.levels.WARN
+      )
+    end
+
     -- Establish the initial state now that minuet is up. bootstrap() first checks
     -- that Ollama is installed: if not, it starts disabled (blink keeps its own LSP
     -- ghost text) and says so once; otherwise default-on means blink's inline ghost

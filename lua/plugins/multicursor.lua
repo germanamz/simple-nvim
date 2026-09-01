@@ -88,18 +88,27 @@ return {
       end, { desc = "Collapse to one cursor" })
 
       -- Auto-pairs and multiple cursors do not mix. multicursor replays an
-      -- insert at the other cursors from `getreg(".")` (the last-inserted-text
-      -- register), and mini.pairs adds the closing half through an `expr`
-      -- mapping that returns the pair plus a cursor-moving `<C-g>U<Left>`. A
-      -- single-line `{` still replays fine, but the moment a `<CR>` lands
-      -- inside the pair the register stops holding the whole insert, and the
-      -- other cursors receive a truncated replay: the brackets vanish and the
-      -- remaining text is dropped at the wrong column.
+      -- insert at the other cursors rather than re-applying it: every cursor
+      -- added by the keymaps above is in mode "n" (cursor-manager.lua:2295-2303
+      -- normalises them), so each one replays with dot-repeat —
+      -- `feedkeys(".", "nx")` at input-manager.lua:188. (The `getreg(".")`
+      -- branch beside it, :191-193, only runs for a cursor still holding a
+      -- selection at insert exit.) mini.pairs adds the closing half through an
+      -- `expr` mapping that returns the pair plus a cursor-moving
+      -- `<C-g>U<Left>`. A single-line `{` still replays fine, but the moment a
+      -- `<CR>` lands inside the pair the recorded change stops describing the
+      -- whole insert, and the other cursors receive a truncated replay: the
+      -- brackets vanish and the remaining text is dropped at the wrong column.
       --
       -- Mapping the openers to themselves (buffer-locally, for as long as the
       -- cursors live) shadows mini.pairs' global expr mappings, so typing `{`
       -- inserts one literal `{` at every cursor. You close the pair yourself
       -- while multi-cursor editing; normal single-cursor editing is untouched.
+      --
+      -- Accepting an AI suggestion is the same failure class from the other
+      -- direction — minuet inserts by API, so there is no recorded change to
+      -- replay at all. That one is fixed at the minuet end, in
+      -- lua/config/minuet_multicursor.lua.
       for _, opener in ipairs({ "(", "[", "{", '"', "'", "`" }) do
         layerSet("i", opener, opener, { desc = "Literal " .. opener })
       end

@@ -203,4 +203,65 @@ describe("smoke: multiple cursors (multicursor.nvim)", function()
       assert.are.equal(opener, insert_maps[opener], "opener not neutralised: " .. opener)
     end
   end)
+
+  -- The other half of the multicursor/insert story: an accepted AI suggestion.
+  -- These pin the two coupling points config.minuet_multicursor depends on
+  -- against the REAL minuet, since the unit spec stubs both plugins.
+  describe("AI accept (config.minuet_multicursor)", function()
+    local vt
+
+    before_each(function()
+      vim.opt.rtp:prepend(vim.fn.stdpath("data") .. "/lazy/minuet-ai.nvim")
+      local ok, mod = pcall(require, "minuet.virtualtext")
+      vt = ok and mod or nil
+    end)
+
+    it("finds the accept minuet actually exposes", function()
+      assert.is_truthy(vt, "minuet.virtualtext did not load")
+      assert.are.equal("function", type(vt.action.accept))
+      -- <C-l> dispatches through action.accept by lookup, so wrapping accept
+      -- covers it too (virtualtext.lua:425-427).
+      assert.are.equal("function", type(vt.action.accept_line))
+    end)
+
+    -- Order-independent: another smoke spec may already have loaded minuet and
+    -- run its config(), which installs the wrapper. Restore a bare accept
+    -- first, so this asserts the wrapping itself rather than the load order.
+    it("wraps that accept, once", function()
+      local mm = require("config.minuet_multicursor")
+      local previous, was_marked = vt.action.accept, vt.action.__multicursor_paste
+
+      local bare = function() end
+      vt.action.accept, vt.action.__multicursor_paste = bare, nil
+
+      assert.is_true(mm.install())
+      local wrapped = vt.action.accept
+      assert.are_not.equal(bare, wrapped)
+      assert.is_true(vt.action.__multicursor_paste)
+
+      -- A second install (`:Lazy reload minuet-ai.nvim`) must not stack a
+      -- second wrapper, and must still report success — lua/plugins/minuet.lua
+      -- warns on false.
+      assert.is_true(mm.install())
+      assert.are.equal(wrapped, vt.action.accept)
+
+      vt.action.accept, vt.action.__multicursor_paste = previous, was_marked
+    end)
+
+    -- set_keymaps captures action.accept BY VALUE (virtualtext.lua:558), so a
+    -- key bound to virtualtext.keymap.accept would bypass the wrapper and
+    -- reproduce the original bug. lua/plugins/minuet.lua leaves it nil and the
+    -- smart <Tab> in lua/plugins/completion.lua owns accept instead.
+    it("leaves minuet's own accept keymap unbound", function()
+      local spec = require("plugins.minuet")
+      local found
+      for _, key in ipairs(spec.keys or {}) do
+        if key[1] == "<leader>ua" then
+          found = true
+        end
+      end
+      assert.is_true(found, "minuet spec no longer declares its AI keys")
+      assert.is_nil(require("minuet").config.virtualtext.keymap.accept)
+    end)
+  end)
 end)
