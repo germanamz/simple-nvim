@@ -99,6 +99,45 @@ describe("config.options", function()
     vim.api.nvim_win_close(win, true)
   end)
 
+  it("makes Enter continue comments in code buffers via config.comments", function()
+    require("config.options")
+    vim.cmd("new")
+    local win = vim.api.nvim_get_current_win()
+    local buf = vim.api.nvim_get_current_buf()
+    vim.bo[buf].filetype = "go"
+
+    -- the bundled go ftplugin leaves fo=cqj; the FileType policy adds r and
+    -- keeps o/t out (see lua/config/comments.lua)
+    local fo = vim.bo[buf].formatoptions
+    assert.is_not_nil(fo:find("r", 1, true), "r missing from " .. fo)
+    assert.is_nil(fo:find("o", 1, true), "o present in " .. fo)
+    assert.is_nil(fo:find("t", 1, true), "t present in " .. fo)
+
+    vim.api.nvim_win_close(win, true)
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end)
+
+  it("maps insert <CR> and gqc to config.comments", function()
+    require("config.options")
+    local cr, gqc
+    for _, m in ipairs(vim.api.nvim_get_keymap("i")) do
+      if m.lhs == "<CR>" then
+        cr = m
+      end
+    end
+    for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
+      if m.lhs == "gqc" then
+        gqc = m
+      end
+    end
+    assert.is_not_nil(cr, "no insert <CR> map")
+    -- must be an expr map returning keys: blink's fallback schedules a
+    -- non-expr callback and gets no newline from it
+    assert.are.equal(1, cr.expr)
+    assert.is_not_nil(gqc, "no gqc map")
+    assert.is_not_nil(gqc.desc and gqc.desc:lower():find("comment"))
+  end)
+
   it("binds <leader>bd to delete the current buffer", function()
     vim.g.mapleader = " "
     require("config.options")

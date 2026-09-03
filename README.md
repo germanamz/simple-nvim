@@ -92,6 +92,7 @@ sudo apt install -y neovim git build-essential ripgrep fd-find nodejs npm golang
 - **LSP:** native `vim.lsp` + `mason.nvim` + `mason-lspconfig.nvim` + `nvim-lspconfig` (defaults only)
 - **Git:** `gitsigns.nvim` (signs, blame, hunk navigation, review-base diffing)
 - **Markdown:** `<leader>mp` previews the file in a **cmux markdown panel** — a pane of the surrounding terminal that renders the file properly and re-renders it on every save, rather than anything Neovim draws. Works from the buffer and from the file tree, and every preview tabs into one pane instead of stacking splits. Needs cmux (the terminal this config is used in); anywhere else the keymap says so and no-ops. Editing stays in raw markdown.
+- **Comments:** Enter inside a comment continues it with the same leader (`// `, `-- `, `# `) in every code filetype, Go included (its bundled ftplugin never enabled that). Enter again on the empty leader ends the comment and leaves a code line at the same indent; `o`/`O` never add a leader. `gqc` reflows the comment block under the cursor to the project's editorconfig `max_line_length` (79 columns without one), and `gq` over comment lines does the same instead of silently running the code formatter. See [docs/comments.md](docs/comments.md).
 - **Discoverability:** `which-key.nvim` (`<leader>K` shows every mapping)
 
 ## Key bindings

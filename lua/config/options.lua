@@ -280,6 +280,34 @@ vim.api.nvim_create_autocmd("FileType", {
   end,
 })
 
+-- Comment continuation and reflow — lua/config/comments.lua has the rules.
+-- The 'formatoptions' policy runs from a catch-all FileType autocmd: the
+-- runtime registers its ftplugin loader before init.lua runs, so this fires
+-- after the ftplugin and can undo what it set (go.vim never adds `r`;
+-- lua.vim adds `o`). Both keys route through the module lazily. <CR> must be
+-- an expr map that returns keys: blink's fallback schedules a non-expr
+-- callback and gets no newline from it, and multicursor replays the redo
+-- record, which an API edit never enters. mini.pairs only installs its own
+-- <CR> when none exists, so pair splitting is delegated to it from cr().
+vim.api.nvim_create_autocmd("FileType", {
+  group = vim.api.nvim_create_augroup("comments_policy", { clear = true }),
+  callback = function(args)
+    require("config.comments").apply(args.buf)
+  end,
+})
+
+vim.keymap.set("i", "<CR>", function()
+  return require("config.comments").cr()
+end, {
+  expr = true,
+  replace_keycodes = false,
+  desc = "Newline; on a fresh comment leader, end the comment",
+})
+
+vim.keymap.set("n", "gqc", function()
+  require("config.comments").reflow()
+end, { desc = "Reflow comment block" })
+
 -- Re-apply / tear down the paragraph gutter as windows show markdown or not.
 -- Gate the require so a session that never touches markdown doesn't load the
 -- module: only enter it for a markdown buffer, or to detach a window that the

@@ -375,11 +375,20 @@ once.
 | `gu` / `gU`   | lowercase / uppercase over motion                 |
 | `>>` / `<<`   | indent / dedent line                              |
 | `==`          | re-indent line                                    |
-| `gq{motion}`  | reformat (uses formatexpr → conform / LSP / `gq`) |
+| `gq{motion}`  | reformat (formatexpr → conform; comment-only ranges → Neovim's own) |
+| `gqc`         | reflow the comment block under the cursor         |
+| `gcc` / `gc{motion}` | toggle line comments (builtin)             |
 | `<Space>F`    | format buffer or visual selection (conform)       |
 
 In insert mode: `<C-w>` deletes last word, `<C-u>` deletes to start of line,
 `<C-h>` is backspace, `<C-o>` runs one normal-mode command then returns.
+
+`<CR>` inside a comment continues it with the same leader, in every code
+filetype. On the empty leader it just inserted (`// `), `<CR>` ends the comment
+instead and leaves a code line at that indent; a bare `//` you typed keeps
+going, since that is Go's paragraph separator, and the next line gets a fresh
+`// `. `o` / `O` never add a leader. Comments wrap as you type only where the
+project's editorconfig sets `max_line_length`. See [comments.md](comments.md).
 
 ### Surround (mini.surround)
 
@@ -881,14 +890,18 @@ comments are not numbered.
 
 ## 19. Formatting
 
-`conform.nvim` drives formatting. `formatexpr` is set to conform's globally,
-so `gq{motion}` uses the configured formatter. Falls back to LSP for
+`conform.nvim` drives formatting. `formatexpr` is `config.comments`' wrapper
+around conform's, set globally: `gq{motion}` uses the configured formatter,
+except over a range that is only comment lines, which Neovim's internal
+formatter reflows at `textwidth` (gofmt, stylua and friends never rewrap a
+comment, so `gq` on one used to be a silent no-op). Falls back to LSP for
 filetypes without a conform entry.
 
 | Keys         | Action                                          |
 | ------------ | ----------------------------------------------- |
 | `<Space>F`   | format buffer (or visual selection) on demand   |
 | `gq{motion}` | format one motion's worth via `formatexpr`      |
+| `gqc`        | reflow the comment block under the cursor ([comments.md](comments.md)) |
 | `:ConformInfo` | which formatter applies to current buffer     |
 
 Format-on-save is on: `BufWritePre` runs conform synchronously (1000 ms cap, LSP

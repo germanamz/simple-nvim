@@ -54,6 +54,10 @@ beyond the code.
   core filetype mapping, what each half of that toolchain then does with a
   `build.zig.zon` (they disagree), why there is no lint pass, and the version
   coupling between a mason-pinned `zls` and the `zig` on `PATH`.
+- **[comments.md](comments.md).** Enter continues a comment in every code
+  filetype (Go's bundled ftplugin never did), Enter on the empty leader ends
+  it, and `gqc` reflows a comment block: the one thing `gq` could not do while
+  conform owned `formatexpr`, and why `gqip` must not be used for it.
 - **[superpowers/](superpowers/README.md).** The engineering record: how the
   larger pieces were designed and what actually shipped. Start with
   [testing.md](superpowers/testing.md) before changing anything — it covers the

@@ -2,12 +2,15 @@
 -- formatter list comes from lua/config/formatters.lua (its `by_ft` map).
 --
 -- Behavior:
---   • formatexpr is set globally to conform's so `gq` reflows via the
---     configured formatter. Neovim 0.11's default LspAttach also sets
---     formatexpr per-buffer; for filetypes we have a conform formatter for,
---     re-override after attach so conform wins. lsp_format = "fallback" means
---     conform.format() falls back to LSP for filetypes without a conform
---     entry.
+--   • formatexpr is set globally to config.comments' wrapper around conform's,
+--     so `gq` reflows via the configured formatter — except over a range that
+--     is nothing but comment lines, which goes to Neovim's internal,
+--     'comments'-aware formatter instead (conform's formatexpr never falls
+--     back to it, and gofmt/stylua/rustfmt do not rewrap comments). Neovim
+--     0.11's default LspAttach also sets formatexpr per-buffer; for filetypes
+--     we have a conform formatter for, re-override after attach so the wrapper
+--     wins. lsp_format = "fallback" means conform.format() falls back to LSP
+--     for filetypes without a conform entry.
 --   • <leader>F formats the current buffer (or visual selection) on demand.
 --   • Format-on-save: BufWritePre runs conform synchronously (1000ms cap —
 --     black needs ~150ms warm, more cold — then the write proceeds anyway).
@@ -56,14 +59,15 @@ return {
       end,
     })
 
-    vim.o.formatexpr = "v:lua.require'conform'.formatexpr()"
+    local formatexpr = "v:lua.require'config.comments'.formatexpr()"
+    vim.o.formatexpr = formatexpr
 
     vim.api.nvim_create_autocmd("LspAttach", {
       group = vim.api.nvim_create_augroup("conform_formatexpr", { clear = true }),
       callback = function(args)
         local ft = vim.bo[args.buf].filetype
         if formatters.by_ft[ft] then
-          vim.bo[args.buf].formatexpr = "v:lua.require'conform'.formatexpr()"
+          vim.bo[args.buf].formatexpr = formatexpr
         end
       end,
     })
