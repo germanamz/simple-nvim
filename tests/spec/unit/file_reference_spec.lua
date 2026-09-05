@@ -89,3 +89,38 @@ describe("config.file_reference.reference", function()
     assert.is_nil(ref.reference(vim.api.nvim_create_buf(false, true), 1))
   end)
 end)
+
+describe("config.file_reference.relpath", function()
+  local ref = require("config.file_reference")
+  local git_fixture = require("helpers.git_fixture")
+
+  local prev_cwd
+
+  before_each(function()
+    prev_cwd = vim.fn.getcwd()
+  end)
+
+  after_each(function()
+    vim.cmd.cd(prev_cwd)
+  end)
+
+  --- A buffer named `path` without going through :edit (which would attach an
+  --- LSP client for a .lua file).
+  local function named_buf(path)
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, path)
+    return buf
+  end
+
+  it("is relative to the work tree", function()
+    local root = git_fixture.repo({
+      commits = { { files = { ["a/b.lua"] = "return 1\n" }, message = "init" } },
+    })
+    vim.cmd.cd(root)
+    assert.are.equal("a/b.lua", ref.relpath(named_buf(root .. "/a/b.lua")))
+  end)
+
+  it("is nil for a buffer with no file", function()
+    assert.is_nil(ref.relpath(vim.api.nvim_create_buf(false, true)))
+  end)
+end)

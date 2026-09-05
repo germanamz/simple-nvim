@@ -56,13 +56,16 @@ local function real(dir)
   return dir and vim.fn.resolve(dir) or nil
 end
 
---- The reference string for `buf` at line `first` (through `last`, when a
---- visual selection spans more than one line). nil for a buffer with no file.
+--- The path a reference for `buf` should use: relative to the project root that
+--- M.base picks, or absolute when the file lives outside both the cwd and any
+--- work tree. nil for a buffer with no file.
+---
+--- Split out of M.reference so callers that need a different spelling of the
+--- reference (the agent payload wants `@path#L39-41`) share this ladder rather
+--- than reimplementing it.
 ---@param buf integer
----@param first integer 1-indexed line
----@param last integer|nil 1-indexed line, when the reference covers a range
 ---@return string|nil
-function M.reference(buf, first, last)
+function M.relpath(buf)
   local name = vim.api.nvim_buf_get_name(buf)
   if name == "" then
     return nil
@@ -74,7 +77,20 @@ function M.reference(buf, first, last)
   local abs = vim.fn.resolve(vim.fn.fnamemodify(name, ":p"))
   local cwd = vim.fn.resolve(vim.fn.getcwd())
   local base = M.base(abs, real(git.buf_root(buf)), cwd, real(git.root(cwd)))
-  local rel = base and path.relative(abs, base) or abs
+  return base and path.relative(abs, base) or abs
+end
+
+--- The reference string for `buf` at line `first` (through `last`, when a
+--- visual selection spans more than one line). nil for a buffer with no file.
+---@param buf integer
+---@param first integer 1-indexed line
+---@param last integer|nil 1-indexed line, when the reference covers a range
+---@return string|nil
+function M.reference(buf, first, last)
+  local rel = M.relpath(buf)
+  if not rel then
+    return nil
+  end
   if last and last > first then
     return string.format("%s:%d-%d", rel, first, last)
   end
