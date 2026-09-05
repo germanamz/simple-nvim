@@ -107,6 +107,43 @@ function M.clear()
   queue = {}
 end
 
+--- `@path#Lfirst-last` for one record. Single `L`, hyphen range, and one number
+--- when the range covers one line -- the spelling Claude's own at_mentioned
+--- handler emits, so the payload resolves as a file mention instead of prose.
+---@param item table
+---@return string
+local function mention(item)
+  if item.last and item.last > item.first then
+    return string.format("@%s#L%d-%d", item.file, item.first, item.last)
+  end
+  return string.format("@%s#L%d", item.file, item.first)
+end
+
+--- The text the agent receives. Pure over `items` so it is testable without a
+--- buffer in sight.
+---@param items table[]
+---@return string
+function M.format(items)
+  local out = { string.format("Review comments (%d):", #items) }
+  for i, item in ipairs(items) do
+    out[#out + 1] = ""
+    out[#out + 1] = string.format("%d. %s", i, mention(item))
+    for line in (item.text .. "\n"):gmatch("([^\n]*)\n") do
+      out[#out + 1] = "   " .. line
+    end
+  end
+  return table.concat(out, "\n")
+end
+
+--- The formatted queue, or nil when there is nothing to send.
+---@return string|nil
+function M.payload()
+  if #queue == 0 then
+    return nil
+  end
+  return M.format(M.resolve())
+end
+
 --- Test seam: the raw queue, for specs that need to inspect marks.
 ---@return ReviewComment[]
 function M._queue()

@@ -65,3 +65,44 @@ describe("config.review_comments queue", function()
     assert.are.equal(0, rc.count())
   end)
 end)
+
+-- The `@path#L39-41` spelling is not cosmetic: it is exactly what Claude's own
+-- at_mentioned handler emits into the prompt box, so a pasted or typed payload
+-- resolves as a real file mention rather than being read as prose. Single `L`,
+-- hyphen range, one number when the range is one line.
+describe("config.review_comments.format", function()
+  it("numbers each comment and uses the at-mention spelling", function()
+    local text = rc.format({
+      { file = "lua/config/lsp.lua", first = 39, last = 41, text = "use util.git.buf_root" },
+      { file = "init.lua", first = 5, text = "stale comment" },
+    })
+    assert.are.equal(
+      table.concat({
+        "Review comments (2):",
+        "",
+        "1. @lua/config/lsp.lua#L39-41",
+        "   use util.git.buf_root",
+        "",
+        "2. @init.lua#L5",
+        "   stale comment",
+      }, "\n"),
+      text
+    )
+  end)
+
+  it("indents every line of a multi-line comment", function()
+    local text = rc.format({ { file = "a.lua", first = 1, text = "first\nsecond" } })
+    assert.is_truthy(text:find("\n   first\n   second", 1, true))
+  end)
+
+  it("collapses a range that resolved to a single line", function()
+    local text = rc.format({ { file = "a.lua", first = 7, last = 7, text = "x" } })
+    assert.is_truthy(text:find("@a.lua#L7", 1, true))
+    assert.is_nil(text:find("#L7-7", 1, true))
+  end)
+
+  it("has no payload for an empty queue", function()
+    rc.clear()
+    assert.is_nil(rc.payload())
+  end)
+end)
