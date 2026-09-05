@@ -834,9 +834,9 @@ agent in one paste. The queue lives in memory and dies with the session.
 | Keys | Action |
 | --- | --- |
 | `<Space>ac` | Comment on the cursor line, or the visual selection's span |
-| `<Space>al` | List queued comments — jump to one, edit it, or drop it |
+| `<Space>al` | List queued comments — jump to one, edit it, drop it, or clear them all |
 | `<Space>as` | Copy the batch to the clipboard |
-| `<Space>ax` | Discard the batch |
+| `<Space>ax` | Discard the batch (asks first) |
 
 Each comment is written as `@path/to/file.lua#L39-41` followed by your text —
 the spelling Claude Code's own at-mention produces, so a pasted batch resolves

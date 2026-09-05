@@ -325,6 +325,61 @@ describe("config.review_comments.flush", function()
   end)
 end)
 
+-- Discarding is the one irreversible thing here: the queue is memory-only, so a
+-- stray <leader>ax (one key from <leader>ac and <leader>as) destroys a whole
+-- review with nothing to undo it. Same reason <leader>hr confirms a gitsigns
+-- reset while a review base is active.
+describe("config.review_comments.discard confirmation", function()
+  local buf
+
+  before_each(function()
+    rc.clear()
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, vim.fn.getcwd() .. "/confirmable.lua")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two" })
+  end)
+
+  after_each(function()
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  end)
+
+  --- Run `fn` with vim.fn.confirm answering `answer`, recording its prompt.
+  local function with_confirm(answer, fn)
+    local real, seen = vim.fn.confirm, {}
+    vim.fn.confirm = function(msg, ...)
+      seen[#seen + 1] = msg
+      return answer
+    end
+    local ok, err = pcall(fn)
+    vim.fn.confirm = real
+    if not ok then
+      error(err)
+    end
+    return seen
+  end
+
+  it("keeps the queue when the confirmation is declined", function()
+    rc.push(buf, 1, nil, "a")
+    rc.push(buf, 2, nil, "b")
+    local asked = with_confirm(2, rc.discard)
+    assert.are.equal(1, #asked)
+    assert.is_truthy(asked[1]:find("2", 1, true))
+    assert.are.equal(2, rc.count())
+  end)
+
+  it("empties the queue when the confirmation is accepted", function()
+    rc.push(buf, 1, nil, "a")
+    with_confirm(1, rc.discard)
+    assert.are.equal(0, rc.count())
+  end)
+
+  -- Nothing to lose, so nothing to ask about.
+  it("does not ask when the queue is already empty", function()
+    local asked = with_confirm(2, rc.discard)
+    assert.are.equal(0, #asked)
+  end)
+end)
+
 describe("config.review_comments.discard", function()
   it("empties the queue and releases the extmarks", function()
     rc.clear()
@@ -335,7 +390,15 @@ describe("config.review_comments.discard", function()
     rc.push(buf, 2, nil, "b")
     assert.are.equal(2, rc.count())
 
-    rc.discard()
+    local real = vim.fn.confirm
+    vim.fn.confirm = function()
+      return 1
+    end
+    local ok, err = pcall(rc.discard)
+    vim.fn.confirm = real
+    if not ok then
+      error(err)
+    end
 
     assert.are.equal(0, rc.count())
     assert.is_nil(rc.payload())
@@ -445,5 +508,48 @@ describe("config.review_comments.list", function()
       with_select("Drop", rc.list)
     end)
     assert.are.equal(0, rc.count())
+  end)
+
+  -- Clear all routes through discard(), so it inherits the confirmation rather
+  -- than opening a second, unguarded way to destroy the queue.
+  it("clears the whole queue from the action menu, once confirmed", function()
+    local buf = named("clearall.txt", 3)
+    rc.push(buf, 1, nil, "a")
+    rc.push(buf, 2, nil, "b")
+    local real, asked = vim.fn.confirm, 0
+    vim.fn.confirm = function()
+      asked = asked + 1
+      return 1
+    end
+    local ok, err = pcall(function()
+      with_notify(function()
+        with_select("Clear all", rc.list)
+      end)
+    end)
+    vim.fn.confirm = real
+    if not ok then
+      error(err)
+    end
+    assert.are.equal(1, asked)
+    assert.are.equal(0, rc.count())
+  end)
+
+  it("keeps the queue when Clear all is declined", function()
+    local buf = named("keepall.txt", 3)
+    rc.push(buf, 1, nil, "a")
+    local real = vim.fn.confirm
+    vim.fn.confirm = function()
+      return 2
+    end
+    local ok, err = pcall(function()
+      with_notify(function()
+        with_select("Clear all", rc.list)
+      end)
+    end)
+    vim.fn.confirm = real
+    if not ok then
+      error(err)
+    end
+    assert.are.equal(1, rc.count())
   end)
 end)

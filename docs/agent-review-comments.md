@@ -6,13 +6,19 @@ agent opens exactly the code you meant.
 
 ```
 <leader>ac   comment on the cursor line, or the visual selection's span
-<leader>al   list queued comments — jump to one, edit it, or drop it
+<leader>al   list queued comments — jump to one, edit it, drop it, clear them all
 <leader>as   copy the batch to the clipboard
 <leader>ax   discard the batch
 ```
 
 The queue lives in memory and dies with the session. No comment is ever written
 to disk.
+
+Discarding is therefore the one irreversible action here, and `<leader>ax` sits
+one key from `<leader>ac` and `<leader>as`, so it confirms first — the same
+guard `<leader>hr` puts in front of a gitsigns reset while a review base is
+active. The list's "Clear all" routes through the same function rather than
+becoming a second, unguarded way to destroy the queue.
 
 ## Responsibilities
 

@@ -214,31 +214,39 @@ function M.list()
     if not choice then
       return
     end
-    vim.ui.select({ "Jump", "Edit", "Drop" }, { prompt = choice.file }, function(action)
-      if action == "Edit" then
-        -- Seeded with the current text so a typo is a correction, not a retype.
-        vim.ui.input({ prompt = "Review comment: ", default = choice.text }, function(text)
-          if not text or vim.trim(text) == "" then
+    vim.ui.select(
+      { "Jump", "Edit", "Drop", "Clear all" },
+      { prompt = choice.file },
+      function(action)
+        if action == "Clear all" then
+          -- Through discard() on purpose: one destructive path, so this inherits
+          -- the confirmation instead of becoming a second unguarded way out.
+          M.discard()
+        elseif action == "Edit" then
+          -- Seeded with the current text so a typo is a correction, not a retype.
+          vim.ui.input({ prompt = "Review comment: ", default = choice.text }, function(text)
+            if not text or vim.trim(text) == "" then
+              return
+            end
+            queue[index].text = vim.trim(text)
+          end)
+        elseif action == "Jump" then
+          local target = queue[index]
+          if not vim.api.nvim_buf_is_valid(target.bufnr) then
+            vim.notify("Buffer for " .. choice.file .. " is gone", vim.log.levels.WARN)
             return
           end
-          queue[index].text = vim.trim(text)
-        end)
-      elseif action == "Jump" then
-        local target = queue[index]
-        if not vim.api.nvim_buf_is_valid(target.bufnr) then
-          vim.notify("Buffer for " .. choice.file .. " is gone", vim.log.levels.WARN)
-          return
+          vim.api.nvim_set_current_buf(target.bufnr)
+          -- An unloaded buffer has no mark left, so choice.first is the push-time
+          -- snapshot and the file it reloads from may since have lost that line.
+          local count = vim.api.nvim_buf_line_count(0)
+          vim.api.nvim_win_set_cursor(0, { math.max(1, math.min(choice.first, count)), 0 })
+        elseif action == "Drop" then
+          M.drop(index)
+          vim.notify(string.format("Dropped (%d left)", #queue))
         end
-        vim.api.nvim_set_current_buf(target.bufnr)
-        -- An unloaded buffer has no mark left, so choice.first is the push-time
-        -- snapshot and the file it reloads from may since have lost that line.
-        local count = vim.api.nvim_buf_line_count(0)
-        vim.api.nvim_win_set_cursor(0, { math.max(1, math.min(choice.first, count)), 0 })
-      elseif action == "Drop" then
-        M.drop(index)
-        vim.notify(string.format("Dropped (%d left)", #queue))
       end
-    end)
+    )
   end)
 end
 
@@ -271,6 +279,16 @@ end
 --- Throw the batch away.
 function M.discard()
   local n = #queue
+  if n == 0 then
+    vim.notify("No review comments queued")
+    return
+  end
+  -- The queue is memory-only, so this is the one irreversible action here, and
+  -- <leader>ax sits one key from <leader>ac and <leader>as. Confirm it for the
+  -- same reason <leader>hr does while a review base is active.
+  if vim.fn.confirm(string.format("Discard %d review comment(s)?", n), "&Yes\n&No", 2) ~= 1 then
+    return
+  end
   M.clear()
   vim.notify(string.format("Discarded %d review comment(s)", n))
 end
