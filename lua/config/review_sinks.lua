@@ -123,6 +123,26 @@ local function resolve_surface(bin, on_done)
   end)
 end
 
+--- The payload as `cmux send` will not misread it.
+---
+--- `cmux send` treats part of its text argument as keystrokes: a real newline
+--- or carriage return, and the two-character sequences `\n` and `\r`, all
+--- arrive as Enter, and `\t` (real or escaped) as Tab. Left alone, a batch --
+--- which is always multi-line, and whose prose is whatever the reviewer typed
+--- -- submits itself piece by piece into the agent's prompt, destroying the
+--- draft-not-submit guarantee that `<leader>as` exists for, and fires Tabs into
+--- the agent's TUI. Escaping does not help: cmux has no escape for a backslash,
+--- so `\\n` still ends in an Enter (verified against cmux 0.64.22). The only
+--- neutralizer is to break the pair, so a zero-width space is parted between
+--- the backslash and its letter: invisible in the prompt, and it carries no
+--- meaning into the text the agent reads.
+---@param text string
+---@return string
+local function flatten(text)
+  local line = text:gsub("%s*[\r\n]%s*", "  "):gsub("\t", " ")
+  return (line:gsub("\\([nrt])", "\\\226\128\139%1"))
+end
+
 --- Type `text` into the agent's surface.
 ---
 --- Two calls, never one: `send` writes the payload and `send-key enter` submits
@@ -141,7 +161,7 @@ function sinks.cmux(text, opts, on_done)
       if not ref then
         return on_done(false, err)
       end
-      run(bin, { "send", "--surface", ref, "--", text }, function(code)
+      run(bin, { "send", "--surface", ref, "--", flatten(text) }, function(code)
         if code ~= 0 then
           -- The surface is gone. Forget it and resolve again, once.
           surface = nil
