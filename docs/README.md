@@ -63,6 +63,11 @@ beyond the code.
   filetype (Go's bundled ftplugin never did), Enter on the empty leader ends
   it, and `gqc` reflows a comment block: the one thing `gq` could not do while
   conform owned `formatexpr`, and why `gqip` must not be used for it.
+- **[agent-review-comments.md](agent-review-comments.md).** Annotate lines while
+  reading a change and hand the batch to a coding agent in one paste, each
+  comment carrying the `@path#L39-41` it names. Why the ranges follow your edits,
+  why the destination is the clipboard rather than the agent's terminal, and the
+  five transports that were investigated and rejected.
 - **[superpowers/](superpowers/README.md).** The engineering record: how the
   larger pieces were designed and what actually shipped. Start with
   [testing.md](superpowers/testing.md) before changing anything — it covers the
