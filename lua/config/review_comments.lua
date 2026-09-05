@@ -26,6 +26,9 @@ local ns = vim.api.nvim_create_namespace("review_comments")
 ---@type ReviewComment[]
 local queue = {}
 
+--- True from the moment a batch is handed to a sink until the sink answers.
+local flushing = false
+
 --- Queue a comment on `buf` covering lines `first`..`last` (1-indexed, `last`
 --- nil for a single line). False when the buffer has no file behind it, since
 --- there would be nothing to point the agent at.
@@ -39,12 +42,15 @@ function M.push(buf, first, last, text)
   if not file then
     return false
   end
-  -- end_row is exclusive-ish here: mark the whole last line so an insert INSIDE
+  -- Both ends take right gravity. On the start that is what makes an `O` above
+  -- the commented line push the comment down with the code it names -- left
+  -- gravity would leave the mark sitting on the line that was just inserted.
+  -- end_row is exclusive-ish: marking the whole last line means an insert INSIDE
   -- the range widens it rather than being clipped.
   local ok, mark = pcall(vim.api.nvim_buf_set_extmark, buf, ns, first - 1, 0, {
     end_row = (last or first) - 1,
     end_col = 0,
-    right_gravity = false,
+    right_gravity = true,
     end_right_gravity = true,
   })
   queue[#queue + 1] = {
@@ -157,7 +163,16 @@ local function span()
   if first > last then
     first, last = last, first
   end
-  vim.api.nvim_feedkeys(vim.keycode("<Esc>"), "n", false)
+  -- Leave visual mode without going through the typeahead. Feeding <Esc> the way
+  -- file_reference.yank does is safe only because yank never prompts afterwards:
+  -- the prompt add() opens next is vim.fn.input() underneath, which reads the
+  -- typeahead, so a queued <Esc> is the first key it sees and cancels it -- no
+  -- comment, and the editor still in visual mode with your next keys running as
+  -- motions. Executing the <Esc> instead (feedkeys with "x") fixes that but
+  -- drains whatever else is pending, so a comment typed ahead of the prompt runs
+  -- as normal-mode commands. `normal!` touches neither: the mode change happens
+  -- now and keys typed ahead still land in the prompt. Verified under a pty.
+  vim.cmd("normal! \27")
   if first == last then
     return first, nil
   end
@@ -200,10 +215,15 @@ function M.list()
     vim.ui.select({ "Jump", "Drop" }, { prompt = choice.file }, function(action)
       if action == "Jump" then
         local target = queue[index]
-        if vim.api.nvim_buf_is_valid(target.bufnr) then
-          vim.api.nvim_set_current_buf(target.bufnr)
-          vim.api.nvim_win_set_cursor(0, { choice.first, 0 })
+        if not vim.api.nvim_buf_is_valid(target.bufnr) then
+          vim.notify("Buffer for " .. choice.file .. " is gone", vim.log.levels.WARN)
+          return
         end
+        vim.api.nvim_set_current_buf(target.bufnr)
+        -- An unloaded buffer has no mark left, so choice.first is the push-time
+        -- snapshot and the file it reloads from may since have lost that line.
+        local count = vim.api.nvim_buf_line_count(0)
+        vim.api.nvim_win_set_cursor(0, { math.max(1, math.min(choice.first, count)), 0 })
       elseif action == "Drop" then
         M.drop(index)
         vim.notify(string.format("Dropped (%d left)", #queue))
@@ -217,6 +237,13 @@ end
 ---@param opts table|nil `{ submit = boolean }`
 function M.flush(opts)
   opts = opts or {}
+  -- Delivery is asynchronous, so <leader>as pressed twice -- or followed by the
+  -- "did that go through?" <leader>aS -- would re-send a queue nothing has
+  -- emptied yet, and the agent would read the whole review twice.
+  if flushing then
+    vim.notify("A send is already in progress")
+    return
+  end
   local text = M.payload()
   if not text then
     vim.notify("No review comments queued")
@@ -224,7 +251,11 @@ function M.flush(opts)
   end
   local sinks = require("config.review_sinks")
   local name = sinks.choose()
-  sinks.send(name, text, { submit = opts.submit }, function(ok, err)
+  flushing = true
+  -- pcall'd because a sink that throws before it answers would otherwise latch
+  -- the guard for the rest of the session -- no further send would go out.
+  local called, err_call = pcall(sinks.send, name, text, { submit = opts.submit }, function(ok, err)
+    flushing = false
     if not ok then
       vim.notify("Review comments not sent: " .. (err or "unknown"), vim.log.levels.ERROR)
       return
@@ -237,6 +268,10 @@ function M.flush(opts)
       vim.notify(string.format("Sent %d review comment(s)", n))
     end
   end)
+  if not called then
+    flushing = false
+    error(err_call, 0)
+  end
 end
 
 --- Throw the batch away.
