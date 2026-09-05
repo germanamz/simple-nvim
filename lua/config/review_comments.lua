@@ -144,6 +144,108 @@ function M.payload()
   return M.format(M.resolve())
 end
 
+--- The line span the comment applies to: the cursor line, or the visual
+--- selection's span when one is active.
+---@return integer first, integer|nil last
+local function span()
+  if not vim.fn.mode():match("^[vV\22]") then
+    return vim.api.nvim_win_get_cursor(0)[1], nil
+  end
+  -- Still in visual mode inside a keymap callback (they run like <Cmd>), so
+  -- '< / '> are stale; `v` is the anchor and `.` the cursor end.
+  local first, last = vim.fn.line("v"), vim.fn.line(".")
+  if first > last then
+    first, last = last, first
+  end
+  vim.api.nvim_feedkeys(vim.keycode("<Esc>"), "n", false)
+  if first == last then
+    return first, nil
+  end
+  return first, last
+end
+
+--- Prompt for a comment on the cursor line or visual selection, and queue it.
+function M.add()
+  local buf = vim.api.nvim_get_current_buf()
+  local first, last = span()
+  vim.ui.input({ prompt = "Review comment: " }, function(text)
+    if not text or vim.trim(text) == "" then
+      return
+    end
+    if not M.push(buf, first, last, vim.trim(text)) then
+      vim.notify("No file behind this buffer", vim.log.levels.WARN)
+      return
+    end
+    vim.notify(string.format("Queued (%d)", #queue))
+  end)
+end
+
+--- Pick a queued comment, then what to do with it.
+function M.list()
+  local items = M.resolve()
+  if #items == 0 then
+    vim.notify("No review comments queued")
+    return
+  end
+  vim.ui.select(items, {
+    prompt = "Review comments:",
+    format_item = function(item)
+      local ref = mention(item)
+      return string.format("%s  %s", ref, item.text)
+    end,
+  }, function(choice, index)
+    if not choice then
+      return
+    end
+    vim.ui.select({ "Jump", "Drop" }, { prompt = choice.file }, function(action)
+      if action == "Jump" then
+        local target = queue[index]
+        if vim.api.nvim_buf_is_valid(target.bufnr) then
+          vim.api.nvim_set_current_buf(target.bufnr)
+          vim.api.nvim_win_set_cursor(0, { choice.first, 0 })
+        end
+      elseif action == "Drop" then
+        M.drop(index)
+        vim.notify(string.format("Dropped (%d left)", #queue))
+      end
+    end)
+  end)
+end
+
+--- Hand the whole batch to the agent. The queue is emptied only on success --
+--- a failed send must not silently lose a review.
+---@param opts table|nil `{ submit = boolean }`
+function M.flush(opts)
+  opts = opts or {}
+  local text = M.payload()
+  if not text then
+    vim.notify("No review comments queued")
+    return
+  end
+  local sinks = require("config.review_sinks")
+  local name = sinks.choose()
+  sinks.send(name, text, { submit = opts.submit }, function(ok, err)
+    if not ok then
+      vim.notify("Review comments not sent: " .. (err or "unknown"), vim.log.levels.ERROR)
+      return
+    end
+    local n = #queue
+    M.clear()
+    if name == "clipboard" then
+      vim.notify(string.format("%d review comment(s) copied — not a cmux session", n))
+    else
+      vim.notify(string.format("Sent %d review comment(s)", n))
+    end
+  end)
+end
+
+--- Throw the batch away.
+function M.discard()
+  local n = #queue
+  M.clear()
+  vim.notify(string.format("Discarded %d review comment(s)", n))
+end
+
 --- Test seam: the raw queue, for specs that need to inspect marks.
 ---@return ReviewComment[]
 function M._queue()

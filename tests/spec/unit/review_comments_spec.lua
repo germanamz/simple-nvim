@@ -106,3 +106,104 @@ describe("config.review_comments.format", function()
     assert.is_nil(rc.payload())
   end)
 end)
+
+describe("config.review_comments.add", function()
+  local buf
+
+  before_each(function()
+    rc.clear()
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, vim.fn.getcwd() .. "/sample.lua")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three" })
+    vim.api.nvim_set_current_buf(buf)
+    vim.api.nvim_win_set_cursor(0, { 2, 0 })
+  end)
+
+  -- Same fixed name as the block above, so this buffer has to go before the
+  -- next example names one the same way — nvim_buf_set_name is E95 on a live
+  -- duplicate.
+  after_each(function()
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  end)
+
+  --- Run `fn` with vim.ui.input answering `answer`.
+  local function with_input(answer, fn)
+    local real = vim.ui.input
+    vim.ui.input = function(_, cb)
+      cb(answer)
+    end
+    local ok, err = pcall(fn)
+    vim.ui.input = real
+    if not ok then
+      error(err)
+    end
+  end
+
+  it("queues the cursor line with the typed text", function()
+    with_input("needs a guard", rc.add)
+    local item = rc.resolve()[1]
+    assert.are.equal(2, item.first)
+    assert.is_nil(item.last)
+    assert.are.equal("needs a guard", item.text)
+  end)
+
+  it("queues nothing when the prompt is cancelled", function()
+    with_input(nil, rc.add)
+    assert.are.equal(0, rc.count())
+  end)
+
+  it("queues nothing for an empty comment", function()
+    with_input("   ", rc.add)
+    assert.are.equal(0, rc.count())
+  end)
+end)
+
+describe("config.review_comments.flush", function()
+  local sinks = require("config.review_sinks")
+  local buf
+
+  before_each(function()
+    rc.clear()
+  end)
+
+  -- Same fixed name as the block above, so this buffer has to go before the
+  -- next example names one the same way — nvim_buf_set_name is E95 on a live
+  -- duplicate.
+  after_each(function()
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  end)
+
+  it("sends the payload through the chosen sink and empties the queue", function()
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, vim.fn.getcwd() .. "/sample.lua")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one" })
+    rc.push(buf, 1, nil, "look here")
+
+    local sent
+    local real = sinks.send
+    sinks.send = function(_name, text, _opts, on_done)
+      sent = text
+      on_done(true, nil)
+    end
+    rc.flush({ submit = false })
+    sinks.send = real
+
+    assert.is_truthy(sent:find("@sample.lua#L1", 1, true))
+    assert.are.equal(0, rc.count())
+  end)
+
+  it("keeps the queue when the sink fails", function()
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, vim.fn.getcwd() .. "/sample.lua")
+    rc.push(buf, 1, nil, "look here")
+
+    local real = sinks.send
+    sinks.send = function(_name, _text, _opts, on_done)
+      on_done(false, "boom")
+    end
+    rc.flush({})
+    sinks.send = real
+
+    assert.are.equal(1, rc.count())
+  end)
+end)
