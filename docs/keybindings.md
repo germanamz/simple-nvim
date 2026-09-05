@@ -36,6 +36,7 @@ Leader = `<Space>` · Local leader = `\`
 22. [Command-line tricks](#22-command-line-tricks)
 23. [Sessions](#23-sessions)
 24. [Known conflicts](#24-known-conflicts)
+25. [Files changed outside nvim](#25-files-changed-outside-nvim)
 
 ---
 
@@ -791,6 +792,10 @@ commit/stage shows up on return): gitsigns hunks, the statusline branch/base
 and hunk counts, and the file-tree's git decorations. `<Space>gR` forces the
 same refresh for terminals that don't forward focus events.
 
+A commit or a stage moves `.git/index`, which is what most of those displays
+watch. A bare **working-tree** write does not — see
+[section 25](#25-files-changed-outside-nvim) for what covers that case.
+
 Statusline: ` +A ~C -D ↑above ↓below ` summary.
 
 ---
@@ -1016,8 +1021,41 @@ Single press closes the picker (not "go to normal mode inside the picker").
 
 ---
 
+## 25. Files changed outside nvim
+
+An agent, a CLI formatter or a `git checkout` rewriting a file you have open.
+
+| Keys       | Action                                              |
+| ---------- | --------------------------------------------------- |
+| `<Space>r` | re-read every open buffer from disk and re-resolve git |
+
+Buffers follow the file on their own: every open file buffer is re-stat'd when
+nvim regains focus, when you enter a buffer, and when you pause (`CursorHold`).
+Reloading a buffer is also what refreshes everything computed *from* it — gitsigns
+diffs buffer text, and the LSP is sent buffer text, never the file — so the hunk
+signs and the diagnostics follow along.
+
+`CursorHold` fires once per idle period and does not re-arm until you move, so an
+nvim you have not touched at all since the rewrite catches up on your next
+keypress rather than on a timer.
+
+`<Space>r` is the hatch for what the automatic sweep cannot see: a file created or
+deleted on disk changes `git status` without touching any open buffer, and a
+terminal that doesn't forward focus events gets no `FocusGained`.
+
+If a file changes on disk **while you have unsaved edits in it**, nothing is
+reloaded and nothing is lost — you get a warning naming the file. `:e!` takes the
+disk copy, `:w` keeps yours.
+
+Details, and why `<Space>lr` alone never fixed stale diagnostics:
+[external-changes.md](external-changes.md).
+
+---
+
 ## See also
 
+- [external-changes.md](external-changes.md): what refreshes when a file is
+  rewritten outside nvim, and what does not.
 - [smart-files.md](smart-files.md): the `<leader><leader>` file picker in depth.
 - [dotted-chain-textobject.md](dotted-chain-textobject.md): the `ao` / `io`
   textobject from section 10.

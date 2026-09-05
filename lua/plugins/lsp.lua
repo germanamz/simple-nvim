@@ -282,11 +282,16 @@ vim.api.nvim_create_autocmd("LspAttach", {
     -- in-memory project.
     --
     -- Re-attach runs through config.lsp_picker, NOT the `:edit` this used to do.
-    -- Reloading the buffer broke the keymap twice over: `:edit` REFUSES a
-    -- modified buffer (E37), and the clients are stopped by the time it throws,
-    -- so a restart reached for mid-edit — the usual case — left the buffer with
-    -- no server at all; and it only ever re-attached THIS buffer, while the stop
-    -- had detached every sibling the client served.
+    -- Reloading the buffer with `:edit` broke the keymap twice over: it REFUSES
+    -- a modified buffer (E37), and the clients are stopped by the time it
+    -- throws, so a restart reached for mid-edit — the usual case — left the
+    -- buffer with no server at all; and it only ever re-attached THIS buffer,
+    -- while the stop had detached every sibling the client served.
+    --
+    -- The re-READ that `:edit` was also doing is still needed and now runs as a
+    -- per-buffer `:checktime` inside restart_clients: didOpen serializes buffer
+    -- lines, so a restart over a buffer that never re-read hands the fresh
+    -- server the same text and gets the same diagnostics back.
     map("<leader>lr", function()
       local lsp_picker = require("config.lsp_picker")
       -- last_buf: this buffer resolves last, so in a mixed-version monorepo the
@@ -428,9 +433,14 @@ return {
       -- superproject that's one walk per submodule root, and every external file
       -- event then runs an lpeg glob match on the main loop (a storm during
       -- builds / branch switches / codegen). Turning it off trades server
-      -- auto-refresh on out-of-editor changes (recover with <leader>lr or :edit)
-      -- for a quiet UI thread. mdx_analyzer already sets this for its own reason;
-      -- merged before cfg.capabilities so any explicit per-server value wins.
+      -- auto-refresh on out-of-editor changes for a quiet UI thread. What covers
+      -- an open buffer is config.file_reload's sweep, which re-reads it and lets
+      -- vim.lsp's on_reload re-send didOpen; <leader>lr (which now re-reads too)
+      -- and <leader>r remain the manual hatches, and a file the server knows
+      -- about but nothing has open still needs one of those.
+      --
+      -- mdx_analyzer already sets this for its own reason; merged before
+      -- cfg.capabilities so any explicit per-server value wins.
       local no_watch = { workspace = { didChangeWatchedFiles = { dynamicRegistration = false } } }
 
       -- A tree create with no server yet to ask (a fresh session, the tree

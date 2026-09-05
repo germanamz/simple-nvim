@@ -32,11 +32,15 @@
 --            round-trip ~10ms flash of the ignored directory row, never its
 --            contents). Results memoize in `_ignored`, so steady state is O(1).
 --
--- Invalidation is event-driven, not a .git watcher: .gitignore / exclude writes
--- clear the cache here (M.setup); submodule-topology changes clear it through
--- config.dir_cache; <leader>gR is the manual hatch. Index-only changes
--- (`git add -f node_modules/x`, `git rm --cached`) are a deliberate non-goal of
--- the auto-events — refresh with <leader>gR.
+-- Invalidation is event-driven, not a .git watcher: every edge in M.setup that
+-- means "the ignore RULES just changed" clears the cache — a .gitignore /
+-- exclude written in-editor, the same file re-read from disk, and
+-- config.file_reload's User FileReloaded / FileRefreshForced. That last pair is
+-- what covers the changes nobody typed here: a branch switch, an agent edit, a
+-- codegen run. Submodule-topology changes clear it through config.dir_cache;
+-- <leader>gR is the manual hatch. Index-only changes (`git add -f
+-- node_modules/x`, `git rm --cached`) are a deliberate non-goal of the
+-- auto-events — refresh with <leader>gR.
 local M = {}
 
 local git = require("util.git")
@@ -70,6 +74,19 @@ for _, n in ipairs({
   STATIC[n] = true
 end
 
+-- The files whose CONTENTS are the ignore rules: '.gitignore' anywhere in the
+-- tree, and 'exclude' for .git/info/exclude. Neither has a slash, so the list
+-- doubles as an autocmd pattern set (a bare basename matches at any depth, the
+-- same convention config.dir_cache uses for '.gitmodules') and as the lookup
+-- behind _is_ignore_file — one source of truth, because the reload edge is
+-- handed a bufnr and has to ask the filename question the pattern asks.
+local IGNORE_FILES = { ".gitignore", "exclude" }
+
+local IGNORE_FILE = {}
+for _, n in ipairs(IGNORE_FILES) do
+  IGNORE_FILE[n] = true
+end
+
 -- _ignored: abs -> true (HIDE) | false (git CONFIRMED not-ignored: render, never
 --           re-ask). nil means unknown -> enqueue + fail-open.
 -- seen:     abs currently enqueued (cleared as each resolves) so one build pass
@@ -82,6 +99,13 @@ local CHECK_TIMEOUT_MS = 2000
 function M._is_static(abs)
   local base = abs:match("[^/]+$")
   return base ~= nil and STATIC[base] == true
+end
+
+-- Pure: is this path a file whose contents decide ignore answers? Exact
+-- basename, so '.gitignore.bak' and 'excludes.txt' are correctly uninteresting.
+function M._is_ignore_file(path)
+  local base = path:match("[^/]+$")
+  return base ~= nil and IGNORE_FILE[base] == true
 end
 
 -- Pure: group absolute paths by the toplevel of their CONTAINING directory
@@ -273,25 +297,85 @@ function M.is_ignored(abs)
 end
 
 -- Drop the oracle cache. Chained from config.dir_cache (submodule topology /
--- DirChanged / <leader>gR) and from the .gitignore watcher in M.setup.
+-- DirChanged / <leader>gR) and from M.setup's rule-change edges. Nothing here
+-- watches .git — "watcher" was the wrong word for a hook that only ever saw
+-- in-editor writes, and it is what hid the external-change gap on review.
 function M._clear()
   _ignored, seen, pending = {}, {}, {}
 end
 
+-- Throw the memo away and re-render. Cheap enough to hang off events that fire
+-- on every branch switch: _clear mints fresh tables instead of walking the old
+-- ones (O(1)), and the re-resolve goes back through the same bounded async pool
+-- — one `git check-ignore` per enclosing toplevel, pool.GIT_CONCURRENCY at a
+-- time — so there is no fork storm hiding behind the extra edges.
+--
+-- The clear is unconditional even when nothing is memoized yet, because a batch
+-- can be in flight: only the fresh table identity stops drain()'s callbacks from
+-- writing verdicts computed against the pre-change rules into the live cache.
+-- The tree reload is what gets skipped in that case — an autoread reload fires
+-- BufReadPost AND publishes FileReloaded (verified on 0.12.5: BufReadPre,
+-- BufReadPost, then FileChangedShellPost), so both edges land for one external
+-- change and only the first one has anything to re-render.
+local function invalidate()
+  -- The clear is unconditional (a fresh table identity fences whatever the
+  -- in-flight `git check-ignore` drain is about to write); only the repaint is
+  -- gated. An empty _ignored because the FIRST batch has not landed yet looks
+  -- identical here to an empty _ignored because nothing is ignored, and in that
+  -- case the discarded `seen`/`pending` are not re-asked until something else
+  -- reloads the tree. It fails open — rows show rather than hide — and the next
+  -- render self-heals, so it is not worth a second flag to distinguish.
+  local had_verdicts = next(_ignored) ~= nil
+  M._clear()
+  if not had_verdicts then
+    return
+  end
+  local ok, api = pcall(require, "nvim-tree.api")
+  if ok and api.tree.is_visible() then
+    api.tree.reload()
+  end
+end
+
 function M.setup()
   local g = vim.api.nvim_create_augroup("ignore_filter", { clear = true })
-  -- Basename patterns (no slash): '.gitignore' anywhere in the tree, and
-  -- 'exclude' covers .git/info/exclude. Editing either changes ignore answers.
-  vim.api.nvim_create_autocmd("BufWritePost", {
+  -- BufWritePost: the rules were edited here. BufReadPost: they arrived from
+  -- disk — a `:e` on a .gitignore, and the `:e!` config.file_reload's conflict
+  -- notification tells you to run.
+  vim.api.nvim_create_autocmd({ "BufWritePost", "BufReadPost" }, {
     group = g,
-    pattern = { ".gitignore", "exclude" },
-    callback = function()
-      M._clear()
-      local ok, api = pcall(require, "nvim-tree.api")
-      if ok and api.tree.is_visible() then
-        api.tree.reload()
+    pattern = IGNORE_FILES,
+    desc = "Drop ignore verdicts when the rules that produced them change",
+    callback = invalidate,
+  })
+
+  -- The external-change edge. config.file_reload publishes this once 'autoread'
+  -- has re-read a buffer that changed underneath the editor, which is the only
+  -- signal an agent edit or a branch switch produces — the pattern autocmds
+  -- above see nothing when no one typed the write. It carries a bufnr rather
+  -- than a path, so the filename test happens here.
+  vim.api.nvim_create_autocmd("User", {
+    group = g,
+    pattern = "FileReloaded",
+    desc = "Drop ignore verdicts when a .gitignore is reloaded from disk",
+    callback = function(args)
+      local buf = args.data and args.data.buf
+      if
+        buf
+        and vim.api.nvim_buf_is_valid(buf)
+        and M._is_ignore_file(vim.api.nvim_buf_get_name(buf))
+      then
+        invalidate()
       end
     end,
+  })
+
+  -- <leader>r means "I can see something stale": re-resolve without asking which
+  -- file moved, the same unconditional contract <leader>gR has via dir_cache.
+  vim.api.nvim_create_autocmd("User", {
+    group = g,
+    pattern = "FileRefreshForced",
+    desc = "Re-resolve every ignore verdict on the manual refresh",
+    callback = invalidate,
   })
 end
 

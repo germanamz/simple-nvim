@@ -576,36 +576,57 @@ describe("e2e: gitsigns", function()
     assert.is_true(calls >= 1, "FocusGained did not trigger gitsigns.refresh()")
   end)
 
-  it("clears stale hunks after an external commit on FocusGained", function()
+  -- The case the reload machinery exists for: something outside nvim rewrites a
+  -- file this buffer is holding open. gitsigns diffs the IN-MEMORY buffer
+  -- against a git blob (manager.update's util.buf_lines), so a buffer nothing
+  -- re-read keeps emitting the hunks of text that is no longer on disk, and
+  -- refresh() alone moves neither side of that diff.
+  --
+  -- This deliberately runs no git command. The version of this test that
+  -- committed the working tree from "another terminal" certified nothing:
+  -- buffer and file agreed the whole way through (only the index moved, so
+  -- nothing was ever stale), and `git add`/`git commit` write .git/index and
+  -- refs/heads/<branch> — both of which gitsigns' own gitdir watcher sees
+  -- (git/repo/watcher.lua watches the gitdir directory itself, on a 200ms
+  -- trailing debounce) and re-diffs on, inside the assertion's timeout,
+  -- whether or not the handler under test does anything at all.
+  it("re-diffs the hatch against text an external write put on disk", function()
     local bufnr = open_modified_repo()
+    local file = vim.fn.getcwd() .. "/a.lua"
     wait.wait_for(function()
       return #(require("gitsigns").get_hunks(bufnr) or {}) > 0
-    end, 5000, "expected hunks before the external commit")
+    end, 5000, "expected hunks before the external write")
 
-    -- Commit the working-tree changes from "another terminal": the tree now
-    -- matches HEAD/index, so a re-diff yields zero hunks — but gitsigns still
-    -- holds the pre-commit hunks until something refreshes it.
-    local cwd = vim.fn.getcwd()
-    vim.fn.system({ "git", "-C", cwd, "add", "-A" })
-    vim.fn.system({
-      "git",
-      "-C",
-      cwd,
-      "-c",
-      "user.email=t@e.invalid",
-      "-c",
-      "user.name=t",
-      "commit",
-      "-q",
-      "-m",
-      "external",
-      "--no-gpg-sign",
-    })
+    -- Put the committed content back on disk and nothing else. The buffer still
+    -- holds the modified lines and .git is untouched, so the gitdir watcher has
+    -- no event to fire on: re-reading the buffer is the only route to zero hunks.
+    local f = assert(io.open(file, "w"))
+    f:write(build_original())
+    f:close()
 
-    vim.api.nvim_exec_autocmds("FocusGained", {})
+    press(" gR")
+
+    -- Assert on gitsigns' cache entry rather than on get_hunks(): refresh()
+    -- nils bcache.hunks synchronously (actions.refresh -> CacheEntry:invalidate,
+    -- before the async re-diff yields) and get_hunks turns a nil `hunks` into an
+    -- empty list, so "#get_hunks == 0" is satisfied by the middle of an update
+    -- as readily as by its result. A non-nil, empty `hunks` is a diff that
+    -- really ran: manager.update assigns run_diff's list.
+    local gs_cache = require("gitsigns.cache").cache
     wait.wait_for(function()
-      return #(require("gitsigns").get_hunks(bufnr) or {}) == 0
-    end, 5000, "hunks not cleared after external commit + FocusGained")
-    assert.are.equal(0, #(require("gitsigns").get_hunks(bufnr) or {}))
+      local hunks = gs_cache[bufnr] and gs_cache[bufnr].hunks
+      return hunks ~= nil and #hunks == 0
+    end, 10000, "<leader>gR kept diffing the stale buffer text")
+
+    -- ...and it is still zero once the debounces in flight have landed
+    -- (update_debounce is 100ms, the watcher's 200ms), not a value that flips
+    -- back as soon as a later update re-diffs the same stale lines.
+    vim.wait(500)
+    local settled = gs_cache[bufnr] and gs_cache[bufnr].hunks
+    assert.is_not_nil(settled, "gitsigns dropped the diff instead of settling on zero hunks")
+    assert.are.equal(0, #settled)
+    -- The zero is the re-read talking: the buffer did follow the file.
+    local text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, -1, false), "\n") .. "\n"
+    assert.are.equal(build_original(), text)
   end)
 end)

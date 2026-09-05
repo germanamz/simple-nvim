@@ -60,6 +60,13 @@ require("config.statusline").setup()
 require("config.syntax_emphasis").setup()
 require("config.block_guides").setup()
 require("config.decl_rules").setup()
+-- Keep open buffers following the file on disk. 'autoread' is on by default but
+-- only runs when something asks Neovim to re-stat, and nothing here ever did --
+-- so an agent or CLI formatter rewriting a file left every buffer-derived
+-- indicator (gitsigns hunks, LSP and lint diagnostics) reporting on text that no
+-- longer existed. Also publishes the User FileReloaded / FileRefreshForced edges
+-- the git and lint caches re-resolve on.
+require("config.file_reload").setup()
 require("config.dir_cache").setup()
 require("config.ignore_filter").setup()
 -- gK / <leader>kd, plus the vim.ui.open wrapper that routes web URLs into a

@@ -186,5 +186,28 @@ describe("config.submodule_status", function()
       submodule_status.invalidate_all()
       assert.is_nil(submodule_status.get("/b"))
     end)
+
+    -- invalidate()'s reason to exist, and its only production caller: a file
+    -- rewritten in the worktree by an agent or a CLI formatter moves no index, so
+    -- revalidate()'s key cannot see it and the entry would stay stale for the rest
+    -- of the session. config.nvim_tree_git subscribes to config.file_reload's
+    -- User FileReloaded and drops exactly the repo the reloaded buffer lives in.
+    it("is driven by nvim_tree_git's FileReloaded handler for one repo only", function()
+      seed("/a", { " M x" })
+      seed("/b", { " M y" })
+      local git = require("util.git")
+      local real_buf_root = git.buf_root
+      git.buf_root = function()
+        return "/a"
+      end
+      require("config.nvim_tree_git").register_autocmds()
+      vim.api.nvim_exec_autocmds("User", { pattern = "FileReloaded", data = { buf = 0 } })
+      git.buf_root = real_buf_root
+      -- Drop the handlers before asserting: register_autocmds also arms a
+      -- FocusGained refresh, which has no business outliving this spec.
+      pcall(vim.api.nvim_del_augroup_by_name, "nvim_tree_git_refresh")
+      assert.is_nil(submodule_status.get("/a"))
+      assert.is_not_nil(submodule_status.get("/b"))
+    end)
   end)
 end)

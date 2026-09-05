@@ -123,14 +123,36 @@ function M.restart_clients(clients, opts)
     bufs[#bufs + 1] = last
   end
 
+  -- Re-read anything that moved on disk BEFORE the servers come back. didOpen
+  -- serializes buffer lines, never the file ($VIMRUNTIME/lua/vim/lsp.lua's
+  -- _buf_get_full_text), so without this a restart hands the fresh server the
+  -- same stale text and it republishes byte-identical diagnostics — which is
+  -- exactly what "<leader>lr doesn't clear them" looked like. `:checktime {buf}`
+  -- rather than the `:edit` this replaced: it reaches a buffer that is neither
+  -- current nor in a window, it is a no-op when the stat is unchanged, and on a
+  -- buffer with unsaved edits config.file_reload's FileChangedShell handler
+  -- warns instead of throwing E37 — so the mid-edit regression that motivated
+  -- dropping `:edit` does not come back.
+  --
+  -- Ahead of the stop loop, not between it and the re-attach: a reload drives
+  -- vim.lsp's on_reload, which sends didClose+didOpen to whatever clients are
+  -- still attached. get_clients filters on `initialized`, never on
+  -- `_is_stopping`, so re-reading after the stop would hand a dying client a
+  -- fresh didOpen and schedule a vim.diagnostic.show for its namespace — a
+  -- flash of the stale diagnostics on the next tick, until _on_detach resets it.
+  for _, b in ipairs(bufs) do
+    pcall(vim.cmd, "checktime " .. b)
+  end
+
   for _, c in ipairs(live) do
     c:stop()
   end
 
   -- vim.lsp.enable() installs a FileType autocmd that starts/attaches the
   -- server, so re-firing FileType is what brings the clients back. It reaches a
-  -- buffer that is not current, and — unlike the `:edit` this replaced — it
-  -- leaves the buffer's TEXT alone (see the <leader>lr note in plugins/lsp.lua).
+  -- buffer that is not current, and it leaves the buffer's TEXT alone — the
+  -- checktime above is what refreshes it (see the <leader>lr note in
+  -- plugins/lsp.lua).
   for _, b in ipairs(bufs) do
     vim.api.nvim_exec_autocmds("FileType", { buffer = b })
   end

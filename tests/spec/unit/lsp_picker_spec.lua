@@ -209,6 +209,49 @@ describe("config.lsp_picker.restart_clients", function()
     vim.api.nvim_buf_delete(b2, { force = true })
   end)
 
+  -- The regression guard for "even <leader>lr doesn't clear them". didOpen
+  -- serializes buffer LINES, never the file on disk, so restarting a server over
+  -- a buffer that never re-read gives it byte-identical text and it republishes
+  -- byte-identical diagnostics. bufadd+bufload is the exact shape that made this
+  -- survive: loaded, never displayed — the case a bare `:checktime` skips.
+  it("re-reads a hidden buffer from disk before the servers come back", function()
+    local path = vim.fn.tempname() .. "-restart.txt"
+    local function write(content)
+      local f = assert(io.open(path, "w"))
+      f:write(content)
+      f:close()
+    end
+    local function lines(buf)
+      return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "|")
+    end
+
+    write("before\n")
+    local buf = vim.fn.bufadd(path)
+    vim.fn.bufload(buf)
+    assert.are.equal("before", lines(buf))
+    write("after\n")
+
+    local at_reattach = {}
+    group = vim.api.nvim_create_augroup("lsp_picker_restart_spec", { clear = true })
+    vim.api.nvim_create_autocmd("FileType", {
+      group = group,
+      buffer = buf,
+      callback = function()
+        at_reattach[#at_reattach + 1] = lines(buf)
+      end,
+    })
+
+    picker.restart_clients({ client({ id = 1, bufs = { [buf] = true } }) })
+
+    assert.are.equal("after", lines(buf), "restart left the buffer holding stale text")
+    -- Ordering is the whole point: a reload that lands after the re-attach is
+    -- too late, because didOpen has already gone out with the old contents.
+    assert.are.equal("after", at_reattach[1], "re-attached before re-reading the file")
+
+    vim.api.nvim_buf_delete(buf, { force = true })
+    vim.fn.delete(path)
+  end)
+
   it("ignores clients that are already stopped", function()
     local buf = vim.api.nvim_create_buf(false, true)
     local live = client({ id = 1, bufs = { [buf] = true } })

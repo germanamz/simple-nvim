@@ -127,7 +127,7 @@ describe("smoke: lsp fs sync", function()
       local m = buf_keymap_by_desc(buf, "Restart LSP on buffer")
       assert.is_not_nil(m, "<leader>lr not registered on LspAttach")
 
-      local stopped, edited, fired = 0, false, 0
+      local stopped, edited, fired, checked = 0, false, 0, 0
       local fake_client = {
         attached_buffers = { [buf] = true },
         is_stopped = function()
@@ -155,6 +155,9 @@ describe("smoke: lsp fs sync", function()
         if c == "edit" then
           edited = true
         else
+          if type(c) == "string" and c:match("^checktime%s") then
+            checked = checked + 1
+          end
           orig_cmd(c)
         end
       end
@@ -169,6 +172,10 @@ describe("smoke: lsp fs sync", function()
       assert.are.equal(1, stopped)
       assert.are.equal(1, fired, "the buffer was not re-attached via FileType")
       assert.is_false(edited, "<leader>lr reloaded the buffer; that is the E37 bug")
+      -- `:edit` stays gone, but the buffer still has to re-read from disk or the
+      -- restarted server gets the same stale text back. `:checktime {buf}` is
+      -- the form that does it without E37 and without needing a window.
+      assert.is_true(checked >= 1, "<leader>lr did not re-stat the buffer before re-attaching")
     end)
   end)
 end)

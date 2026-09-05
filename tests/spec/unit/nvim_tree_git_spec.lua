@@ -145,6 +145,11 @@ end)
 describe("config.nvim_tree_git repo_status wiring", function()
   local saved_tree, saved_api, saved_smart, saved_repo, saved_sub
   local reloads, invalidations, revalidations, sub_invalidations, module
+  local invalidated
+  -- Visibility is a per-test knob, not a constant: quit_on_open = true
+  -- (lua/plugins/nvim-tree.lua) means the tree is CLOSED for essentially all
+  -- editing time, so the closed case is the *common* one for <leader>gR.
+  local visible, spawns
 
   before_each(function()
     saved_tree = package.loaded["nvim-tree"]
@@ -153,11 +158,12 @@ describe("config.nvim_tree_git repo_status wiring", function()
     saved_repo = package.loaded["config.repo_status"]
     saved_sub = package.loaded["config.submodule_status"]
     reloads, invalidations, revalidations, sub_invalidations = 0, 0, 0, 0
+    visible, spawns, invalidated = true, 0, {}
     package.loaded["nvim-tree"] = true
     package.loaded["nvim-tree.api"] = {
       tree = {
         is_visible = function()
-          return true
+          return visible
         end,
         reload = function()
           reloads = reloads + 1
@@ -165,7 +171,9 @@ describe("config.nvim_tree_git repo_status wiring", function()
       },
     }
     package.loaded["config.telescope_smart"] = {
-      _refresh_async = function() end,
+      _refresh_async = function()
+        spawns = spawns + 1
+      end,
     }
     package.loaded["config.repo_status"] = {
       invalidate_all = function()
@@ -178,6 +186,9 @@ describe("config.nvim_tree_git repo_status wiring", function()
     package.loaded["config.submodule_status"] = {
       invalidate_all = function()
         sub_invalidations = sub_invalidations + 1
+      end,
+      invalidate = function(dir)
+        invalidated[#invalidated + 1] = dir
       end,
     }
     package.loaded["config.nvim_tree_git"] = nil
@@ -209,6 +220,69 @@ describe("config.nvim_tree_git repo_status wiring", function()
     assert.are.equal(1, invalidations)
     assert.are.equal(1, sub_invalidations)
     assert.are.equal(0, revalidations)
+  end)
+
+  it("hard-flushes both caches even when the tree is closed", function()
+    -- The flush used to sit BELOW the is_visible() guard, so with quit_on_open
+    -- closing the tree after every file open, <leader>gR and HeadChanged flushed
+    -- nothing at all and a stale label outlived every hatch the design named.
+    -- Two bare table assignments cost nothing, so they run before the guards;
+    -- only the git pipeline and the reload stay behind them.
+    visible = false
+    module.refresh_labels({ hard = true })
+    assert.are.equal(1, invalidations)
+    assert.are.equal(1, sub_invalidations)
+    assert.are.equal(0, spawns)
+  end)
+
+  it("skips the pipeline and the soft revalidate when the tree is closed", function()
+    -- Nothing displays branch facts with the tree closed, and repo_status
+    -- re-requests per visible row on the next render, so the FocusGained path
+    -- stays fully behind the guard — only the hard flush is worth doing blind.
+    visible = false
+    module.refresh_labels()
+    assert.are.equal(0, spawns)
+    assert.are.equal(0, revalidations)
+    assert.are.equal(0, invalidations)
+  end)
+
+  -- util.git.index_key, which gates both caches, stats <gitdir>/index only: a
+  -- file rewritten in the worktree by an agent or a CLI formatter moves no index,
+  -- so revalidate() keeps the stale entry forever. config.file_reload's
+  -- FileReloaded is the one edge that sees such a write, and it carries the buffer
+  -- — so the drop is one submodule, not the whole cache and not 200 fs watchers.
+  it("drops just the reloaded buffer's repo on User FileReloaded", function()
+    module.register_autocmds()
+    local git = require("util.git")
+    local real = git.buf_root
+    git.buf_root = function(buf)
+      return buf == 7 and "/repo/sub" or nil
+    end
+    vim.api.nvim_exec_autocmds("User", { pattern = "FileReloaded", data = { buf = 7 } })
+    git.buf_root = real
+    assert.are.same({ "/repo/sub" }, invalidated)
+    assert.are.equal(0, sub_invalidations) -- targeted, never the whole cache
+  end)
+
+  it("ignores a FileReloaded for a buffer outside any work tree", function()
+    module.register_autocmds()
+    local git = require("util.git")
+    local real = git.buf_root
+    git.buf_root = function()
+      return nil
+    end
+    vim.api.nvim_exec_autocmds("User", { pattern = "FileReloaded", data = { buf = 7 } })
+    git.buf_root = real
+    assert.are.same({}, invalidated)
+  end)
+
+  it("treats FileRefreshForced as a hard refresh", function()
+    -- <leader>r means "I no longer trust anything on screen", so it flushes
+    -- rather than revalidating: the write it is chasing left no index trace.
+    module.register_autocmds()
+    vim.api.nvim_exec_autocmds("User", { pattern = "FileRefreshForced" })
+    assert.are.equal(1, invalidations)
+    assert.are.equal(1, sub_invalidations)
   end)
 
   it("reloads a visible tree when RepoStatusChanged fires", function()
@@ -268,6 +342,8 @@ describe("config.nvim_tree_git.register_autocmds", function()
       head = #vim.api.nvim_get_autocmds({ event = "User", pattern = "HeadChanged" }),
       refreshed = #vim.api.nvim_get_autocmds({ event = "User", pattern = "SmartCodesRefreshed" }),
       reposstatus = #vim.api.nvim_get_autocmds({ event = "User", pattern = "RepoStatusChanged" }),
+      reloaded = #vim.api.nvim_get_autocmds({ event = "User", pattern = "FileReloaded" }),
+      forced = #vim.api.nvim_get_autocmds({ event = "User", pattern = "FileRefreshForced" }),
       focus = #vim.api.nvim_get_autocmds({ event = "FocusGained" }),
     }
   end
@@ -285,6 +361,8 @@ describe("config.nvim_tree_git.register_autocmds", function()
     assert.are.equal(baseline.head + 1, after.head)
     assert.are.equal(baseline.refreshed + 1, after.refreshed)
     assert.are.equal(baseline.reposstatus + 1, after.reposstatus)
+    assert.are.equal(baseline.reloaded + 1, after.reloaded)
+    assert.are.equal(baseline.forced + 1, after.forced)
     assert.are.equal(baseline.focus + 1, after.focus)
   end)
 end)

@@ -184,10 +184,15 @@ end
 -- happened" — enough to gate an expensive `git status` re-resolve on FocusGained
 -- without paying a per-dir spawn (config.repo_status, config.submodule_status).
 -- Two things it deliberately does NOT catch: a bare worktree edit (an untracked
--- or unstaged change never touches the index — the documented staleness window,
--- escape-hatched by <leader>gR and the in-session filesystem watcher) and, on
--- its own, a HEAD move (config.git_head's HeadChanged already covers that). The
--- index lives at <gitdir>/index; a submodule/worktree has a `.git` FILE that
+-- or unstaged change never touches the index — the documented staleness window)
+-- and, on its own, a HEAD move (config.git_head's HeadChanged already covers
+-- that). Nothing watches the worktree for the first — one uv fs handle per
+-- submodule is the storm this cheap key exists to avoid. Its real escape hatch is
+-- config.file_reload's User FileReloaded, which config.nvim_tree_git turns into a
+-- targeted submodule_status.invalidate() of the reloaded buffer's repo; the
+-- <leader>gR and <leader>r hard flushes drop everything.
+--
+-- The index lives at <gitdir>/index; a submodule/worktree has a `.git` FILE that
 -- points its gitdir elsewhere (gitdir: ../.git/modules/<name>), so resolve that
 -- with pure fs before stat-ing. The resolved index path is invariant for a
 -- session, so memoize it (only positive resolutions — a missing .git stays cheap

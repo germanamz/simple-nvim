@@ -68,8 +68,9 @@ end
 -- main thread, then reload so the decorator repaints with them. The one home
 -- for the guard/refresh/reload contract shared by the ReviewBaseChanged/
 -- HeadChanged and FocusGained handlers (lua/plugins/nvim-tree.lua) and the
--- <leader>gR manual hatch (lua/plugins/gitsigns.lua). No-op when nvim-tree
--- isn't loaded or the tree isn't on screen — skip the git spawn entirely.
+-- <leader>gR manual hatch (lua/plugins/gitsigns.lua). The git spawn and the
+-- reload are skipped when nvim-tree isn't loaded or the tree isn't on screen;
+-- a hard cache flush is NOT — it runs above those guards, see below.
 -- Per-cwd trailing coalescing: rapid triggers (rebase, focus toggling) must
 -- not stack overlapping whole-tree git pipelines. While one is in flight, new
 -- triggers collapse into a single queued rerun that goes back through
@@ -78,11 +79,30 @@ end
 -- the then-current inputs, which is what the old always-spawn gave us.
 local inflight, trailing = {}, {}
 
--- opts.hard = true force-flushes the branch-fact cache (the definitive
--- HeadChanged / ReviewBaseChanged signals and the manual <leader>gR hatch);
--- otherwise (FocusGained) it revalidates cheaply, keeping every submodule whose
--- git index has not moved. Both then force-refresh the codes cache and reload.
+-- opts.hard = true force-flushes the branch-fact and submodule-status caches
+-- (the definitive HeadChanged / ReviewBaseChanged signals, the manual <leader>gR
+-- hatch and the <leader>r disk refresh); otherwise (FocusGained) it revalidates
+-- cheaply, keeping every submodule whose git index has not moved. Both then
+-- force-refresh the codes cache and reload.
 function M.refresh_labels(opts)
+  local hard = (opts and opts.hard) or false
+  -- The flush sits ABOVE the guards, and that placement is the fix, not an
+  -- oversight: actions.open_file.quit_on_open (lua/plugins/nvim-tree.lua) closes
+  -- the tree the moment you open a file, so is_visible() is FALSE for essentially
+  -- all editing time — a flush below the guard ran almost never, and <leader>gR
+  -- looked like it dropped the stale entries while dropping nothing. Both calls
+  -- are bare table assignments with no spawn, so there is nothing to gate: the
+  -- drop is what makes the NEXT tree open re-resolve. Only the git pipeline and
+  -- the reload below actually need a tree on screen.
+  if hard then
+    require("config.repo_status").invalidate_all()
+    -- Hard flush also drops every cached submodule status so <leader>gR /
+    -- HeadChanged / ReviewBaseChanged / <leader>r re-scan even submodules whose
+    -- index key is unchanged (a bare external edit the cheap key can't see). The
+    -- soft path relies on recursive_changes_async's index-keyed revalidate plus
+    -- the targeted FileReloaded drop in register_autocmds instead.
+    require("config.submodule_status").invalidate_all()
+  end
   if not package.loaded["nvim-tree"] then
     return
   end
@@ -90,30 +110,20 @@ function M.refresh_labels(opts)
   if not api.tree.is_visible() then
     return
   end
-  -- Reconcile the per-dir branch-fact cache so the root header and visible
-  -- submodule labels re-resolve as needed. A hard flush drops everything; a
-  -- revalidate keeps entries whose git index is unchanged, so a focus-gain over a
-  -- 200-submodule superproject with nothing staged re-resolves NO submodules
-  -- (vs. the old invalidate-every-visible-row storm). Only visible consumers
-  -- re-request, so non-visible submodules stay out of cache either way.
-  local repo_status = require("config.repo_status")
-  if opts and opts.hard then
-    repo_status.invalidate_all()
-    -- Hard flush also drops every cached submodule status so <leader>gR /
-    -- HeadChanged / ReviewBaseChanged re-scan even submodules whose index key is
-    -- unchanged (a bare external edit the cheap key can't see). The soft path
-    -- relies on recursive_changes_async's index-keyed revalidate instead.
-    require("config.submodule_status").invalidate_all()
-  else
-    repo_status.revalidate()
+  -- Soft (FocusGained) path: reconcile the per-dir branch-fact cache rather than
+  -- nuking it, so a focus-gain over a 200-submodule superproject with nothing
+  -- staged re-resolves NO submodules (vs. the old invalidate-every-visible-row
+  -- storm). Unlike the flush this one stays behind the guard: only a rendered row
+  -- re-requests a branch fact, so with the tree closed there is nobody to serve.
+  if not hard then
+    require("config.repo_status").revalidate()
   end
   local cwd = vim.fn.getcwd()
   if inflight[cwd] then
     -- OR-accumulate hardness so a HeadChanged coalescing behind an in-flight
     -- FocusGained still force-flushes on the trailing rerun (a HEAD move that
     -- left the index untouched would otherwise survive a soft revalidate).
-    local hard = (trailing[cwd] and trailing[cwd].hard) or (opts and opts.hard) or false
-    trailing[cwd] = { hard = hard }
+    trailing[cwd] = { hard = (trailing[cwd] and trailing[cwd].hard) or hard }
     return
   end
   inflight[cwd] = true
@@ -198,6 +208,44 @@ function M.register_autocmds()
     group = group,
     callback = function()
       M.refresh_labels()
+    end,
+  })
+  -- The external-write edge the caches cannot see for themselves. Both
+  -- config.repo_status and config.submodule_status gate re-resolution on
+  -- util.git.index_key, which stats <gitdir>/index only — an agent or a CLI
+  -- formatter rewriting a file in the worktree moves no index, so revalidate()
+  -- keeps that submodule's entry for the rest of the session and its label never
+  -- changes. config.file_reload publishes FileReloaded once a buffer has actually
+  -- been re-read from disk and carries the buffer, so the drop can be exact:
+  -- util.git.buf_root resolves the repo the file lives in — the submodule in a
+  -- superproject — and only that one entry goes. buf_root is memoized per dir,
+  -- but a MISS runs `git rev-parse` through vim.system():wait(2000), so the
+  -- first reload under a directory nothing has resolved yet can block the UI
+  -- thread. In practice gitsigns and the statusline warm the same cache when the
+  -- buffer attaches, so the reload edge finds a hit.
+  -- Deliberately NOT a per-submodule uv.new_fs_event: 200 watcher handles is the
+  -- storm the tiered design exists to avoid. The refresh runs even outside a work
+  -- tree, since the rewritten file's own code may have moved regardless.
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "FileReloaded",
+    callback = function(args)
+      local buf = args.data and args.data.buf
+      local root = buf and require("util.git").buf_root(buf)
+      if root then
+        require("config.submodule_status").invalidate(root)
+      end
+      M.refresh_labels()
+    end,
+  })
+  -- <leader>r means "nothing on screen is trustworthy any more": the user is
+  -- chasing a change no event caught, so flush rather than revalidate — whatever
+  -- they are chasing left no index trace for the cheap key to compare against.
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "FileRefreshForced",
+    callback = function()
+      M.refresh_labels({ hard = true })
     end,
   })
   -- Reload when a branch-fact resolve lands: config.repo_status fires

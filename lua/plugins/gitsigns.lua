@@ -433,6 +433,16 @@ return {
     -- re-sync on the same FocusGained event from their own modules:
     -- config.statusline re-resolves the focused buffer's branch/base, and
     -- nvim-tree reloads its git decorations (see lua/plugins/nvim-tree.lua).
+    -- No forced config.file_reload.sweep() here, deliberately: that module owns
+    -- a FocusGained sweep of its own and registers it FIRST (init.lua runs
+    -- file_reload.setup() before lazy.setup), so the buffers have already been
+    -- re-read by the time this handler runs and refresh() diffs current text. A
+    -- second forced sweep would restat every open buffer twice on one event and
+    -- reset a throttle clock the CursorHold/BufEnter edges share. The only case
+    -- it would win — refocusing inside that sweep's 1s throttle window — heals
+    -- itself: the next sweep reloads the buffer and gitsigns re-diffs from its
+    -- own nvim_buf_attach on_reload, with no refresh() involved. <leader>gR is
+    -- the opposite case, and does force one.
     vim.api.nvim_create_autocmd("FocusGained", {
       callback = function()
         require("gitsigns").refresh()
@@ -448,6 +458,15 @@ return {
     -- re-resolving branch/base for *every* buffer, and reloading the file tree's
     -- git labels.
     vim.keymap.set("n", "<leader>gR", function()
+      -- gitsigns diffs the IN-MEMORY buffer against a git blob (manager.update
+      -- feeds it util.buf_lines), so refresh() moves neither side of that diff
+      -- for a buffer nvim never re-read — an agent or CLI formatter that
+      -- rewrote the file underneath leaves this hatch re-running the same
+      -- arithmetic over text that is no longer on disk. Re-read first, so the
+      -- refresh below diffs what the file actually says. Forced because the
+      -- press means the automatic edges (FocusGained, BufEnter, CursorHold)
+      -- never fired, and the sweep's 1s throttle must not swallow this one.
+      require("config.file_reload").sweep({ force = true })
       -- The manual hatch for dir_cache: an external-shell `git submodule
       -- add/deinit/init` fires neither DirChanged nor a .gitmodules write, so drop
       -- the dir-keyed root cache here before re-resolving everything below.

@@ -155,8 +155,12 @@ function M.revalidate()
   end
 end
 
--- Targeted drop for one submodule — the precise, in-session lever for the
--- filesystem watcher (a bare worktree edit the index key can't see).
+-- Targeted drop for one submodule: the precise, in-session lever for a bare
+-- worktree edit, which moves no index and so is invisible to revalidate()'s key.
+-- Driven from config.nvim_tree_git's User FileReloaded handler (config.file_reload
+-- publishes that edge once a buffer has been re-read from disk) against
+-- util.git.buf_root of the reloaded buffer — one submodule re-scanned, and not a
+-- single watcher handle.
 function M.invalidate(dir)
   cache[dir] = nil
 end
