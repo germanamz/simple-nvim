@@ -204,6 +204,31 @@ vim.keymap.set({ "n", "x" }, "<leader>yl", function()
   require("config.file_reference").yank()
 end, { desc = "Yank file:line reference" })
 
+-- Review comments for the coding agent in the next cmux pane. Queued in memory
+-- (never on disk) and flushed as one batch, each comment carrying the
+-- `@path#L39-41` it is about. See lua/config/review_comments.lua and
+-- docs/agent-review-comments.md. Lazy require throughout: nothing loads, and no
+-- cmux probe runs, until a key is pressed.
+vim.keymap.set({ "n", "x" }, "<leader>ac", function()
+  require("config.review_comments").add()
+end, { desc = "Comment on this line for the agent" })
+
+vim.keymap.set("n", "<leader>al", function()
+  require("config.review_comments").list()
+end, { desc = "List queued review comments" })
+
+vim.keymap.set("n", "<leader>as", function()
+  require("config.review_comments").flush({ submit = false })
+end, { desc = "Send review comments to the agent" })
+
+vim.keymap.set("n", "<leader>aS", function()
+  require("config.review_comments").flush({ submit = true })
+end, { desc = "Send review comments and submit" })
+
+vim.keymap.set("n", "<leader>ax", function()
+  require("config.review_comments").discard()
+end, { desc = "Discard queued review comments" })
+
 -- Quit all windows, discarding unsaved changes
 vim.keymap.set("n", "<leader>qa", "<cmd>qa!<cr>", { desc = "Quit all (force)" })
 

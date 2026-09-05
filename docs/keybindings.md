@@ -826,6 +826,25 @@ Telescope-backed git pickers (also under `<Space>g`):
 | `<Space>gt`  | Git status (changed files)                          |
 | `<Space>gv`  | Diff changed files vs the review base               |
 
+### Review comments for an agent
+
+Annotate lines while reviewing, then hand the batch to the coding agent running
+in the next cmux pane. The queue lives in memory and dies with the session.
+
+| Key | Action |
+| --- | --- |
+| `<Space>ac` | Comment on the cursor line, or the visual selection's span |
+| `<Space>al` | List queued comments — jump to one, or drop it |
+| `<Space>as` | Send the batch to the agent's pane as an unsubmitted draft |
+| `<Space>aS` | Send the batch and submit it |
+| `<Space>ax` | Discard the batch |
+
+Each comment reaches the agent as `@path/to/file.lua#L39-41` followed by your
+text. `<Space>as` deliberately does not submit: injected input lands wherever
+focus is in that pane, so a permission dialog would swallow a blind submit —
+press Enter yourself once you can see the agent is idle. Outside cmux the batch
+goes to the clipboard instead.
+
 ---
 
 ## 18. Markdown / MDX
