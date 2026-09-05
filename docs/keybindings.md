@@ -828,22 +828,26 @@ Telescope-backed git pickers (also under `<Space>g`):
 
 ### Review comments for an agent
 
-Annotate lines while reviewing, then hand the batch to the coding agent running
-in the next cmux pane. The queue lives in memory and dies with the session.
+Annotate lines while reading a change, then hand the whole batch to a coding
+agent in one paste. The queue lives in memory and dies with the session.
 
-| Key | Action |
+| Keys | Action |
 | --- | --- |
 | `<Space>ac` | Comment on the cursor line, or the visual selection's span |
-| `<Space>al` | List queued comments — jump to one, or drop it |
-| `<Space>as` | Send the batch to the agent's pane as an unsubmitted draft |
-| `<Space>aS` | Send the batch and submit it |
+| `<Space>al` | List queued comments — jump to one, edit it, or drop it |
+| `<Space>as` | Copy the batch to the clipboard |
 | `<Space>ax` | Discard the batch |
 
-Each comment reaches the agent as `@path/to/file.lua#L39-41` followed by your
-text. `<Space>as` deliberately does not submit: injected input lands wherever
-focus is in that pane, so a permission dialog would swallow a blind submit —
-press Enter yourself once you can see the agent is idle. Outside cmux the batch
-goes to the clipboard instead.
+Each comment is written as `@path/to/file.lua#L39-41` followed by your text —
+the spelling Claude Code's own at-mention produces, so a pasted batch resolves
+as real file mentions rather than prose. Line numbers follow the code: edit
+above a queued comment and its range moves with the lines it named.
+
+The clipboard is the destination on purpose. An earlier version typed the batch
+straight into a sibling terminal pane, which could deliver a review into the
+wrong session — and injected text lands wherever focus is over there, so a
+permission prompt would swallow it. Pasting costs one keystroke and always
+lands where you are looking.
 
 ---
 

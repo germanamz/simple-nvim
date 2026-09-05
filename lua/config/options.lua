@@ -204,11 +204,11 @@ vim.keymap.set({ "n", "x" }, "<leader>yl", function()
   require("config.file_reference").yank()
 end, { desc = "Yank file:line reference" })
 
--- Review comments for the coding agent in the next cmux pane. Queued in memory
--- (never on disk) and flushed as one batch, each comment carrying the
--- `@path#L39-41` it is about. See lua/config/review_comments.lua and
--- docs/agent-review-comments.md. Lazy require throughout: nothing loads, and no
--- cmux probe runs, until a key is pressed.
+-- Review comments for a coding agent. Queued in memory (never on disk) and
+-- copied as one batch, each comment carrying the `@path#L39-41` it is about --
+-- you paste it into whichever agent you are looking at. See
+-- lua/config/review_comments.lua and docs/agent-review-comments.md. Lazy
+-- require throughout: nothing loads until a key is pressed.
 vim.keymap.set({ "n", "x" }, "<leader>ac", function()
   require("config.review_comments").add()
 end, { desc = "Comment on this line for the agent" })
@@ -218,12 +218,8 @@ vim.keymap.set("n", "<leader>al", function()
 end, { desc = "List queued review comments" })
 
 vim.keymap.set("n", "<leader>as", function()
-  require("config.review_comments").flush({ submit = false })
-end, { desc = "Send review comments to the agent" })
-
-vim.keymap.set("n", "<leader>aS", function()
-  require("config.review_comments").flush({ submit = true })
-end, { desc = "Send review comments and submit" })
+  require("config.review_comments").flush()
+end, { desc = "Copy review comments for the agent" })
 
 vim.keymap.set("n", "<leader>ax", function()
   require("config.review_comments").discard()

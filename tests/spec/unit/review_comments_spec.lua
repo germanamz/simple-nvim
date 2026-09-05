@@ -268,7 +268,6 @@ describe("config.review_comments.add over a visual selection", function()
 end)
 
 describe("config.review_comments.flush", function()
-  local sinks = require("config.review_sinks")
   local buf
 
   before_each(function()
@@ -290,93 +289,60 @@ describe("config.review_comments.flush", function()
     rc.push(buf, 1, nil, "look here")
   end
 
-  --- Run `fn` with `send` standing in for the sink. Restored even when `fn`
-  --- throws: a leaked stub would fail every later example in this file.
-  local function with_sink(send, fn)
-    local real = sinks.send
-    sinks.send = send
+  --- Run `fn` with the `+` register saved and restored. The suite must not
+  --- clobber the clipboard of whoever is running it.
+  local function with_clipboard(fn)
+    local saved = vim.fn.getreg("+")
     local ok, err = pcall(fn)
-    sinks.send = real
+    vim.fn.setreg("+", saved)
     if not ok then
       error(err)
     end
+    return ok
   end
 
-  it("sends the payload through the chosen sink and empties the queue", function()
+  it("copies the payload to the clipboard and empties the queue", function()
     queued("sample.lua")
-    local sent
-    with_sink(function(_name, text, _opts, on_done)
-      sent = text
-      on_done(true, nil)
-    end, function()
-      rc.flush({ submit = false })
+    local copied
+    with_clipboard(function()
+      rc.flush()
+      copied = vim.fn.getreg("+")
     end)
 
-    assert.is_truthy(sent:find("@sample.lua#L1", 1, true))
+    assert.is_truthy(copied:find("@sample.lua#L1", 1, true))
+    assert.is_truthy(copied:find("look here", 1, true))
     assert.are.equal(0, rc.count())
   end)
 
-  it("keeps the queue when the sink fails", function()
-    queued("sample.lua")
-    with_sink(function(_name, _text, _opts, on_done)
-      on_done(false, "boom")
-    end, function()
-      rc.flush({})
-    end)
-
-    assert.are.equal(1, rc.count())
-  end)
-
-  -- Delivery is asynchronous, so a second <leader>as (or the <leader>aS reflex
-  -- of "did that go through?") lands while the first send is still open. Without
-  -- a guard the agent receives the whole review twice.
-  it("ignores a second flush while the first is in flight", function()
-    queued("sample.lua")
-    local calls, finish = 0, nil
-    with_sink(function(_name, _text, _opts, on_done)
-      calls = calls + 1
-      finish = on_done
-    end, function()
-      rc.flush({})
-      rc.flush({ submit = true })
-      assert.are.equal(1, calls)
-      assert.are.equal(1, rc.count())
-      finish(true, nil)
-      assert.are.equal(0, rc.count())
+  -- An empty flush must leave the clipboard alone: <leader>as pressed with
+  -- nothing queued would otherwise silently destroy whatever you had yanked.
+  it("leaves the clipboard untouched when nothing is queued", function()
+    with_clipboard(function()
+      vim.fn.setreg("+", "precious")
+      rc.flush()
+      assert.are.equal("precious", vim.fn.getreg("+"))
     end)
   end)
+end)
 
-  it("does not latch the guard when a sink throws", function()
-    queued("sample.lua")
-    with_sink(function()
-      error("sink blew up")
-    end, function()
-      assert.is_false(pcall(rc.flush, {}))
-    end)
+describe("config.review_comments.discard", function()
+  it("empties the queue and releases the extmarks", function()
+    rc.clear()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, vim.fn.getcwd() .. "/discardable.lua")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two" })
+    rc.push(buf, 1, nil, "a")
+    rc.push(buf, 2, nil, "b")
+    assert.are.equal(2, rc.count())
 
-    local calls = 0
-    with_sink(function(_name, _text, _opts, on_done)
-      calls = calls + 1
-      on_done(true, nil)
-    end, function()
-      rc.flush({})
-    end)
-    assert.are.equal(1, calls)
-  end)
+    rc.discard()
 
-  it("lets the next flush through once a failed send has answered", function()
-    queued("sample.lua")
-    local calls = 0
-    with_sink(function(_name, _text, _opts, on_done)
-      calls = calls + 1
-      on_done(false, "boom")
-    end, function()
-      rc.flush({})
-      rc.flush({})
-    end)
-
-    assert.are.equal(2, calls)
-    assert.are.equal(1, rc.count())
+    assert.are.equal(0, rc.count())
+    assert.is_nil(rc.payload())
+    -- clear() deletes every mark it set, so the namespace is empty again.
+    local ns = vim.api.nvim_get_namespaces()["review_comments"]
+    assert.are.same({}, vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {}))
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
   end)
 end)
 

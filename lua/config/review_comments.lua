@@ -1,5 +1,10 @@
--- Review comments queued in Neovim and handed to the coding agent running in
--- the next cmux pane, each carrying the `@path#L39-41` the comment is about.
+-- Review comments queued while reading a change, then handed to a coding agent
+-- as one batch, each carrying the `@path#L39-41` it is about.
+--
+-- `@path#L39-41` is not a cosmetic spelling: it is exactly what Claude Code's
+-- IDE at-mention emits into its own prompt, so a pasted batch resolves as real
+-- file mentions rather than being read as prose. Other agents read it as an
+-- ordinary reference.
 --
 -- The queue is memory-only and dies with the session: a comment is a thing you
 -- are about to say, not a document. Nothing here writes to disk.
@@ -25,9 +30,6 @@ local ns = vim.api.nvim_create_namespace("review_comments")
 
 ---@type ReviewComment[]
 local queue = {}
-
---- True from the moment a batch is handed to a sink until the sink answers.
-local flushing = false
 
 --- Queue a comment on `buf` covering lines `first`..`last` (1-indexed, `last`
 --- nil for a single line). False when the buffer has no file behind it, since
@@ -212,8 +214,16 @@ function M.list()
     if not choice then
       return
     end
-    vim.ui.select({ "Jump", "Drop" }, { prompt = choice.file }, function(action)
-      if action == "Jump" then
+    vim.ui.select({ "Jump", "Edit", "Drop" }, { prompt = choice.file }, function(action)
+      if action == "Edit" then
+        -- Seeded with the current text so a typo is a correction, not a retype.
+        vim.ui.input({ prompt = "Review comment: ", default = choice.text }, function(text)
+          if not text or vim.trim(text) == "" then
+            return
+          end
+          queue[index].text = vim.trim(text)
+        end)
+      elseif action == "Jump" then
         local target = queue[index]
         if not vim.api.nvim_buf_is_valid(target.bufnr) then
           vim.notify("Buffer for " .. choice.file .. " is gone", vim.log.levels.WARN)
@@ -232,46 +242,30 @@ function M.list()
   end)
 end
 
---- Hand the whole batch to the agent. The queue is emptied only on success --
---- a failed send must not silently lose a review.
----@param opts table|nil `{ submit = boolean }`
-function M.flush(opts)
-  opts = opts or {}
-  -- Delivery is asynchronous, so <leader>as pressed twice -- or followed by the
-  -- "did that go through?" <leader>aS -- would re-send a queue nothing has
-  -- emptied yet, and the agent would read the whole review twice.
-  if flushing then
-    vim.notify("A send is already in progress")
-    return
-  end
+--- Put the whole batch on the clipboard, ready to paste into whichever agent
+--- you are looking at.
+---
+--- The clipboard is the destination on purpose, and it replaced a sink that
+--- typed the batch straight into a sibling cmux pane. That sink could deliver a
+--- review into the wrong session: it addressed the target by cmux `ref`
+--- (`surface:2`), which is resolved against the live tree at call time with no
+--- documented stability, so a ref cached at the first flush could later name a
+--- different surface -- and the send would exit 0 while your comments landed in
+--- someone else's agent. Even correctly addressed, injected text goes wherever
+--- focus is in that pane, so a permission prompt or a picker would swallow it.
+--- Pasting costs one keystroke and always lands where you are looking.
+function M.flush()
   local text = M.payload()
   if not text then
     vim.notify("No review comments queued")
     return
   end
-  local sinks = require("config.review_sinks")
-  local name = sinks.choose()
-  flushing = true
-  -- pcall'd because a sink that throws before it answers would otherwise latch
-  -- the guard for the rest of the session -- no further send would go out.
-  local called, err_call = pcall(sinks.send, name, text, { submit = opts.submit }, function(ok, err)
-    flushing = false
-    if not ok then
-      vim.notify("Review comments not sent: " .. (err or "unknown"), vim.log.levels.ERROR)
-      return
-    end
-    local n = #queue
-    M.clear()
-    if name == "clipboard" then
-      vim.notify(string.format("%d review comment(s) copied — not a cmux session", n))
-    else
-      vim.notify(string.format("Sent %d review comment(s)", n))
-    end
-  end)
-  if not called then
-    flushing = false
-    error(err_call, 0)
-  end
+  local n = #queue
+  -- `+` only: clipboard=unnamedplus already makes it the unnamed register, so
+  -- `p` pastes it too.
+  vim.fn.setreg("+", text)
+  M.clear()
+  vim.notify(string.format("%d review comment(s) copied — paste into the agent", n))
 end
 
 --- Throw the batch away.

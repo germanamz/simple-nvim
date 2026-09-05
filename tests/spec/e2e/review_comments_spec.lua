@@ -41,7 +41,7 @@ describe("e2e: review comments", function()
     return (spec:gsub("<leader>", leader))
   end
 
-  local keys = { "<leader>ac", "<leader>al", "<leader>as", "<leader>aS", "<leader>ax" }
+  local keys = { "<leader>ac", "<leader>al", "<leader>as", "<leader>ax" }
 
   it("binds all five keys with a desc", function()
     for _, lhs in ipairs(keys) do
