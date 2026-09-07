@@ -969,6 +969,16 @@ languages like Go. See [superpowers/token-emphasis.md](superpowers/token-emphasi
 Nothing else here is a toggle: the comment tiers and the bold declaration names
 are highlight groups, retuned in `lua/config/syntax_emphasis.lua`.
 
+**Long lines unfold on their own.** Soft-wrap is off, so a line wider than the
+window is cut at the right edge with a `›` marker (see §3 for scrolling to the
+rest of it by hand). Rest the cursor on such a line for a couple of seconds and it
+unfolds in place — wrapped across the rows below, which are pushed down rather
+than covered — then folds back the moment you move, scroll, type, or leave normal
+mode. There is no key for it, and nothing to dismiss. It stays quiet where it
+would have nothing to add or nothing correct to draw: a soft-wrapped window, a
+closed fold, or a window you have already scrolled sideways. See
+[superpowers/long-line-peek.md](superpowers/long-line-peek.md).
+
 ---
 
 ## 22. Command-line tricks

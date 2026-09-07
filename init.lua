@@ -60,6 +60,9 @@ require("config.statusline").setup()
 require("config.syntax_emphasis").setup()
 require("config.block_guides").setup()
 require("config.decl_rules").setup()
+-- Unfolds a too-wide line in place after the cursor rests on it (~2.5s), so the
+-- tail is readable without scrolling the viewport sideways. 'wrap' stays off.
+require("config.long_line_peek").setup()
 -- Keep open buffers following the file on disk. 'autoread' is on by default but
 -- only runs when something asks Neovim to re-stat, and nothing here ever did --
 -- so an agent or CLI formatter rewriting a file left every buffer-derived

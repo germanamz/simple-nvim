@@ -24,6 +24,11 @@ divergence is called out — those deltas are usually the most useful part.
   blocks the cursor is nested inside.
 - **[nvim-tree-context.md](nvim-tree-context.md).** Sticky ancestor folders
   pinned to the top of the file tree.
+- **[long-line-peek.md](long-line-peek.md).** A line too wide for the window
+  unfolds in place after a 2.5s dwell, then folds back. Why it is a same-buffer
+  float over a `virt_lines` spacer rather than rendered virtual text, and the
+  three non-obvious constraints (measure the height, bound it by the window, scope
+  the spacer to one window).
 - **[telescope-pickers.md](telescope-pickers.md).** The shared picker-legend
   machinery, plus the three pickers built on it: buffers flags, folder-scoped
   grep, and the LSP client picker.
