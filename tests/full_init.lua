@@ -6,6 +6,13 @@ vim.env.NVIM_BOOTSTRAP = "0"
 -- Keep tests hermetic: never read or write the user's ShaDa (see minimal_init).
 vim.o.shadafile = "NONE"
 
+-- Keep tests hermetic: never open a swapfile. An unnamed buffer's swap name is
+-- derived from the cwd alone (`%Users%...%nvim.sw?`), so every spec that creates
+-- one competes for a single finite name family in the user's shared swap dir --
+-- and a run reaped by run-plenary.sh's SIGKILL leaves its file behind forever.
+-- Enough leftovers and Neovim runs out of alternatives: E303, mid-`before_each`.
+vim.o.swapfile = false
+
 -- Plenary's PlenaryBustedDirectory always passes `--noplugin` to child nvim
 -- when `minimal_init` is set. That flips `loadplugins` off, which makes
 -- `lazy.setup` short-circuit before registering any specs. Re-enable here

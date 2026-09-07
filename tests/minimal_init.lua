@@ -8,6 +8,13 @@ vim.env.NVIM_BOOTSTRAP = "0"
 -- shada file and could clobber the user's marks/history.
 vim.o.shadafile = "NONE"
 
+-- Keep tests hermetic: never open a swapfile. An unnamed buffer's swap name is
+-- derived from the cwd alone (`%Users%...%nvim.sw?`), so every spec that creates
+-- one competes for a single finite name family in the user's shared swap dir --
+-- and a run reaped by run-plenary.sh's SIGKILL leaves its file behind forever.
+-- Enough leftovers and Neovim runs out of alternatives: E303, mid-`before_each`.
+vim.o.swapfile = false
+
 local data = vim.fn.stdpath("data")
 vim.opt.rtp:prepend(data .. "/lazy/plenary.nvim")
 
