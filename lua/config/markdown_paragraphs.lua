@@ -318,6 +318,18 @@ local function compute(bufnr)
 end
 
 function M.marker()
+  -- 'statuscolumn' is evaluated once per *screen* row, not per buffer line, and
+  -- v:lnum stays on the buffer line throughout -- so a wrapped continuation row
+  -- (v:virtnum > 0) or a virtual line (v:virtnum < 0, e.g. the spacer
+  -- config.long_line_peek parks under a peeked line) would re-render this
+  -- buffer line's marker on every extra row. Core already blanks its own `%l`
+  -- there; do the same for ours. Width must still match, or the text column
+  -- shifts on those rows.
+  if vim.v.virtnum ~= 0 then
+    local data = cache[vim.api.nvim_get_current_buf()]
+    return data and data.empty or "      "
+  end
+
   local winid = vim.g.statusline_winid
   local bufnr
   if type(winid) == "number" and winid ~= 0 then
