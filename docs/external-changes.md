@@ -195,6 +195,16 @@ The sweep can only fix state derived from buffers. It cannot see:
 `<Space>r` sweeps unconditionally, re-diffs gitsigns and fires
 `FileRefreshForced`. `<Space>gR` remains the git-only version of the same thing.
 
+## When the server itself is the stale part
+
+A sweep fixes what the server was *told*, not the server. If it is wedged rather
+than behind — no diagnostics at all, or diagnostics that outlive the re-read —
+`<Space>lR` (`:LspRestartAll`) stops every client and re-attaches every open file
+buffer, re-reading each one first for the reason section 2 gives. It is the
+workspace-wide counterpart to `<Space>lr`, which only reaches the current
+buffer's clients and cannot reach a buffer whose client already died. See
+[keybindings.md](keybindings.md) section 14.
+
 ## See also
 
 - `lua/config/file_reload.lua` — the sweep, the conflict handler, the events.

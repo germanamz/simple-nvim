@@ -633,10 +633,24 @@ Global (not buffer-local):
 
 | Keys         | Action                                                  |
 | ------------ | ------------------------------------------------------- |
+| `<Space>lR`  | restart **every** LSP server and re-attach every open buffer (`:LspRestartAll`) |
 | `<Space>ll`  | picker over active LSP clients (`:LspList`)              |
 | `<Space>lk`  | stop LSP servers left serving no buffer (`:LspReapIdle`) |
 | `gK`         | **documentation** for the symbol / import under the cursor |
 | `<Space>kd`  | picker over this project's declared dependencies         |
+
+`<Space>lR` is the blunt one, for when the servers are wedged and `<Space>lr` is
+not enough. It reaches two things the per-buffer restart cannot. A superproject
+runs one client per root, so `<Space>lr` fixes the file you are standing in and
+leaves every sibling package answering from state it read before the branch
+switch. And a buffer whose server *died* has no client left to walk back from —
+`<Space>lr` says "no LSP clients on this buffer" and the picker cannot see it
+either — so reopening the file used to be the only way back. `<Space>lR` takes
+its list from the open **file buffers** instead: every one of them is re-read
+from disk, every client is stopped, and every buffer is re-attached, with the
+buffer you are in resolved last so ts_ls picks up the TypeScript *this* package
+pins. It is global, not buffer-local, precisely because the buffer that needs it
+most is the one with nothing attached.
 
 `gK` is the docs counterpart to `K`: where `K` shows the hover blurb, `gK` opens
 the actual documentation. It asks the running server first — gopls hands back a
@@ -741,6 +755,7 @@ html, cssls, marksman, mdx_analyzer. Each attaches only on its `filetypes`.
 | `:LspRestart`      | restart attached clients               |
 | `:LspReapIdle`     | stop clients with no attached buffers  |
 | `:LspList`         | pick a client to stop or restart       |
+| `:LspRestartAll`   | stop every client, re-attach every buffer |
 | `:Mason`           | manage server binaries                 |
 | `:checkhealth lsp` | diagnose attach problems               |
 
@@ -1058,9 +1073,10 @@ Single press closes the picker (not "go to normal mode inside the picker").
 
 An agent, a CLI formatter or a `git checkout` rewriting a file you have open.
 
-| Keys       | Action                                              |
-| ---------- | --------------------------------------------------- |
-| `<Space>r` | re-read every open buffer from disk and re-resolve git |
+| Keys        | Action                                              |
+| ----------- | --------------------------------------------------- |
+| `<Space>r`  | re-read every open buffer from disk and re-resolve git |
+| `<Space>lR` | the same re-read, plus a restart of every LSP server ([section 14](#14-lsp)) |
 
 Buffers follow the file on their own: every open file buffer is re-stat'd when
 nvim regains focus, when you enter a buffer, and when you pause (`CursorHold`).
@@ -1079,6 +1095,10 @@ terminal that doesn't forward focus events gets no `FocusGained`.
 If a file changes on disk **while you have unsaved edits in it**, nothing is
 reloaded and nothing is lost — you get a warning naming the file. `:e!` takes the
 disk copy, `:w` keeps yours.
+
+`<Space>r` leaves the servers running: a re-read is enough, because reloading a
+buffer re-sends it. Reach for `<Space>lR` when a server is not merely behind but
+wedged — no diagnostics at all, or diagnostics that survive the re-read.
 
 Details, and why `<Space>lr` alone never fixed stale diagnostics:
 [external-changes.md](external-changes.md).

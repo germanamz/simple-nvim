@@ -283,3 +283,231 @@ describe("config.lsp_picker.restart_clients", function()
     assert.are.equal(0, reattached)
   end)
 end)
+
+-- restart_all is the full-reload hatch (<leader>lR / :LspRestartAll). It differs
+-- from restart_clients in the two places that matter when the LSP is wedged:
+-- it stops EVERY live client rather than the current buffer's, and it takes its
+-- re-attach set from the open file buffers rather than from `attached_buffers`
+-- -- so it reaches a buffer whose server died, which nothing else here can.
+describe("config.lsp_picker.restart_all", function()
+  local tmpdir, group
+
+  local function write_file(path, content)
+    local f = assert(io.open(path, "w"))
+    f:write(content)
+    f:close()
+  end
+
+  local function lines(buf)
+    return table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), "|")
+  end
+
+  --- A loaded, named, hidden file buffer with a filetype: the shape a restart
+  --- has to re-attach. Hidden because the stale ones never are displayed.
+  local function file_buf(name, content)
+    local path = tmpdir .. "/" .. name
+    write_file(path, content or "")
+    local buf = vim.fn.bufadd(path)
+    vim.fn.bufload(buf)
+    vim.bo[buf].filetype = "lua"
+    return buf, path
+  end
+
+  --- Record FileType fires for `bufs` only, in order. Scoped per buffer so the
+  --- assertions ignore whatever else the harness happens to have open.
+  local function record_filetype(bufs)
+    local fired = {}
+    for _, b in ipairs(bufs) do
+      vim.api.nvim_create_autocmd("FileType", {
+        group = group,
+        buffer = b,
+        callback = function(args)
+          fired[#fired + 1] = args.buf
+        end,
+      })
+    end
+    return fired
+  end
+
+  before_each(function()
+    tmpdir = vim.fn.tempname() .. "-lsp-picker"
+    vim.fn.mkdir(tmpdir, "p")
+    group = vim.api.nvim_create_augroup("lsp_picker_restart_all_spec", { clear = true })
+  end)
+
+  after_each(function()
+    pcall(vim.api.nvim_del_augroup_by_id, group)
+    -- Wipe this block's buffers before their files go: a later restart_all would
+    -- otherwise sweep them, find the path missing and report a deletion.
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+      if vim.api.nvim_buf_get_name(buf):find(tmpdir, 1, true) then
+        pcall(vim.api.nvim_buf_delete, buf, { force = true })
+      end
+    end
+    vim.fn.delete(tmpdir, "rf")
+  end)
+
+  it("re-attaches a buffer no client had claimed", function()
+    local served = file_buf("served.lua")
+    local orphan = file_buf("orphan.lua")
+    local fired = record_filetype({ served, orphan })
+
+    picker.restart_all({ client({ bufs = { [served] = true } }) })
+
+    assert.is_true(
+      vim.tbl_contains(fired, orphan),
+      "a buffer with no client is exactly what restart_clients cannot reach"
+    )
+  end)
+
+  it("stops a client that never served the buffer you are standing in", function()
+    local here = file_buf("here.lua")
+    local there = file_buf("there.lua")
+    local elsewhere = client({ id = 2, root = "/other", bufs = { [there] = true } })
+
+    local stopped = picker.restart_all({ elsewhere }, { last_buf = here })
+
+    assert.are.equal(1, stopped)
+    assert.are.equal(1, elsewhere._stop_calls)
+  end)
+
+  it("resolves last_buf last, so the package you are in wins", function()
+    local a = file_buf("a.lua")
+    local b = file_buf("b.lua")
+    local fired = record_filetype({ a, b })
+
+    picker.restart_all({}, { last_buf = a })
+
+    assert.are.equal(a, fired[#fired])
+  end)
+
+  it("skips buffers with no file behind them", function()
+    local scratch = vim.api.nvim_create_buf(false, true)
+    local fired = record_filetype({ scratch })
+
+    picker.restart_all({})
+
+    assert.are.equal(0, #fired, "re-attached a scratch buffer")
+    vim.api.nvim_buf_delete(scratch, { force = true })
+  end)
+
+  it("skips a buffer with no filetype for a server to match", function()
+    local buf = file_buf("plain.lua")
+    vim.bo[buf].filetype = ""
+    local fired = record_filetype({ buf })
+
+    picker.restart_all({})
+
+    assert.are.equal(0, #fired)
+  end)
+
+  it("re-reads a file that changed on disk before re-attaching", function()
+    local buf, path = file_buf("changed.lua", "before\n")
+    write_file(path, "after\n")
+    local at_reattach
+    vim.api.nvim_create_autocmd("FileType", {
+      group = group,
+      buffer = buf,
+      callback = function()
+        at_reattach = lines(buf)
+      end,
+    })
+
+    picker.restart_all({})
+
+    assert.are.equal("after", lines(buf), "restart left the buffer holding stale text")
+    -- didOpen serializes buffer lines, so a re-attach that lands first hands the
+    -- fresh server the same text and gets the same diagnostics back.
+    assert.are.equal("after", at_reattach, "re-attached before re-reading the file")
+  end)
+
+  it("makes each buffer current while its FileType handlers run", function()
+    local buf = file_buf("current.lua")
+    local seen
+    vim.api.nvim_create_autocmd("FileType", {
+      group = group,
+      buffer = buf,
+      callback = function()
+        seen = vim.api.nvim_get_current_buf()
+      end,
+    })
+
+    picker.restart_all({})
+
+    -- nvim_exec_autocmds sets <abuf> but does not switch buffers, while
+    -- ftplugins act on the CURRENT one: $VIMRUNTIME/ftplugin/lua.lua calls
+    -- vim.treesitter.start() with no bufnr. Re-attaching a buffer you are not
+    -- standing in would otherwise setlocal its filetype's options onto the
+    -- buffer you are.
+    assert.are.equal(buf, seen)
+  end)
+
+  it("keeps re-attaching after a handler wipes one of the buffers", function()
+    -- The list is computed before the first checktime, and both halves of the
+    -- cycle can invalidate an entry: config.file_reload pcalls its own reload
+    -- loop for exactly this reason ("a buffer can be wiped by an autocmd that an
+    -- earlier reload in this same loop triggered"). Buffers fire in bufnr order,
+    -- so `doomed` is already gone by the time the cycle reaches it.
+    local first = file_buf("first.lua")
+    local doomed = file_buf("doomed.lua")
+    local last = file_buf("last.lua")
+    vim.api.nvim_create_autocmd("FileType", {
+      group = group,
+      buffer = first,
+      callback = function()
+        vim.api.nvim_buf_delete(doomed, { force = true })
+      end,
+    })
+    local fired = record_filetype({ last })
+
+    picker.restart_all({})
+
+    assert.is_true(vim.tbl_contains(fired, last), "a wiped buffer stopped the re-attach")
+  end)
+
+  it("re-attaches open buffers even when no client is running at all", function()
+    local buf = file_buf("crashed.lua")
+    local fired = record_filetype({ buf })
+
+    local stopped, reattached = picker.restart_all({})
+
+    assert.are.equal(0, stopped)
+    assert.is_true(vim.tbl_contains(fired, buf), "a crashed server leaves nothing to walk")
+    assert.is_true(reattached >= 1)
+  end)
+end)
+
+-- The <leader>lR / :LspRestartAll wrapper. Split out the way config.lsp_reap
+-- splits sweep_and_notify: the user asked, so say what happened either way --
+-- and "nothing was running" is a real answer here, not an error, since a dead
+-- server is one of the states this key exists to recover from.
+describe("config.lsp_picker.restart_all_and_notify", function()
+  local notify, said
+
+  before_each(function()
+    said = {}
+    notify = vim.notify
+    vim.notify = function(msg)
+      said[#said + 1] = msg
+    end
+  end)
+
+  after_each(function()
+    vim.notify = notify
+  end)
+
+  it("reports the clients it stopped and the buffers it re-attached", function()
+    picker.restart_all_and_notify({ client({ id = 1 }) })
+
+    assert.are.equal(1, #said)
+    assert.is_truthy(said[1]:find("restarted 1 client across", 1, true))
+    assert.is_nil(said[1]:find("1 clients", 1, true), "pluralised a single client")
+  end)
+
+  it("says nothing was running rather than reporting zero clients", function()
+    picker.restart_all_and_notify({})
+
+    assert.are.equal(1, #said)
+    assert.is_truthy(said[1]:find("no LSP servers were running", 1, true))
+  end)
+end)

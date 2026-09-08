@@ -196,6 +196,28 @@ vim.api.nvim_create_user_command("LspList", function()
   require("config.lsp_picker").open()
 end, { desc = "Pick an LSP client to stop or restart" })
 
+-- The blunt hatch when the servers are wedged: stop EVERY client and re-attach
+-- every open file buffer. `<leader>lr` cannot do either half — it walks the
+-- CURRENT buffer's clients, so in a superproject (one client per root) it fixes
+-- the file you are standing in and leaves the rest of the workspace answering
+-- from stale state, and a buffer whose server died has no client to walk back
+-- from at all. Global rather than buffer-local for that second reason: the
+-- buffer that most needs this is the one with nothing attached to hang a
+-- buffer-local map off. See lua/config/lsp_picker.lua.
+vim.keymap.set("n", "<leader>lR", function()
+  -- last_buf: this buffer resolves last, so in a mixed-version monorepo the new
+  -- client runs the TypeScript THIS package pins (see config.lsp_tsdk).
+  require("config.lsp_picker").restart_all_and_notify(nil, {
+    last_buf = vim.api.nvim_get_current_buf(),
+  })
+end, { desc = "Restart all LSP servers" })
+
+vim.api.nvim_create_user_command("LspRestartAll", function()
+  require("config.lsp_picker").restart_all_and_notify(nil, {
+    last_buf = vim.api.nvim_get_current_buf(),
+  })
+end, { desc = "Stop every LSP client and re-attach every open buffer" })
+
 -- Yank `path:line` (relative to the project root) for the cursor line, or the
 -- line span of a visual selection. See lua/config/file_reference.lua for how
 -- the root is picked in a superproject. Lazy require: the module (and its git

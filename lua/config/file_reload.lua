@@ -97,6 +97,16 @@ local function warn(name, advice)
   vim.notify(name .. " " .. advice, vim.log.levels.WARN)
 end
 
+--- Every buffer with an on-disk truth to re-read, in bufnr order.
+---
+--- Exported because a sweep is not the only thing that has to act on this exact
+--- set: config.lsp_picker's full LSP restart re-attaches the buffers a sweep can
+--- refresh, and one definition of "a file buffer" beats two that drift.
+---@return integer[]
+function M.buffers()
+  return vim.tbl_filter(reloadable, vim.api.nvim_list_bufs())
+end
+
 --- Re-stat every open file buffer and let 'autoread' reload the ones that moved.
 ---
 --- Returns how many buffers were checked; 0 when the sweep was skipped (mid-edit
@@ -114,20 +124,17 @@ function M.sweep(opts)
   end
   last_sweep = now
 
-  local checked = 0
-  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if reloadable(buf) then
-      checked = checked + 1
-      if opts._record then
-        opts._record[#opts._record + 1] = buf
-      end
-      -- Per-bufnr: the bare form would skip every buffer that is not currently
-      -- displayed. pcall because a buffer can be wiped by an autocmd that an
-      -- earlier reload in this same loop triggered.
-      pcall(vim.cmd, "checktime " .. buf)
+  local bufs = M.buffers()
+  for _, buf in ipairs(bufs) do
+    if opts._record then
+      opts._record[#opts._record + 1] = buf
     end
+    -- Per-bufnr: the bare form would skip every buffer that is not currently
+    -- displayed. pcall because a buffer can be wiped by an autocmd that an
+    -- earlier reload in this same loop triggered.
+    pcall(vim.cmd, "checktime " .. buf)
   end
-  return checked
+  return #bufs
 end
 
 --- The `<leader>r` hatch: sweep unconditionally, then tell everything that
