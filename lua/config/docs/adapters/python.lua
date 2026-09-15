@@ -302,6 +302,11 @@ local function interpreter(ctx)
   return exe
 end
 
+--- For config.docs.brief.python, which asks this same interpreter which Python
+--- version's documentation `K` should read. Underscored because it is not part
+--- of the DocAdapter contract, which the registry spec holds adapters to.
+M._interpreter = interpreter
+
 --- The project's site-packages directory.
 ---
 --- Built from the venv DIRECTORY, never from the interpreter path: every venv
