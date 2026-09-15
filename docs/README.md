@@ -72,6 +72,11 @@ beyond the code.
   comment carrying the `@path#L39-41` it names. Why the ranges follow your edits,
   why the destination is the clipboard rather than the agent's terminal, and the
   five transports that were investigated and rejected.
+- **[hover-docs.md](hover-docs.md).** Why `K` on `realloc`, `std::vector::push_back`
+  or `len` showed a signature and nothing else (the headers and stubs carry no
+  docs), and how `K` now appends an excerpt from offline DevDocs bundles
+  (`:DocsInstall`): how clangd and pyright name the symbol, how each page family
+  is cut down to a hover, and the alternatives that were rejected.
 - **[superpowers/](superpowers/README.md).** The engineering record: how the
   larger pieces were designed and what actually shipped. Start with
   [testing.md](superpowers/testing.md) before changing anything — it covers the
