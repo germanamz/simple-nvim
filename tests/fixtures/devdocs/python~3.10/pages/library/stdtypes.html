@@ -1,0 +1,46 @@
+<dl class="py class" id="index-29"> <dt id="str">
+<code>class str(object='')</code> </dt> <dt>
+<code>class str(object=b'', encoding='utf-8', errors='strict')</code> </dt> <dd>
+<p>Return a <a class="reference internal" href="#textseq"><span class="std std-ref">string</span></a> version of <em>object</em>. If <em>object</em> is not provided, returns the empty string. Otherwise, the behavior of <code>str()</code> depends on whether <em>encoding</em> or <em>errors</em> is given, as follows.</p> <p>If neither <em>encoding</em> nor <em>errors</em> is given, <code>str(object)</code> returns <a class="reference internal" href="../reference/datamodel#object.__str__" title="object.__str__"><code>type(object).__str__(object)</code></a>, which is the “informal” or nicely printable string representation of <em>object</em>. For string objects, this is the string itself. If <em>object</em> does not have a <a class="reference internal" href="../reference/datamodel#object.__str__" title="object.__str__"><code>__str__()</code></a> method, then <a class="reference internal" href="#str" title="str"><code>str()</code></a> falls back to returning <a class="reference internal" href="functions#repr" title="repr"><code>repr(object)</code></a>.</p><dl class="py method"> <dt id="str.split">
+<code>str.split(sep=None, maxsplit=- 1)</code> </dt> <dd>
+<p>Return a list of the words in the string, using <em>sep</em> as the delimiter string. If <em>maxsplit</em> is given, at most <em>maxsplit</em> splits are done (thus, the list will have at most <code>maxsplit+1</code> elements). If <em>maxsplit</em> is not specified or <code>-1</code>, then there is no limit on the number of splits (all possible splits are made).</p> <p>If <em>sep</em> is given, consecutive delimiters are not grouped together and are deemed to delimit empty strings (for example, <code>'1,,2'.split(',')</code> returns <code>['1', '', '2']</code>). The <em>sep</em> argument may consist of multiple characters (for example, <code>'1&lt;&gt;2&lt;&gt;3'.split('&lt;&gt;')</code> returns <code>['1', '2', '3']</code>). Splitting an empty string with a specified separator returns <code>['']</code>.</p> <p>For example:</p> <pre data-language="python">&gt;&gt;&gt; '1,2,3'.split(',')
+['1', '2', '3']
+&gt;&gt;&gt; '1,2,3'.split(',', maxsplit=1)
+['1', '2,3']
+&gt;&gt;&gt; '1,2,,3,'.split(',')
+['1', '2', '', '3', '']
+</pre> <p>If <em>sep</em> is not specified or is <code>None</code>, a different splitting algorithm is applied: runs of consecutive whitespace are regarded as a single separator, and the result will contain no empty strings at the start or end if the string has leading or trailing whitespace. Consequently, splitting an empty string or a string consisting of just whitespace with a <code>None</code> separator returns <code>[]</code>.</p> <p>For example:</p> <pre data-language="python">&gt;&gt;&gt; '1 2 3'.split()
+['1', '2', '3']
+&gt;&gt;&gt; '1 2 3'.split(maxsplit=1)
+['1', '2 3']
+&gt;&gt;&gt; '   1   2   3   '.split()
+['1', '2', '3']
+</pre> </dd>
+</dl><dl class="py method" id="index-33"> <dt id="str.splitlines">
+<code>str.splitlines(keepends=False)</code> </dt> <dd>
+<p>Return a list of the lines in the string, breaking at line boundaries. Line breaks are not included in the resulting list unless <em>keepends</em> is given and true.</p> <p>This method splits on the following line boundaries. In particular, the boundaries are a superset of <a class="reference internal" href="../glossary#term-universal-newlines"><span class="xref std std-term">universal newlines</span></a>.</p> <table class="docutils align-default">  <thead> <tr>
+<th class="head"><p>Representation</p></th> <th class="head"><p>Description</p></th> </tr> </thead>  <tr>
+<td><p><code>\n</code></p></td> <td><p>Line Feed</p></td> </tr> <tr>
+<td><p><code>\r</code></p></td> <td><p>Carriage Return</p></td> </tr> <tr>
+<td><p><code>\r\n</code></p></td> <td><p>Carriage Return + Line Feed</p></td> </tr> <tr>
+<td><p><code>\v</code> or <code>\x0b</code></p></td> <td><p>Line Tabulation</p></td> </tr> <tr>
+<td><p><code>\f</code> or <code>\x0c</code></p></td> <td><p>Form Feed</p></td> </tr> <tr>
+<td><p><code>\x1c</code></p></td> <td><p>File Separator</p></td> </tr> <tr>
+<td><p><code>\x1d</code></p></td> <td><p>Group Separator</p></td> </tr> <tr>
+<td><p><code>\x1e</code></p></td> <td><p>Record Separator</p></td> </tr> <tr>
+<td><p><code>\x85</code></p></td> <td><p>Next Line (C1 Control Code)</p></td> </tr> <tr>
+<td><p><code>\u2028</code></p></td> <td><p>Line Separator</p></td> </tr> <tr>
+<td><p><code>\u2029</code></p></td> <td><p>Paragraph Separator</p></td> </tr>  </table> <div class="versionchanged"> <p><span class="versionmodified changed">Changed in version 3.2: </span><code>\v</code> and <code>\f</code> added to list of line boundaries.</p> </div> <p>For example:</p> <pre data-language="python">&gt;&gt;&gt; 'ab c\n\nde fg\rkl\r\n'.splitlines()
+['ab c', '', 'de fg', 'kl']
+&gt;&gt;&gt; 'ab c\n\nde fg\rkl\r\n'.splitlines(keepends=True)
+['ab c\n', '\n', 'de fg\r', 'kl\r\n']
+</pre> <p>Unlike <a class="reference internal" href="#str.split" title="str.split"><code>split()</code></a> when a delimiter string <em>sep</em> is given, this method returns an empty list for the empty string, and a terminal line break does not result in an extra line:</p> <pre data-language="python">&gt;&gt;&gt; "".splitlines()
+[]
+&gt;&gt;&gt; "One line\n".splitlines()
+['One line']
+</pre> <p>For comparison, <code>split('\n')</code> gives:</p> <pre data-language="python">&gt;&gt;&gt; ''.split('\n')
+['']
+&gt;&gt;&gt; 'Two lines\n'.split('\n')
+['Two lines', '']
+</pre> </dd>
+</dl></dd></dl>

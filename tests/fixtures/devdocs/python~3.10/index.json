@@ -1,0 +1,35 @@
+{
+ "entries": [
+  {
+   "name": "len()",
+   "path": "library/functions#len",
+   "type": "Built-in Functions"
+  },
+  {
+   "name": "os.path.join()",
+   "path": "library/os.path#os.path.join",
+   "type": "File & Directory Access"
+  },
+  {
+   "name": "print()",
+   "path": "library/functions#print",
+   "type": "Built-in Functions"
+  },
+  {
+   "name": "str",
+   "path": "library/stdtypes#str",
+   "type": "Built-in Types"
+  },
+  {
+   "name": "str.split()",
+   "path": "library/stdtypes#str.split",
+   "type": "Built-in Types"
+  },
+  {
+   "name": "str.splitlines()",
+   "path": "library/stdtypes#str.splitlines",
+   "type": "Built-in Types"
+  }
+ ],
+ "types": []
+}

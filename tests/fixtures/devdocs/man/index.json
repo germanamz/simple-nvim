@@ -1,0 +1,25 @@
+{
+ "entries": [
+  {
+   "name": "read (2)",
+   "path": "man2/read.2",
+   "type": "man-pages (Linux kernel and C library user-space interface documentation)"
+  },
+  {
+   "name": "read (3p)",
+   "path": "man3/read.3p",
+   "type": "POSIX man pages (Manual pages from the POSIX specification)"
+  },
+  {
+   "name": "realloc (3)",
+   "path": "man3/realloc.3",
+   "type": "man-pages (Linux kernel and C library user-space interface documentation)"
+  },
+  {
+   "name": "tcsetattr (3)",
+   "path": "man3/tcsetattr.3",
+   "type": "man-pages (Linux kernel and C library user-space interface documentation)"
+  }
+ ],
+ "types": []
+}

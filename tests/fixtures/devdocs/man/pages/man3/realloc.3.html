@@ -1,0 +1,109 @@
+<h1>malloc(3) — Linux manual page</h1>   <pre>
+<span class="headline"><i>malloc</i>(3)               Library Functions Manual               <i>malloc</i>(3)</span>
+</pre> <h2>
+NAME </h2>
+<pre>
+       malloc, free, calloc, realloc, reallocarray - allocate and free
+       dynamic memory
+</pre><h2>
+SYNOPSIS </h2>
+<pre>
+       <b>#include &lt;stdlib.h&gt;</b>
+
+       <b>void *malloc(size_t </b><i>size</i><b>);</b>
+       <b>void free(void *_Nullable </b><i>ptr</i><b>);</b>
+       <b>void *calloc(size_t </b><i>nmemb</i><b>, size_t </b><i>size</i><b>);</b>
+       <b>void *realloc(void *_Nullable </b><i>ptr</i><b>, size_t </b><i>size</i><b>);</b>
+       <b>void *reallocarray(void *_Nullable </b><i>ptr</i><b>, size_t </b><i>nmemb</i><b>, size_t </b><i>size</i><b>);</b>
+
+   Feature Test Macro Requirements for glibc (see
+   <a href="../man7/feature_test_macros.7">feature_test_macros(7)</a>):
+
+       <b>reallocarray</b>():
+           Since glibc 2.29:
+               _DEFAULT_SOURCE
+           glibc 2.28 and earlier:
+               _GNU_SOURCE
+</pre><h2>
+DESCRIPTION </h2>
+<pre>
+   <b>malloc()</b>
+       The <b>malloc</b>() function allocates <i>size</i> bytes and returns a pointer
+       to the allocated memory.  <i>The memory is not initialized</i>.  If <i>size</i>
+       is 0, then <b>malloc</b>() returns a unique pointer value that can later
+       be successfully passed to <b>free</b>().  (See "Nonportable behavior"
+       for portability issues.)
+
+   <b>free()</b>
+       The <b>free</b>() function frees the memory space pointed to by <i>ptr</i>,
+       which must have been returned by a previous call to <b>malloc</b>() or
+       related functions.  Otherwise, or if <i>ptr</i> has already been freed,
+       undefined behavior occurs.  If <i>ptr</i> is NULL, no operation is
+       performed.
+
+   <b>calloc()</b>
+       The <b>calloc</b>() function allocates memory for an array of <i>nmemb</i>
+       elements of <i>size</i> bytes each and returns a pointer to the
+       allocated memory.  The memory is set to zero.  If <i>nmemb</i> or <i>size</i>
+       is 0, then <b>calloc</b>() returns a unique pointer value that can later
+       be successfully passed to <b>free</b>().
+
+       If the multiplication of <i>nmemb</i> and <i>size</i> would result in integer
+       overflow, then <b>calloc</b>() returns an error.  By contrast, an
+       integer overflow would not be detected in the following call to
+       <b>malloc</b>(), with the result that an incorrectly sized block of
+       memory would be allocated:
+
+           malloc(nmemb * size);
+
+   <b>realloc()</b>
+       The <b>realloc</b>() function changes the size of the memory block
+       pointed to by <i>ptr</i> to <i>size</i> bytes.  The contents of the memory will
+       be unchanged in the range from the start of the region up to the
+       minimum of the old and new sizes.  If the new size is larger than
+       the old size, the added memory will <i>not</i> be initialized.
+
+       If <i>ptr</i> is NULL, then the call is equivalent to <i>malloc(size)</i>, for
+       all values of <i>size</i>.
+
+       If <i>size</i> is equal to zero, and <i>ptr</i> is not NULL, then the call is
+       equivalent to <i>free(ptr)</i> (but see "Nonportable behavior" for
+       portability issues).
+
+       Unless <i>ptr</i> is NULL, it must have been returned by an earlier call
+       to <b>malloc </b>or related functions.  If the area pointed to was
+       moved, a <i>free(ptr)</i> is done.
+
+   <b>reallocarray()</b>
+       The <b>reallocarray</b>() function changes the size of (and possibly
+       moves) the memory block pointed to by <i>ptr</i> to be large enough for
+       an array of <i>nmemb</i> elements, each of which is <i>size</i> bytes.  It is
+       equivalent to the call
+
+           realloc(ptr, nmemb * size);
+
+       However, unlike that <b>realloc</b>() call, <b>reallocarray</b>() fails safely
+       in the case where the multiplication would overflow.  If such an
+       overflow occurs, <b>reallocarray</b>() returns an error.
+</pre><h2>
+RETURN VALUE </h2>
+<pre>
+       The <b>malloc</b>(), <b>calloc</b>(), <b>realloc</b>(), and <b>reallocarray</b>() functions
+       return a pointer to the allocated memory, which is suitably
+       aligned for any type that fits into the requested size or less.
+       On error, these functions return NULL and set <i><a href="errno.3">errno</a></i>.  Attempting
+       to allocate more than <b>PTRDIFF_MAX </b>bytes is considered an error,
+       as an object that large could cause later pointer subtraction to
+       overflow.
+
+       The <b>free</b>() function returns no value, and preserves <i><a href="errno.3">errno</a></i>.
+
+       The <b>realloc</b>() and <b>reallocarray</b>() functions return NULL if <i>ptr</i> is
+       not NULL and the requested size is zero; this is not considered
+       an error.  (See "Nonportable behavior" for portability issues.)
+       Otherwise, the returned pointer may be the same as <i>ptr</i> if the
+       allocation was not moved (e.g., there was room to expand the
+       allocation in-place), or different from <i>ptr</i> if the allocation was
+       moved to a new address.  If these functions fail, the original
+       block is left untouched; it is not freed or moved.
+</pre>

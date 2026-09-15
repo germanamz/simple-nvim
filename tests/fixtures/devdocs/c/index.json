@@ -1,0 +1,15 @@
+{
+ "entries": [
+  {
+   "name": "memcpy",
+   "path": "string/byte/memcpy",
+   "type": "Strings"
+  },
+  {
+   "name": "realloc",
+   "path": "memory/realloc",
+   "type": "Dynamic memory management"
+  }
+ ],
+ "types": []
+}

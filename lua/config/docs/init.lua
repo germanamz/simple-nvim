@@ -395,6 +395,33 @@ function M.setup()
   require("config.open_url").setup()
   vim.keymap.set("n", "gK", M.open_at_cursor, { desc = "Docs for symbol under cursor" })
   vim.keymap.set("n", "<leader>kd", M.pick, { desc = "Docs: pick a dependency" })
+
+  -- The offline bundles `K` reads excerpts from (config.docs.hover). Explicit
+  -- rather than automatic: `K` must never touch the network, and the man bundle
+  -- alone is 143 MB.
+  vim.api.nvim_create_user_command("DocsInstall", function(opts)
+    local devdocs = require("config.docs.devdocs")
+    if #opts.fargs == 0 then
+      local lines = devdocs.list_installed()
+      vim.notify(
+        #lines > 0 and ("devdocs bundles:\n" .. table.concat(lines, "\n"))
+          or "devdocs: nothing installed; try :DocsInstall c cpp man python~3.X",
+        vim.log.levels.INFO
+      )
+      return
+    end
+    for _, slug in ipairs(opts.fargs) do
+      devdocs.install(slug)
+    end
+  end, {
+    nargs = "*",
+    desc = "Install offline DevDocs bundles for K (no argument: list installed)",
+    complete = function(lead)
+      return vim.tbl_filter(function(slug)
+        return vim.startswith(slug, lead)
+      end, require("config.docs.devdocs").SLUGS)
+    end,
+  })
 end
 
 return M

@@ -1,0 +1,30 @@
+{
+ "entries": [
+  {
+   "name": "std::memcpy",
+   "path": "string/byte/memcpy",
+   "type": "Text processing"
+  },
+  {
+   "name": "std::to_string",
+   "path": "utility/basic_stacktrace/to_string",
+   "type": "Diagnostics"
+  },
+  {
+   "name": "std::to_string",
+   "path": "string/basic_string/to_string",
+   "type": "Strings"
+  },
+  {
+   "name": "std::to_string",
+   "path": "utility/stacktrace_entry/to_string",
+   "type": "Diagnostics"
+  },
+  {
+   "name": "std::vector::push_back",
+   "path": "container/vector/push_back",
+   "type": "Containers"
+  }
+ ],
+ "types": []
+}

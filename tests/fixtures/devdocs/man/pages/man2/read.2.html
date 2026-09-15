@@ -1,0 +1,47 @@
+<h1>read(2) — Linux manual page</h1>   <pre>
+<span class="headline"><i>read</i>(2)                    System Calls Manual                   <i>read</i>(2)</span>
+</pre> <h2>
+NAME </h2>
+<pre>
+       read - read from a file descriptor
+</pre><h2>
+SYNOPSIS </h2>
+<pre>
+       <b>#include &lt;unistd.h&gt;</b>
+
+       <b>ssize_t read(int </b><i>fd</i><b>, void </b><i>buf</i><b>[.</b><i>count</i><b>], size_t </b><i>count</i><b>);</b>
+</pre><h2>
+DESCRIPTION </h2>
+<pre>
+       <b>read</b>() attempts to read up to <i>count</i> bytes from file descriptor <i>fd</i>
+       into the buffer starting at <i>buf</i>.
+
+       On files that support seeking, the read operation commences at
+       the file offset, and the file offset is incremented by the number
+       of bytes read.  If the file offset is at or past the end of file,
+       no bytes are read, and <b>read</b>() returns zero.
+
+       If <i>count</i> is zero, <b>read</b>() <i>may</i> detect the errors described below.
+       In the absence of any errors, or if <b>read</b>() does not check for
+       errors, a <b>read</b>() with a <i>count</i> of 0 returns zero and has no other
+       effects.
+
+       According to POSIX.1, if <i>count</i> is greater than <b>SSIZE_MAX</b>, the
+       result is implementation-defined; see NOTES for the upper limit
+       on Linux.
+</pre><h2>
+RETURN VALUE </h2>
+<pre>
+       On success, the number of bytes read is returned (zero indicates
+       end of file), and the file position is advanced by this number.
+       It is not an error if this number is smaller than the number of
+       bytes requested; this may happen for example because fewer bytes
+       are actually available right now (maybe because we were close to
+       end-of-file, or because we are reading from a pipe, or from a
+       terminal), or because <b>read</b>() was interrupted by a signal.  See
+       also NOTES.
+
+       On error, -1 is returned, and <i><a href="../man3/errno.3">errno</a></i> is set to indicate the error.
+       In this case, it is left unspecified whether the file position
+       (if any) changes.
+</pre>
