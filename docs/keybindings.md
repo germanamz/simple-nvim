@@ -125,8 +125,13 @@ Inside which-key: just keep typing the prefix; pause and the menu appears.
 | Keys      | Action                                  |
 | --------- | --------------------------------------- |
 | `{` / `}` | previous / next blank-line paragraph    |
-| `[[` `]]` | previous / next section (lang-aware)    |
+| `[[` `]]` | previous / next section (treesitter)    |
 | `%`       | matching bracket `(` `[` `{`            |
+
+`[[` and `]]` are driven by the syntax tree in every buffer with a parser, so
+they step between function definitions rather than between braces in column 1 —
+see [section-motion.md](section-motion.md). They take a count, work as operator
+motions (`d]]`), and push the jump list, so `<C-o>` comes back.
 
 ### Per-screen / per-file
 

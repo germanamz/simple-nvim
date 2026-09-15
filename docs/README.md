@@ -15,6 +15,10 @@ beyond the code.
   scanning model that keeps it fast.
 - **[dotted-chain-textobject.md](dotted-chain-textobject.md).** The `ao` / `io`
   mini.ai textobject that selects a whole dotted identifier chain.
+- **[section-motion.md](section-motion.md).** Why `]]` skipped every function in
+  C and C++ (it searches for a brace in column 1, a style the language moved on
+  from), and the treesitter motion that replaces it in every parser-backed
+  buffer — including how it finds inline C++ methods the `locals` query misses.
 - **[leak-diagnostics.md](leak-diagnostics.md).** The capture playbook for the
   2026-07 CPU and memory runaway, and the defects it turned up.
 - **[lsp-typescript-version.md](lsp-typescript-version.md).** Why ts_ls ran

@@ -148,6 +148,12 @@ return {
             vim.wo.foldexpr = "v:lua.vim.treesitter.foldexpr()"
             vim.bo[args.buf].indentexpr = indentexpr_override[args.match]
               or "v:lua.require'nvim-treesitter'.indentexpr()"
+            -- `]]` / `[[` as a syntax-tree section motion. Wired here rather
+            -- than per-ftplugin so it inherits the large-file guard above and
+            -- only ever runs on a buffer whose parser actually started; running
+            -- after core's filetypeplugin autocmd is what lets these buffer-local
+            -- maps replace the runtime's own `]]`. See config.ts_sections.
+            require("config.ts_sections").attach(args.buf)
           end
         end,
       })
