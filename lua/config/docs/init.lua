@@ -266,6 +266,12 @@ local function resolve_url(ctx, ad, coord, cb)
     function(next_)
       next_(ad and ad.url and coord and ad.url(coord, ctx) or nil)
     end,
+    -- The installed DevDocs bundles `K` reads excerpts from also map a symbol
+    -- to its hosted page: cppreference for `std::vector::push_back`, man7 for
+    -- `read`, docs.python.org for `str.split`. A local index, no network.
+    function(next_)
+      require("config.docs.hover").docs_url(ctx.bufnr, next_)
+    end,
     function(next_)
       resolve.document_link(ctx.bufnr, next_)
     end,

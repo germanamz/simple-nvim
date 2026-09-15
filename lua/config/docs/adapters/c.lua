@@ -1,4 +1,4 @@
--- C/C++/ObjC docs — and the blunt part first: there is no docs answer here.
+-- C/C++/ObjC docs — and the blunt part first: this adapter has no web answer.
 --
 -- Why there is no `url`
 -- --------------------
@@ -6,13 +6,18 @@
 -- editorial category segment that is not computable from a symbol name:
 -- `std::sort` lives under /w/cpp/algorithm/sort, `std::vector` under
 -- /w/cpp/container/vector, `std::stoi` under /w/cpp/string/basic_string/stol
--- (note: stol, not stoi). Nothing in "sort" says "algorithm". The only ways to
--- produce that segment are a hand-maintained lookup table — which is a
--- guaranteed-stale liability that would still miss every symbol not in it — or
--- probing the site, which is banned here and would not work anyway: cppreference
--- 403s scripted clients, so a guessed URL cannot even be validated. A URL
--- builder that is wrong for most inputs is worse than no builder, because the
--- driver's search fallback actually finds the page. So: no url, no table.
+-- (note: stol, not stoi). Nothing in "sort" says "algorithm". A hand-maintained
+-- table would be a guaranteed-stale liability, and probing the site is banned
+-- here and would not work anyway (cppreference 403s scripted clients).
+--
+-- The table does exist, though, maintained upstream: DevDocs' cppreference
+-- index maps every symbol to its page. When that bundle is installed
+-- (`:DocsInstall cpp`), the driver's cascade asks config.docs.hover.docs_url,
+-- which names the symbol through clangd's symbolInfo (`std::vector::push_back`,
+-- not the `v.push_back` under the cursor) and opens the exact page. That lives
+-- in the language-blind cascade rather than here because it needs a warm
+-- clangd, and `url` is a synchronous function over a coordinate. Without the
+-- bundle, the search fallback still finds the page.
 --
 -- Why there is no `manifest`, `manifest_line` or `deps`
 -- ----------------------------------------------------

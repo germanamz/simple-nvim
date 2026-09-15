@@ -620,7 +620,7 @@ Buffer-local: these only exist in buffers with an attached LSP client.
 | `grt`        | type definition                                         |
 | `grn`        | rename symbol (Nvim 0.11 default)                       |
 | `gra`        | code action (Nvim 0.11 default)                         |
-| `K`          | hover docs (Nvim 0.11 default)                          |
+| `K`          | hover docs; in C/C++/Python adds a DevDocs excerpt when the server has none |
 | `<C-s>` (insert) | signature help (Nvim 0.11 default)                  |
 | `]r` / `[r`  | next / previous LSP **reference** in this buffer        |
 | `]d` / `[d`  | next / previous **diagnostic** (Nvim 0.11 default)      |
@@ -662,6 +662,29 @@ the actual documentation. It asks the running server first — gopls hands back 
 version-pinned, symbol-anchored `pkg.go.dev` link, and rust-analyzer resolves
 re-exports to the crate that really defines the symbol — then falls back to the
 language adapter, and finally to a web search so the key is never a no-op.
+
+`K` in C, C++ and Python fills the gap `gK` would otherwise be needed for. clangd
+hovers libc and libc++ with a signature and nothing else (the macOS SDK headers
+have no doc comments), and pyright does the same for builtins written in C
+(`len`, `str.split`). When the server's hover has no documentation, `K` appends
+a short excerpt from an offline DevDocs bundle: cppreference for `realloc` and
+`std::vector::push_back`, the POSIX/Linux man pages for `read` or `tcsetattr`,
+the Python library reference for `len`. A hover that already carries docs, and
+any symbol your project declares, is left exactly as the server sent it.
+
+Bundles are downloaded once and never on a keypress. Until one is installed,
+the float says which to get:
+
+| Command                   | Installs                                            |
+| ------------------------- | --------------------------------------------------- |
+| `:DocsInstall c cpp`      | cppreference, C and C++ (5 MB + 45 MB)              |
+| `:DocsInstall man`        | Linux man-pages + POSIX spec pages (143 MB)         |
+| `:DocsInstall python~3.12`| the Python library reference for that version (~20 MB) |
+| `:DocsInstall`            | lists what is installed                             |
+
+Re-running an install refreshes the bundle. With a bundle installed, `gK` on a
+symbol it covers opens the exact hosted page (cppreference, man7.org,
+docs.python.org) instead of falling back to a web search.
 
 Where a language has a good offline docs command (`go doc`, `pydoc`, `man 3`)
 the docs open in a **two-pane reader** instead of the browser — a symbol outline

@@ -275,6 +275,15 @@ vim.api.nvim_create_autocmd("LspAttach", {
     map("]r", lsp_refs.next, "Next LSP reference")
     map("[r", lsp_refs.prev, "Prev LSP reference")
 
+    -- `K` in C, C++ and Python: core's hover, plus a DevDocs excerpt when the
+    -- server has no documentation for a library symbol (libc, libc++, the
+    -- C-implemented Python builtins). Every other filetype keeps core's `K`.
+    -- See lua/config/docs/hover.lua and `:DocsInstall`.
+    local docs_hover = require("config.docs.hover")
+    if docs_hover.has_provider(ft) then
+      map("K", docs_hover.hover, "Hover (with library docs)")
+    end
+
     -- Restart the LSP client(s) on this buffer and re-attach. Handy after a
     -- file rename confuses the server (e.g. ts_ls "Already included file name
     -- ... only in casing"), or to pick up a change the servers never saw now
