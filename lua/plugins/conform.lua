@@ -44,6 +44,15 @@ return {
       -- from nvim-lint.
       formatters = {
         eslint_d = { exit_codes = { 0, 1 } },
+        -- A function-valued override, not a table: conform re-evaluates it on
+        -- every get_formatter_config (conform/init.lua:697), so the style
+        -- decision is made per buffer instead of being frozen at setup. And
+        -- prepend_args extends range_args as well as args
+        -- (conform/util.lua:158), so <leader>F over a visual selection is
+        -- formatted with the same style as a whole-buffer save.
+        ["clang-format"] = function(bufnr)
+          return { prepend_args = require("config.formatters").clang_format_args(bufnr) }
+        end,
       },
       format_on_save = function(buf)
         -- :FormatDisable (global) / :FormatDisable! (this buffer) flip these,
@@ -81,6 +90,18 @@ return {
       pattern = "pyproject.toml",
       callback = function()
         require("config.formatters")._clear_python_cache()
+      end,
+    })
+
+    -- Adding a .clang-format to a C project mid-session flips it from "use our
+    -- fallback style" to "the project decides", so drop the memoized answers on
+    -- that write. Same shape as the pyproject.toml hook above; basenames carry
+    -- no slash, so they match the file anywhere in the tree.
+    vim.api.nvim_create_autocmd("BufWritePost", {
+      group = vim.api.nvim_create_augroup("conform_clang_format_cache", { clear = true }),
+      pattern = { ".clang-format", "_clang-format" },
+      callback = function()
+        require("config.formatters")._clear_clang_cache()
       end,
     })
 

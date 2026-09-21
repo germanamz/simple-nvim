@@ -66,6 +66,89 @@ describe("config.formatters", function()
     end)
   end)
 
+  describe("clang-format entry", function()
+    local root
+
+    before_each(function()
+      M._clear_clang_cache()
+      root = vim.fn.tempname()
+      vim.fn.mkdir(root .. "/src", "p")
+    end)
+
+    after_each(function()
+      vim.fn.delete(root, "rf")
+      M._clear_clang_cache()
+    end)
+
+    local function buf_in_root()
+      local bufnr = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_name(bufnr, root .. "/src/editor.c")
+      return bufnr
+    end
+
+    local function args_for()
+      local bufnr = buf_in_root()
+      local args = M.clang_format_args(bufnr)
+      vim.api.nvim_buf_delete(bufnr, { force = true })
+      return args
+    end
+
+    local function write(name)
+      local f = assert(io.open(root .. "/" .. name, "w"))
+      f:write("BasedOnStyle: Google\n")
+      f:close()
+    end
+
+    it("names the four C-family filetypes after conform's current formatter", function()
+      -- conform renamed the builtin to "clang-format"; conform.formatters.clang_format
+      -- is now a meta.deprecated shim. The name here is also the key the
+      -- prepend_args override in plugins/conform.lua is registered under, so the
+      -- two must not drift.
+      for _, ft in ipairs({ "c", "cpp", "objc", "objcpp" }) do
+        assert.same({ "clang-format" }, M.by_ft[ft], ft .. " should use clang-format")
+      end
+    end)
+
+    it("passes no style when the project ships a .clang-format", function()
+      write(".clang-format")
+      assert.same({}, args_for())
+    end)
+
+    it("passes no style when the project ships a _clang-format", function()
+      write("_clang-format")
+      assert.same({}, args_for())
+    end)
+
+    it("expands short enums and short function bodies when nothing is configured", function()
+      -- clang-format walks to the filesystem root looking for a config, and so
+      -- does clang_format_args -- there is no .git boundary to seal the fixture
+      -- with the way the JS block does. A stray .clang-format above $TMPDIR
+      -- would make clang-format read it and this assertion lie, so check first.
+      local stray = vim.fs.find({ ".clang-format", "_clang-format" }, {
+        upward = true,
+        path = root .. "/src",
+      })[1]
+      assert.is_nil(
+        stray,
+        "test environment has a .clang-format above the fixture: " .. (stray or "")
+      )
+
+      local args = args_for()
+      assert.are.equal(2, #args)
+      assert.are.equal("--style", args[1])
+      assert.is_truthy(args[2]:match("BasedOnStyle: LLVM"))
+      assert.is_truthy(args[2]:match("AllowShortEnumsOnASingleLine: false"))
+      assert.is_truthy(args[2]:match("AllowShortFunctionsOnASingleLine: None"))
+    end)
+
+    it("re-decides after _clear_clang_cache when a .clang-format appears", function()
+      assert.are.equal(2, #args_for())
+      write(".clang-format")
+      M._clear_clang_cache()
+      assert.same({}, args_for())
+    end)
+  end)
+
   describe("JS/TS entries", function()
     local toolchain = require("config.js_toolchain")
     local root

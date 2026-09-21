@@ -60,6 +60,58 @@ function M._clear_python_cache()
   python_cache = {}
 end
 
+-- clang-format walks up from the file looking for .clang-format / _clang-format
+-- and, finding none, formats with bare LLVM style. Two LLVM defaults fold code
+-- that reads better expanded: AllowShortEnumsOnASingleLine collapses any enum
+-- that fits the column limit, and AllowShortFunctionsOnASingleLine = All does
+-- the same to a one-statement function body --
+--
+--   enum editorKey { ARROW_LEFT = 1000, ARROW_RIGHT, ARROW_UP, ARROW_DOWN };
+--   void abFree(struct abuf *ab) { free(ab->b); }
+--
+-- so turn both off. Everything else LLVM might fold (short ifs, loops, blocks,
+-- case labels) is already Never/false, which is why only these two are listed.
+local clang_fallback_style = table.concat({
+  "{BasedOnStyle: LLVM",
+  "AllowShortEnumsOnASingleLine: false",
+  "AllowShortFunctionsOnASingleLine: None}",
+}, ", ")
+
+-- Memoized per directory like python_cache above: conform re-resolves the
+-- formatter config on every format() call, and without a cache each save would
+-- re-walk the tree to the filesystem root. Clear with _clear_clang_cache.
+local clang_cache = {}
+
+-- The extra args for clang-format, as a list to prepend. Empty whenever the
+-- project ships a config of its own, because --style overrides a .clang-format
+-- outright; --fallback-style would apply only in the no-config case but takes
+-- named styles only and rejects inline YAML, so the gate has to live here.
+--
+-- The upward search deliberately has no stop boundary (no .git, unlike
+-- js_toolchain): clang-format's own search runs to the filesystem root, so
+-- stopping earlier would pass --style over a config clang-format would honour.
+function M.clang_format_args(bufnr)
+  local fname = vim.api.nvim_buf_get_name(bufnr)
+  local dir = (fname ~= "" and vim.fs.dirname(fname)) or vim.fn.getcwd()
+  local cached = clang_cache[dir]
+  if cached then
+    return cached
+  end
+
+  local found = vim.fs.find({ ".clang-format", "_clang-format" }, { upward = true, path = dir })[1]
+  local args = found and {} or { "--style", clang_fallback_style }
+
+  clang_cache[dir] = args
+  return args
+end
+
+-- Drop the memoized clang-format decisions (for tests, or after adding a
+-- .clang-format mid-session). conform.lua wires this to a BufWritePost on those
+-- filenames so a new project config takes effect on the next save.
+function M._clear_clang_cache()
+  clang_cache = {}
+end
+
 -- prettierd-first: prettierd is a resident daemon that keeps the prettier engine
 -- warm, so on save it answers in single-digit ms instead of paying Node's cold
 -- start every time. Plain `prettier` stays as the fallback for machines where the
@@ -156,10 +208,13 @@ M.by_ft = {
   -- notify_on_error surfaces it on save. bashls likewise excludes zsh (see
   -- lsp.lua); kept because most local zsh scripts are bash-compatible.
   zsh = { "shfmt" },
-  c = { "clang_format" },
-  cpp = { "clang_format" },
-  objc = { "clang_format" },
-  objcpp = { "clang_format" },
+  -- "clang-format", not conform's older "clang_format" alias: that one is now a
+  -- meta.deprecated shim, and this name is also the key plugins/conform.lua
+  -- registers the clang_format_args prepend_args override under.
+  c = { "clang-format" },
+  cpp = { "clang-format" },
+  objc = { "clang-format" },
+  objcpp = { "clang-format" },
   toml = { "taplo" },
   javascript = js_formatters,
   javascriptreact = js_formatters,

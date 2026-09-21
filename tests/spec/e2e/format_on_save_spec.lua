@@ -285,6 +285,139 @@ describe("e2e: format on save (conform.nvim)", function()
     vim.api.nvim_buf_delete(bufnr, { force = true })
   end)
 
+  -- C: clang-format with no project config falls back to bare LLVM style, which
+  -- folds any enum that fits the column limit and any one-statement function
+  -- body onto a single line. config.formatters.clang_format_args passes an
+  -- LLVM-based --style turning both off, but ONLY when the project ships no
+  -- .clang-format of its own. These two tests pin both halves of that gate.
+  --
+  -- Two assertions per test, for the reason spelled out on the zig case above:
+  -- the reformat alone would also pass with no `c` entry at all whenever clangd
+  -- is attached, because lsp_format = "fallback" would hand the buffer to the
+  -- server, which formats through clang-format too and discovers the very same
+  -- project config. Pinning list_formatters_to_run as well keeps the intended
+  -- path honest.
+  --
+  -- Buffer built through the API rather than `:edit`: c is an LSP-served
+  -- filetype, and a second `:edit` of one across a fresh isolated env trips the
+  -- stale lsp.log path described above.
+  local function c_buffer(path, lines)
+    local bufnr = vim.api.nvim_create_buf(true, false)
+    vim.api.nvim_buf_set_name(bufnr, path)
+    vim.api.nvim_set_current_buf(bufnr)
+    vim.bo[bufnr].filetype = "c"
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    return bufnr
+  end
+
+  -- The collapsed forms both tests below are written against. Short enough to
+  -- fit LLVM's 80-column limit, which is precisely what makes LLVM fold them.
+  local folded_enum = "enum editorKey { ARROW_LEFT = 1000, ARROW_RIGHT, ARROW_UP, ARROW_DOWN };"
+  local folded_fn = "void abFree(struct abuf *ab) { free(ab->b); }"
+
+  it("keeps short enums and function bodies expanded when the project has no config", function()
+    if vim.fn.executable("clang-format") ~= 1 then
+      pending("clang-format not on PATH")
+      return
+    end
+    require("config.formatters")._clear_clang_cache()
+
+    -- clang-format's config search runs to the filesystem root, so a stray
+    -- .clang-format above the fixture would be found by the formatter AND by
+    -- clang_format_args, and this test would silently assert nothing.
+    local stray =
+      vim.fs.find({ ".clang-format", "_clang-format" }, { upward = true, path = root })[1]
+    assert.is_nil(stray, "test environment has a .clang-format above the fixture")
+
+    local path = root .. "/editor.c"
+    -- Fed to clang-format already folded: a formatter that silently no-opped
+    -- would leave these as typed and the assertions below would catch it, so
+    -- the test cannot pass by doing nothing.
+    local bufnr = c_buffer(path, { folded_enum, "", folded_fn })
+
+    local to_run = require("conform").list_formatters_to_run(bufnr)
+    local names = vim.tbl_map(function(f)
+      return f.name
+    end, to_run)
+    assert.are.same({ "clang-format" }, names)
+
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("write!")
+    end)
+
+    wait.wait_for(function()
+      return vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] == "enum editorKey {"
+    end, 5000, "clang-format did not expand the enum on save")
+
+    local disk = assert(io.open(path, "r")):read("*a")
+    assert.are.equal(
+      table.concat({
+        "enum editorKey {",
+        "  ARROW_LEFT = 1000,",
+        "  ARROW_RIGHT,",
+        "  ARROW_UP,",
+        "  ARROW_DOWN",
+        "};",
+        "",
+        "void abFree(struct abuf *ab) {",
+        "  free(ab->b);",
+        "}",
+        "",
+      }, "\n"),
+      disk
+    )
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
+  -- The opposite direction, and the reason the style is gated rather than passed
+  -- unconditionally: --style overrides a .clang-format outright, so a project
+  -- that asks for the folded form must still get it.
+  it("defers to a project .clang-format instead of imposing the fallback style", function()
+    if vim.fn.executable("clang-format") ~= 1 then
+      pending("clang-format not on PATH")
+      return
+    end
+    require("config.formatters")._clear_clang_cache()
+
+    local rc = assert(io.open(root .. "/.clang-format", "w"))
+    rc:write(
+      "BasedOnStyle: LLVM\nAllowShortEnumsOnASingleLine: true\nAllowShortFunctionsOnASingleLine: All\n"
+    )
+    rc:close()
+
+    local path = root .. "/configured.c"
+    -- Typed expanded, so the project's config has to actively fold it; an
+    -- unconditional --style from us would leave it expanded and fail here.
+    local bufnr = c_buffer(path, {
+      "enum editorKey {",
+      "  ARROW_LEFT = 1000,",
+      "  ARROW_RIGHT,",
+      "  ARROW_UP,",
+      "  ARROW_DOWN",
+      "};",
+      "",
+      "void abFree(struct abuf *ab) {",
+      "  free(ab->b);",
+      "}",
+    })
+
+    assert.are.same({}, require("config.formatters").clang_format_args(bufnr))
+
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd("write!")
+    end)
+
+    wait.wait_for(function()
+      return vim.api.nvim_buf_get_lines(bufnr, 0, 1, false)[1] == folded_enum
+    end, 5000, "the project's .clang-format did not fold the enum on save")
+
+    local disk = assert(io.open(path, "r")):read("*a")
+    assert.are.equal(folded_enum .. "\n\n" .. folded_fn .. "\n", disk)
+
+    vim.api.nvim_buf_delete(bufnr, { force = true })
+  end)
+
   -- Saving a build.zig.zon must not corrupt it. Neovim maps .zon to ft=zig, so
   -- the manifest inherits the zigfmt entry above and gets rewritten on every
   -- write — which is only safe because `zig fmt --stdin` understands Zig object
