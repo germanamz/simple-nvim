@@ -118,6 +118,88 @@ describe("config.buffers", function()
     end)
   end)
 
+  describe("delete_others", function()
+    local made = {}
+
+    local function make(listed, name, modified)
+      local buf = vim.api.nvim_create_buf(listed, false)
+      if name then
+        vim.api.nvim_buf_set_name(buf, name)
+      end
+      if modified then
+        vim.bo[buf].modified = true
+      end
+      made[#made + 1] = buf
+      return buf
+    end
+
+    local function closed(buf)
+      return not vim.api.nvim_buf_is_valid(buf) or not vim.bo[buf].buflisted
+    end
+
+    after_each(function()
+      vim.cmd("silent! only")
+      for _, buf in ipairs(made) do
+        if vim.api.nvim_buf_is_valid(buf) then
+          vim.api.nvim_buf_delete(buf, { force = true })
+        end
+      end
+      made = {}
+    end)
+
+    it("closes every other saved buffer and keeps the current one", function()
+      local other1 = make(true, vim.fn.tempname() .. ".md", false)
+      local other2 = make(true, nil, false)
+      local cur = make(true, vim.fn.tempname() .. ".md", false)
+      vim.api.nvim_set_current_buf(cur)
+
+      buffers.delete_others()
+
+      assert.is_true(closed(other1))
+      assert.is_true(closed(other2))
+      assert.is_false(closed(cur))
+      assert.are.equal(cur, vim.api.nvim_get_current_buf())
+    end)
+
+    it("keeps other buffers with unsaved changes", function()
+      local dirty = make(true, vim.fn.tempname() .. ".md", true)
+      local cur = make(true, vim.fn.tempname() .. ".md", false)
+      vim.api.nvim_set_current_buf(cur)
+
+      buffers.delete_others()
+
+      assert.is_false(closed(dirty))
+      assert.is_true(vim.bo[dirty].modified)
+    end)
+
+    it("does not touch unlisted buffers", function()
+      local unlisted = make(false, vim.fn.tempname() .. ".md", false)
+      local cur = make(true, vim.fn.tempname() .. ".md", false)
+      vim.api.nvim_set_current_buf(cur)
+
+      buffers.delete_others()
+
+      assert.is_true(vim.api.nvim_buf_is_valid(unlisted))
+    end)
+
+    it("closes the windows showing the other buffers", function()
+      local other = make(true, vim.fn.tempname() .. ".md", false)
+      local cur = make(true, vim.fn.tempname() .. ".md", false)
+      vim.api.nvim_set_current_buf(cur)
+      local win = vim.api.nvim_get_current_win()
+      vim.cmd("split")
+      vim.api.nvim_set_current_buf(other)
+      vim.api.nvim_set_current_win(win)
+      assert.are.equal(2, #vim.api.nvim_list_wins())
+
+      buffers.delete_others()
+
+      assert.is_true(closed(other))
+      assert.are.same({ win }, vim.api.nvim_list_wins())
+      assert.are.equal(cur, vim.api.nvim_win_get_buf(win))
+    end)
+  end)
+
   describe("_pick_target", function()
     it("prefers the alternate buffer when it is among the reals", function()
       assert.are.equal(7, buffers._pick_target({ 3, 7, 9 }, 7))

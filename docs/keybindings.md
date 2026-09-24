@@ -222,6 +222,9 @@ parent (§5). Outside cmux they warn once and do nothing.
 | `<C-^>` (`<C-6>`)              | swap with alternate (last) buffer     |
 | `:bd`                          | close (delete) current buffer         |
 | `:bd!`                         | force close, discard changes          |
+| `<Space>bd`                    | close current buffer, keep the window |
+| `<Space>bo`                    | close other buffers (unsaved kept)    |
+| `<Space>bad`                   | close all saved buffers               |
 | `:bufdo {cmd}`                 | run cmd in every loaded buffer        |
 | `:ls`                          | list buffers                          |
 
@@ -780,8 +783,8 @@ the current buffer.
 
 Neovim never reaps LSP clients: close every buffer of a repo and its server keeps
 running (~0.7 GiB and 3 node processes for a warm ts_ls). `<Space>lk` reclaims
-them on demand, and `<Space>bad` sweeps automatically since it closes everything
-anyway. The sweep is deliberately manual — see
+them on demand, and `<Space>bad` / `<Space>bo` sweep automatically since they
+close buffers wholesale anyway. The sweep is deliberately manual — see
 [lsp-typescript-version.md](lsp-typescript-version.md).
 
 Inlay hints are off by default; `<Space>uh` toggles them per buffer and is only

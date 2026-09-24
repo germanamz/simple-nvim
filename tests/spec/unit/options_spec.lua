@@ -153,6 +153,21 @@ describe("config.options", function()
     assert.is_not_nil(found.desc and found.desc:lower():find("delete buffer"))
   end)
 
+  it("binds <leader>bo to delete the other buffers", function()
+    vim.g.mapleader = " "
+    require("config.options")
+
+    local found
+    for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
+      if m.lhs == " bo" then
+        found = m
+        break
+      end
+    end
+    assert.is_not_nil(found)
+    assert.is_not_nil(found.desc and found.desc:lower():find("delete other buffers"))
+  end)
+
   it("<leader>bd deletes the current buffer but keeps its window open", function()
     vim.g.mapleader = " "
     require("config.options")

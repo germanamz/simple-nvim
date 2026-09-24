@@ -173,6 +173,15 @@ vim.keymap.set(
   { desc = "Delete all saved buffers" }
 )
 
+-- Close every other buffer, keeping the current one -- :only for buffers.
+-- Unsaved buffers survive, as with <leader>bad.
+vim.keymap.set(
+  "n",
+  "<leader>bo",
+  require("config.buffers").delete_others,
+  { desc = "Delete other buffers" }
+)
+
 -- Stop language servers left serving no buffer. Neovim never reaps them, so a
 -- session that visits several repos accumulates one client (and its node
 -- processes, ~0.7 GiB each for ts_ls) per root. Manual on purpose — see

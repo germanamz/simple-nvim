@@ -115,4 +115,22 @@ function M.delete_all_saved()
   require("config.lsp_reap").sweep()
 end
 
+-- Close every buffer except the current one (<leader>bo, the buffer analogue
+-- of :only). Like <leader>bad, buffers with unsaved changes survive, as does
+-- anything bdelete refuses without force. Windows showing a closed buffer
+-- close with it, so the layout collapses onto the current window.
+function M.delete_others()
+  local cur = vim.api.nvim_get_current_buf()
+  for _, b in ipairs(vim.api.nvim_list_bufs()) do
+    if b ~= cur and vim.bo[b].buflisted and not vim.bo[b].modified then
+      pcall(vim.cmd, "bdelete " .. b)
+    end
+  end
+
+  -- Same cleanup-gesture reasoning as delete_all_saved: servers that only
+  -- served the closed buffers are now bufferless and never reaped otherwise.
+  -- The current buffer's clients stay attached, so they are untouched.
+  require("config.lsp_reap").sweep()
+end
+
 return M
