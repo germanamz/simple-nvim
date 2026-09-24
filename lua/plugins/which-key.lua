@@ -19,6 +19,8 @@ return {
         { "<leader>l", group = "lsp" },
         { "<leader>m", group = "markdown" },
         { "<leader>q", group = "quit" },
+        -- cmux terminal tab / splits (lua/config/cmux_terminal.lua).
+        { "<leader>t", group = "terminal" },
         { "<leader>u", group = "toggle" },
         { "<leader>y", group = "yank" },
         -- A sibling mini.surround spec hangs its add/delete/replace verbs off a

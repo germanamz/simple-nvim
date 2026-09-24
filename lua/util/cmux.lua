@@ -7,9 +7,10 @@
 -- launched in, so callers need no auth handling of their own -- they only need
 -- to know whether there is a CLI to call at all.
 --
--- Two consumers so far: config.open_url (docs into a browser pane) and
--- config.markdown_preview (markdown into a rendered panel). The detector lives
--- here so the "is this a cmux session" rule is stated once.
+-- Consumers: config.open_url (docs into a browser pane),
+-- config.markdown_preview (markdown into a rendered panel) and
+-- config.cmux_terminal (a terminal tab or split in a given folder). The detector
+-- lives here so the "is this a cmux session" rule is stated once.
 local M = {}
 
 --- Path to the cmux CLI, or nil when this is not a cmux session.

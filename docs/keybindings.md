@@ -192,6 +192,22 @@ All window commands start with `<C-w>` (Ctrl-W). `splitbelow` and
 | `<C-w>c` / `:close` | close current window                 |
 | `<C-w>q` / `:q`   | quit window (last → quit Nvim)         |
 
+### Terminal here (cmux)
+
+| Keys        | Action                                               |
+| ----------- | ---------------------------------------------------- |
+| `<Space>tt` | new cmux terminal **tab** in Neovim's pane           |
+| `<Space>tv` | new cmux terminal **split to the right** (`:vsplit`) |
+| `<Space>th` | new cmux terminal **split below** (`:split`)         |
+
+The terminal starts in the current buffer's folder and takes focus. These are
+cmux tabs and splits of the surrounding terminal, not Neovim windows, so
+`<C-w>` does not reach them. A buffer with no file behind it (unnamed, `help`,
+a `fugitive://` view) opens in Neovim's cwd instead, and an unsaved file in a
+folder that doesn't exist yet opens in the nearest folder that does. In
+nvim-tree the same keys open in the folder under the cursor, or a file's
+parent (§5). Outside cmux they warn once and do nothing.
+
 ---
 
 ## 5. Buffers
@@ -223,7 +239,9 @@ intermediate dirs too; trailing `/` makes a directory), `d` deletes, `r`
 renames, `H` toggles dotfiles, `I` toggles gitignored files, `g?` shows all
 mappings. `<Space>mp` on a markdown node previews it in a cmux markdown panel
 without opening the file first (§18); on a folder or any other filetype it says
-so and does nothing.
+so and does nothing. `<Space>tt` / `tv` / `th` open a cmux terminal tab / split
+right / split below in the folder under the cursor, or in a file's parent
+folder (§4).
 
 `<Space>E` opens netrw (`:Explore`) in the current window using the tree
 listing style (`g:netrw_liststyle = 3`) with the banner hidden. The previous

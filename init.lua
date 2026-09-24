@@ -75,6 +75,9 @@ require("config.ignore_filter").setup()
 -- gK / <leader>kd, plus the vim.ui.open wrapper that routes web URLs into a
 -- cmux browser pane instead of raising the system browser over the terminal.
 require("config.docs").setup()
+-- <leader>tt / tv / th: a cmux terminal tab or split, already in the current
+-- buffer's folder (the nvim-tree buffer overrides them with the node's folder).
+require("config.cmux_terminal").setup()
 
 vim.keymap.set("n", "<leader>k?", function()
   vim.cmd.edit(vim.fn.stdpath("config") .. "/docs/keybindings.md")

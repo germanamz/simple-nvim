@@ -118,6 +118,10 @@ return {
       -- resolution (and the "that is a directory" / "that is not markdown"
       -- answers), since the preview state is keyed by path, not buffer.
       require("config.markdown_preview").set_tree_keymap(bufnr)
+      -- Same `<leader>tt` / `tv` / `th` as everywhere else, but opening in the
+      -- node's folder (or a file node's parent) rather than in the folder of
+      -- the tree buffer, which has none.
+      require("config.cmux_terminal").set_tree_keymaps(bufnr)
     end,
     -- The "Diagnostics" decorator listed in renderer.decorators below is inert
     -- unless diagnostics integration is enabled here.

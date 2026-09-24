@@ -26,6 +26,7 @@ describe("smoke: which-key keybinding documentation", function()
     ["<leader>l"] = "lsp",
     ["<leader>m"] = "markdown",
     ["<leader>q"] = "quit",
+    ["<leader>t"] = "terminal",
     ["<leader>u"] = "toggle",
     ["gs"] = "surround",
   }
