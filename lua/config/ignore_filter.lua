@@ -296,6 +296,24 @@ function M.is_ignored(abs)
   return false -- fail-open: show until the oracle answers
 end
 
+-- Whether ignored paths are hidden (I in the tree flips it). Kept here rather
+-- than in nvim-tree's custom-filter state because filters.custom also carries
+-- config.nvim_tree_changed (C): toggling nvim-tree's state would switch both
+-- off at once. Only hides() reads it; is_ignored keeps answering, so the grey
+-- decorator still dims ignored rows while they are shown.
+local hiding = true
+
+-- What filters.custom asks: hide this path? is_ignored gated on the I flag.
+function M.hides(abs)
+  return hiding and M.is_ignored(abs)
+end
+
+-- Flip the I flag. The caller re-runs the tree's filters (see
+-- config.nvim_tree_changed.refilter).
+function M.toggle()
+  hiding = not hiding
+end
+
 -- Drop the oracle cache. Chained from config.dir_cache (submodule topology /
 -- DirChanged / <leader>gR) and from M.setup's rule-change edges. Nothing here
 -- watches .git — "watcher" was the wrong word for a hook that only ever saw

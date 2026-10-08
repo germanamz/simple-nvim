@@ -82,13 +82,17 @@ return {
     actions = { open_file = { quit_on_open = true } },
     filters = {
       dotfiles = false, -- show dotfiles (toggle with H)
-      -- Builtin git is off (below), so its git_ignored filter is inert. Hide
-      -- ignored files through config.ignore_filter instead: an O(1), fork-free
-      -- predicate (static heavy-dir set + lazy async `git check-ignore` oracle).
-      -- Toggle with I (remapped to the custom filter in on_attach below).
+      -- Builtin git is off (below), so its git_ignored and git_clean filters are
+      -- inert. Two custom predicates stand in, sharing the one filters.custom
+      -- slot: config.ignore_filter hides ignored files (an O(1), fork-free static
+      -- heavy-dir set + lazy async `git check-ignore` oracle; toggle with I), and
+      -- config.nvim_tree_changed hides everything without git changes (off until
+      -- C). Each key flips its own module flag, remapped in on_attach below,
+      -- because nvim-tree's single custom-filter state would switch both at once.
       git_ignored = false,
       custom = function(p)
-        return require("config.ignore_filter").is_ignored(p)
+        return require("config.ignore_filter").hides(p)
+          or require("config.nvim_tree_changed").hides(p)
       end,
     },
     -- Builtin git is OFF. In a superproject it spawns one *synchronous*
@@ -100,19 +104,29 @@ return {
     -- in config() below (not the .git watcher), and ignore-hiding now comes from
     -- config.ignore_filter. With git off the kill switch can never fire.
     git = { enable = false },
-    -- Keep all default mappings, but rebind I to toggle the custom filter (the
-    -- builtin I toggles git_ignored, now inert) so ignored-visibility still
-    -- toggles from its usual key.
+    -- Keep all default mappings, but rebind I and C (the builtins toggle
+    -- git_ignored and git_clean, both inert with builtin git off) to the custom
+    -- predicates in filters.custom above, so ignored-visibility and a
+    -- changed-files-only view toggle from their usual keys.
     on_attach = function(bufnr)
       local api = require("nvim-tree.api")
       api.config.mappings.default_on_attach(bufnr)
-      vim.keymap.set("n", "I", api.filter.custom.toggle, {
-        buffer = bufnr,
-        noremap = true,
-        silent = true,
-        nowait = true,
-        desc = "nvim-tree: Toggle Filter: Ignored (custom)",
-      })
+      local function map(lhs, fn, desc)
+        vim.keymap.set("n", lhs, fn, {
+          buffer = bufnr,
+          noremap = true,
+          silent = true,
+          nowait = true,
+          desc = "nvim-tree: " .. desc,
+        })
+      end
+      map("I", function()
+        require("config.ignore_filter").toggle()
+        require("config.nvim_tree_changed").refilter()
+      end, "Toggle Filter: Ignored (custom)")
+      map("C", function()
+        require("config.nvim_tree_changed").toggle()
+      end, "Toggle Filter: Changed only (custom)")
       -- Same `<leader>mp` as in a markdown buffer, so previewing a doc from the
       -- tree needs no detour through opening it. The module owns the node
       -- resolution (and the "that is a directory" / "that is not markdown"
@@ -180,14 +194,20 @@ return {
     -- opts) so the module can take api.events without requiring the plugin at
     -- startup. Toggle with <leader>uT, declared in `keys` above.
     require("config.nvim_tree_context").register(api.events)
-    -- Pin a one-line hint to the top of the tree window. nvim-tree sets the
-    -- buffer's filetype in a scratch window before moving it to the side
-    -- window, so a FileType hook targets the wrong window — use TreeOpen,
-    -- which fires once the real window exists.
+    -- Pin a one-line hint to the top of the tree window: the mappings hint, or
+    -- the changed-only filter while it is on (it outlives a close, so a reopened
+    -- tree still says why it is sparse). nvim-tree sets the buffer's filetype in
+    -- a scratch window before moving it to the side window, so a FileType hook
+    -- targets the wrong window — use TreeOpen, which fires once the real window
+    -- exists.
     api.events.subscribe(api.events.Event.TreeOpen, function()
       local win = require("nvim-tree.view").get_winnr()
       if win and vim.api.nvim_win_is_valid(win) then
-        vim.api.nvim_set_option_value("winbar", "%#Comment#  g? — all mappings%*", { win = win })
+        vim.api.nvim_set_option_value(
+          "winbar",
+          require("config.nvim_tree_changed").winbar(),
+          { win = win }
+        )
       end
     end)
     -- Repaint autocmds (ReviewBaseChanged/HeadChanged, SmartCodesRefreshed,

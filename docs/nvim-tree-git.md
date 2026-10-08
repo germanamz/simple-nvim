@@ -45,6 +45,51 @@ Coloring it would mean moving the status to the winbar, which parses statusline
 markup; the status stays on the repo-name row instead, where it scrolls with the
 tree. Submodule labels are decorators, so they are fully colored.
 
+## Showing only changed files (`C`)
+
+Press `C` in the tree to hide everything without git changes. What remains:
+
+- files with a status code, meaning worktree changes and changes since the
+  review base (the same set `<leader>gs` lists);
+- the folders that contain them, which are exactly the folders carrying a `*` or
+  `•` marker;
+- commit-diverged submodule folders, even when nothing inside them changed.
+
+Turning the filter on expands every remaining folder, so each changed file is on
+screen after one key press. While it is on, the tree's winbar reads `changed only
+· C to clear`, including after the tree is closed and reopened. Press `C` again
+for the full tree; the folders it expanded stay open.
+
+nvim-tree's own `C` toggles its `git_clean` filter, which reads builtin git status.
+This config turns builtin git off, so that filter has nothing to read and does
+nothing. `config.nvim_tree_changed` replaces it. It reads the same
+`telescope_smart` codes snapshot the decorator labels from, so it adds no git
+spawns and cannot disagree with the markers. nvim-tree calls the predicate
+synchronously for every entry while it scans a directory. The set of kept paths
+is rebuilt only when a refresh hands back a new codes table, so each call is a
+table lookup.
+
+The predicate sits in `filters.custom` next to `config.ignore_filter`. nvim-tree
+has a single on/off state for that slot, and toggling it with `I` would have
+switched the changed-only filter off as well. So `I` and `C` each flip a flag in
+their own module and then re-run the filters through
+`nvim_tree_changed.refilter`, which keeps the cursor on the same node the way
+nvim-tree's own filter toggles do.
+
+Edge cases:
+
+- **Cold codes cache:** the tree is empty until the async refresh lands, then
+  the `SmartCodesRefreshed` reload fills it in. Folders that appear at that point
+  are collapsed; `E` expands them.
+- **Changes made while the filter is on** show up on the next refresh (focus,
+  file reload, `<leader>gR`). A folder that newly gains a change appears
+  collapsed.
+- **Outside a git repo** `C` warns and stays off. The cwd itself and paths
+  outside it (a tree re-rooted above the cwd) are never hidden, because the codes
+  are cwd-relative.
+- **Very many changed folders:** the expansion stops after nvim-tree's
+  `max_folder_discovery` (300 folders) with a warning.
+
 ## How branch and status are sourced
 
 One generic module resolves branch and status for any repo directory, and two
@@ -209,6 +254,9 @@ and `<leader>gR`) already keeps status fresh at near-zero steady-state cost.
 - **`config.telescope_smart`** delegates per-submodule statuses to
   `submodule_status`, runs its outer status with `--ignore-submodules=dirty`, and
   splits gitlink lines from file lines against the submodule set.
+- **`config.nvim_tree_changed`** is the changed-only `filters.custom` predicate
+  and its `C` toggle. It keeps the codes plus `nvim_tree_git._dir_markers`, so the
+  filter and the markers share one definition of "changed".
 
 ## Edge cases and scope
 
@@ -241,10 +289,12 @@ Out of scope:
 ## Where the code lives
 
 `lua/config/repo_status.lua`, `lua/config/submodule_status.lua`,
-`lua/config/nvim_tree_submodule.lua`, and `lua/config/nvim_tree_git.lua`, wired in
-`lua/plugins/nvim-tree.lua`. Unit specs cover the pure parse and derive functions
+`lua/config/nvim_tree_submodule.lua`, `lua/config/nvim_tree_git.lua`, and
+`lua/config/nvim_tree_changed.lua`, wired in `lua/plugins/nvim-tree.lua`. Unit specs cover the pure parse and derive functions
 (status parsing, rollup derivation, state-key equality); an e2e spec drives a real
 loaded nvim-tree over a fixture superproject to pin the root branch, distinct
 submodule branches, a detached ref, the root ignoring submodule dirt, and the lazy
-guarantee that a collapsed submodule is not resolved until its row is visible. Run
-with the sandbox disabled.
+guarantee that a collapsed submodule is not resolved until its row is visible.
+`tests/spec/e2e/nvim_tree_changed_spec.lua` presses `C` and `I` in a real tree over
+a plain repo and a two-submodule superproject. Run the e2e specs with the sandbox
+disabled.

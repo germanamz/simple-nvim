@@ -331,4 +331,23 @@ describe("config.ignore_filter", function()
       assert.is_false(M.is_ignored("/repo/a"))
     end)
   end)
+
+  -- I flips this module's own flag rather than nvim-tree's custom-filter state,
+  -- because that state also gates the changed-only filter (C) sharing the same
+  -- filters.custom slot. The grey decorator keeps asking is_ignored, so shown
+  -- ignored rows still dim.
+  describe("hides / toggle", function()
+    it("hides ignored paths by default", function()
+      assert.is_true(M.hides("/a/node_modules"))
+      assert.is_false(M.hides("/a/src"))
+    end)
+
+    it("shows ignored paths once toggled, while is_ignored still answers", function()
+      M.toggle()
+      assert.is_false(M.hides("/a/node_modules"))
+      assert.is_true(M.is_ignored("/a/node_modules"))
+      M.toggle()
+      assert.is_true(M.hides("/a/node_modules"))
+    end)
+  end)
 end)

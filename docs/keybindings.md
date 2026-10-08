@@ -239,8 +239,9 @@ ancestry from the project root down to it (and tracking the focused buffer as
 you switch). Press `<Space>e` again to close it. Inside the tree: `<CR>` opens
 a file / toggles a folder, `a` creates a file (type `foo/bar.lua` to make the
 intermediate dirs too; trailing `/` makes a directory), `d` deletes, `r`
-renames, `H` toggles dotfiles, `I` toggles gitignored files, `g?` shows all
-mappings. `<Space>mp` on a markdown node previews it in a cmux markdown panel
+renames, `H` toggles dotfiles, `I` toggles gitignored files, `C` shows only
+files with git changes and the folders holding them (press again for the full
+tree; see [nvim-tree-git.md](nvim-tree-git.md)), `g?` shows all mappings. `<Space>mp` on a markdown node previews it in a cmux markdown panel
 without opening the file first (§18); on a folder or any other filetype it says
 so and does nothing. `<Space>tt` / `tv` / `th` open a cmux terminal tab / split
 right / split below in the folder under the cursor, or in a file's parent
