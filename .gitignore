@@ -1,3 +1,6 @@
 *.log
 .superpowers/
 .playwright-mcp/
+
+# Tusk local index
+.tusk/

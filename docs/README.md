@@ -77,6 +77,10 @@ beyond the code.
   docs), and how `K` now appends an excerpt from offline DevDocs bundles
   (`:DocsInstall`): how clangd and pyright name the symbol, how each page family
   is cut down to a hover, and the alternatives that were rejected.
+- **[memory/](memory/README.md).** Short notes a coding agent keeps between
+  sessions: Neovim and plugin traps, approaches that were tried and refuted, and
+  how to work in this repo. One fact per file, indexed by
+  [tusk](https://github.com/germanamz/tusk) with the rest of these docs.
 - **[superpowers/](superpowers/README.md).** The engineering record: how the
   larger pieces were designed and what actually shipped. Start with
   [testing.md](superpowers/testing.md) before changing anything — it covers the

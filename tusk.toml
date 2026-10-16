@@ -1,0 +1,115 @@
+[workspace]
+name = "simple-nvim"
+# CLAUDE.md is already in every session's context, so indexing it again only
+# duplicates it. The rest are tool state, not notes.
+ignore = [
+    "CLAUDE.md",
+    ".claude/",
+    ".superpowers/",
+    ".playwright-mcp/",
+]
+# Markdown with no type: of its own is indexed as this type. Remove the line
+# to index only files whose frontmatter names a type.
+default-type = "note"
+
+# Semantic search. Needs Ollama running locally with nomic-embed-text pulled;
+# without it the graph still builds and only similarity ranking is missing.
+[embeddings]
+provider = "ollama"
+endpoint = "http://localhost:11434"
+model    = "nomic-embed-text"
+dim      = 768
+# The task prefixes nomic-embed-text is trained with.
+query-prefix    = "search_query: "
+document-prefix = "search_document: "
+
+# Every session starts with the memory index, so it knows what has already
+# been learned before it searches.
+[context]
+pinned = ["docs/memory/README"]
+# A pinned page comes with its edges, which repeat each index line, so the
+# index needs about twice its own size; the 16 KiB default drops it.
+max-bytes = 32768
+
+# What a session has learned about this config: traps, refuted approaches,
+# how to work in this repo. Lives in docs/memory/ and is public, so a memory
+# never names the host machine, its paths, or the projects the config is
+# used on.
+[node-types.memory]
+description = "A fact learned while working on this config, kept for later sessions"
+properties = [
+    { name = "kind",        type = "enum",   values = ["feedback", "project", "reference"], required = true },
+    { name = "description", type = "string", required = true },
+]
+
+# Pages and memories name the source files they describe, in inline code or
+# links. The Claude Code plugin reminds the agent of those pages right after
+# it edits one of the files, and doctor warns when a named file is gone.
+[edge-types.describes]
+description = "A page or memory names a file in the config"
+from        = ["note", "memory"]
+paths       = true
+
+[rule.memory-lives-in-memory-folder]
+description = "a memory lives under docs/memory/"
+filter      = "type=memory AND NOT path=docs/memory/**"
+
+[rule.memory-in-index]
+description = "every memory has a line in docs/memory/README.md"
+filter      = "type=memory AND NOT references<- id=docs/memory/README"
+
+[rule.memory-folder-holds-memories]
+description = "everything in docs/memory/ except its index is a memory"
+filter      = "path=docs/memory/** AND NOT type=memory AND NOT id=docs/memory/README"
+
+# Added by `tusk pack add vault` on 2026-10-16
+# Tusk built-in pack: vault
+#
+# Adds three categorical node types — `note`, `meeting`, `decision` —
+# and two edge types — `references` (auto-materialized from body
+# wikilinks) and `relates-to` (user-declared "see also").
+#
+# Pack is purely categorical: no declared properties on any node type.
+# The implicit `title` is always available; the markdown body is the
+# natural place for content (meeting agendas, decision rationale,
+# note prose). Users wanting structured fields on a node type can
+# declare them inline in their workspace manifest.
+#
+# Note: the `references` edge sets `wikilinks = true`, which is what
+# activates body wikilink → edge materialization in the engine. Any
+# edge type may set this flag; the name `references` is no longer
+# special. A workspace without a `wikilinks = true` edge gets
+# wikilinks as plain text only.
+#
+# `relates-to` has no declared inverse — the relation is symmetric
+# in meaning, so the <- operator handles backward traversal.
+
+[node-types.note]
+description = "A free-form markdown note"
+properties = []
+
+[node-types.meeting]
+description = "A meeting record (agenda, attendees, discussion in body)"
+properties = []
+
+[node-types.decision]
+description = "A captured decision (rationale, status, date in body)"
+properties = []
+
+[edge-types.references]
+description = "Implicit edge materialized from body wikilinks"
+from        = ["*"]
+to          = ["*"]
+cardinality = "many-to-many"
+ordered     = false
+acyclic     = false
+inverse     = "referenced-by"
+wikilinks   = true
+
+[edge-types.relates-to]
+description = "User-declared 'see also' relationship between nodes"
+from        = ["*"]
+to          = ["*"]
+cardinality = "many-to-many"
+ordered     = false
+acyclic     = false

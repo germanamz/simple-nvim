@@ -39,6 +39,34 @@ Buffer-local keymaps are set from a single `LspAttach` autocmd.
 Create `lua/plugins/<name>.lua` returning a lazy.nvim spec table. lazy.nvim
 picks it up automatically — no imports needed.
 
+## Memory and docs (tusk)
+
+The repo is a [tusk](https://github.com/germanamz/tusk) vault: `tusk.toml`
+indexes every markdown file (except this one) into a searchable graph, and the
+plugin in `.claude/skills/tusk/` gives each session the `tusk_*` MCP tools and
+the memory index (`docs/memory/README.md`). Claude Code's built-in auto memory
+is off for this repo (`autoMemoryEnabled` in `.claude/settings.json`), so tusk
+is the only memory.
+
+- Look things up with `tusk_query` (a filter plus `semantic`) before grepping
+`docs/`.
+- A memory is `docs/memory/<slug>.md`, one fact per file, with frontmatter
+`type: memory`, `title`, `kind` (`feedback` | `project` | `reference`) and a
+one-line `description`. For feedback and project memories, follow the fact with
+**Why:** and **How to apply:** lines. Link related memories with `[[slug]]`, and
+add a line for each new memory to `docs/memory/README.md`. Update an existing
+memory rather than adding a duplicate; delete one that turned out wrong.
+- Memories and docs are public. Never name the host machine (paths outside the
+repo and nvim's stdpath dirs, usernames, hardware, installed app versions) or
+the projects the config is used on; describe their shape instead ("a pnpm
+monorepo with TypeScript installed only in a leaf package").
+- Specs and plans in `docs/` stay uncommitted; docs of how things currently work
+are committed (`docs/memory/spec-docs-in-repo-not-scratchpad.md`).
+- Docs name the files they describe in inline code. After you edit a file, the
+plugin lists the docs that name it; fix any the change made wrong.
+- Run `tusk doctor` after editing docs: it exits 1 on a dangling link or a
+broken rule. Semantic search needs Ollama with `nomic-embed-text`.
+
 ## Editing conventions
 
 - 2-space indentation, spaces not tabs
