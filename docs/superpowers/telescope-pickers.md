@@ -142,7 +142,7 @@ Split so the logic is unit-testable over fake client tables, the way
 | Function | Kind | Contract |
 | --- | --- | --- |
 | `M.rows(clients)` | pure | `{ client, name, nbufs, root }` per client, **idle-first** (0 buffers), then by name, then root |
-| `M.format(row)` | pure | `ts_ls          2 bufs   ~/projects/lola-web` — aligned columns, root through `fnamemodify(root, ":~")`, `(no root)` when absent |
+| `M.format(row)` | pure | `ts_ls          2 bufs   ~/src/web` — aligned columns, root through `fnamemodify(root, ":~")`, `(no root)` when absent |
 | `M.kill(client)` | effect | Stop unless already stopped; returns whether it acted |
 | `M.restart_clients(clients, opts?)` | effect | Stop them all, re-attach the **union** of their buffers; returns `stopped, reattached` |
 | `M.restart(client)` | effect | One-client `restart_clients`; returns the count re-attached |

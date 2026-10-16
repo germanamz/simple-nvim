@@ -9,17 +9,17 @@ rejected, what ships imperfect, and how to diagnose it.
 ## The defect
 
 Saving a `.ts` file rewrote single quotes to double in projects whose style rules
-say single. Reproduced against `~/projects/errno`, which sets its quote rule in
-ESLint and has no prettier config:
+say single. Reproduced against a JS project that sets its quote rule in ESLint
+and has no prettier config:
 
 ```
-~/projects/errno/.eslintrc.js:16    '@stylistic/quotes': ['error', 'single']
+.eslintrc.js:16    '@stylistic/quotes': ['error', 'single']
 
-$ prettier --find-config-path src/is-errno.ts
-[error] Can not find configure file for "src/is-errno.ts".
+$ prettier --find-config-path src/index.ts
+[error] Can not find configure file for "src/index.ts".
 
-$ cat src/is-errno.ts | prettier --stdin-filepath …/src/is-errno.ts
-import { Errno, isErrnoSymbol } from "./errno";
+$ cat src/index.ts | prettier --stdin-filepath …/src/index.ts
+import { parse, isValid } from "./parse";
 ```
 
 Three facts composed: `config/formatters.lua` sent every web filetype to
@@ -92,14 +92,14 @@ The walk stops when both slots fill, or at a repo boundary — and "boundary" is
 not simply "nearest `.git`".
 
 A `.git` **directory** is a standalone repo and always ends the walk, so
-`~/.config/nvim` and `~/projects/tusk` (a Go repo, hundreds of markdown files, no
+`~/.config/nvim` and a Go repo with hundreds of markdown files (no
 `package.json`) terminate at their own root instead of climbing to `/`, where a
 stray `~/.prettierrc` would govern them.
 
 A `.git` **file** is a submodule, and there the `package.json` gate applies:
-`lola-workspace/lola-web` has one, so it is sealed from its superproject;
-`germanamz/content/posts` does not — a vendored markdown subtree, not an
-independent package — so it keeps inheriting from its parent.
+`superproject/web` (a pnpm monorepo) has one, so it is sealed from its
+superproject; a vendored markdown subtree does not — it is not an independent
+package — so it keeps inheriting from its parent.
 
 Without the distinction, either vendored subtrees stop inheriting or independent
 packages keep walking into a superproject that knows nothing about them.
@@ -245,8 +245,8 @@ other nine keep unconditional prettier. So a biome repo formats `.ts` with biome
 while `.json` and `.css` keep using prettier, which can produce diffs biome's CI
 rejects. Fixing it needs a per-tool filetype-capability table, unknowable for
 `dprint` — its capabilities depend on which plugins the project installs. Gating
-those nine would also regress a case that was never broken: `~/projects/tusk` is
-a Go repo with hundreds of markdown files and no `package.json`.
+those nine would also regress a case that was never broken: a Go repo with
+hundreds of markdown files and no `package.json`.
 
 **First save in an eslint project may come back unformatted.** `eslint_d`
 cold-starts per project — loading ESLint, resolving the flat config, building

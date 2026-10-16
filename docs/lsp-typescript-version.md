@@ -2,9 +2,9 @@
 
 Root-cause analysis (2026-07-29) of: "types resolution breaks in large git
 workspaces with 200+ submodules; shared tsconfigs don't resolve for the right
-language version". Reproduced against `~/projects/lola-workspace` (superproject;
-`lola-web` = pnpm monorepo) and a synthetic superproject fixture. Includes the
-shipped fix and the two symptoms that turned out **not** to be this bug.
+language version". Reproduced against a real superproject (its `web/` submodule
+is a pnpm monorepo) and a synthetic superproject fixture. Includes the shipped
+fix and the two symptoms that turned out **not** to be this bug.
 
 ## Confirmed root cause
 
@@ -19,9 +19,9 @@ pnpm that is the workspace root. pnpm's isolated `node_modules` installs
 `typescript` in the **leaf package**, which is *below* that root:
 
 ```
-lola-web/                      <- root_dir (pnpm-lock.yaml)
+web/                           <- root_dir (pnpm-lock.yaml)
   node_modules/                <- eslint only; NO typescript
-  apps/lola-web/
+  apps/web/
     node_modules/typescript -> ../../../node_modules/.pnpm/typescript@5.9.3/...
     tsconfig.json
 ```
@@ -31,16 +31,16 @@ tree, and ts_ls uses the bundled TypeScript instead.
 
 ### Evidence
 
-- Ancestor scan from `lola-web` up to `/` finds **no** `node_modules/typescript/lib`
+- Ancestor scan from `web/` up to `/` finds **no** `node_modules/typescript/lib`
   in any of the three module folders.
 - Mason's `typescript-language-server` bundles TypeScript **6.0.3**;
-  `lola-web` pins **5.9.3** — a major version apart.
-- Direct LSP handshake at `rootUri = lola-web`:
+  `web/` pins **5.9.3** — a major version apart.
+- Direct LSP handshake at `rootUri = web/`:
   `Using Typescript version (bundled) 6.0.3 from path ".../mason/.../typescript/lib/tsserver.js"`.
 - Real headless Neovim with this config, opening
-  `lola-web/apps/lola-web/app/page.tsx` from the superproject cwd: the forked
+  `web/apps/web/app/page.tsx` from the superproject cwd: the forked
   process was mason's `.../typescript/lib/tsserver.js`, and `root_dir` was
-  `lola-web` as expected.
+  `web/` as expected.
 - Editor/build divergence on a shared base config: a `@repo/tsconfig/base.json`
   using `target: es5` + `moduleResolution: node` builds clean under the project's
   own 5.9.3 (`tsc` exit 0) but fails under 6.0.3 (`exit 2`, two `TS5107`
@@ -97,7 +97,7 @@ Design points worth keeping:
 - `tests/spec/unit/lsp_tsdk_spec.lua` — 14 specs: pnpm leaf install, plain repo
   root, nearest-wins, yarn PnP sdk, partial install, the root bound, and the
   `before_init` memo.
-- Real headless Neovim after the fix, both fixture and `lola-web`: the forked
+- Real headless Neovim after the fix, both fixture and `web/`: the forked
   process is now the project's `apps/*/node_modules/typescript/lib/tsserver.js`.
 - Full suite `make test`: 732 pass / 0 fail. `make test-lsp` passes.
 
@@ -169,18 +169,19 @@ package deliberately does not multiply clients.
 
 **Automatic Type Acquisition off** (`servers.ts_ls.init_options`). tsserver
 otherwise forks a fourth node process per client to fetch `@types` for untyped JS
-deps. Verified: the `typingsInstaller.js` fork is gone on `wedds`, `digitt` and
-`lola-web` (4 → 3 processes per client) with no diagnostic change. Every project
-here declares its `@types`, so ATA only ever bought completions for untyped JS
-dependencies — which is what it forfeits.
+deps. Verified: the `typingsInstaller.js` fork is gone on three real projects,
+`web/` among them (4 → 3 processes per client) with no diagnostic change. Every
+project here declares its `@types`, so ATA only ever bought completions for
+untyped JS dependencies — which is what it forfeits.
 
 **A per-buffer mismatch warning** (`lsp_tsdk.warn_mismatch`, wired from the
 `LspAttach` ts_ls branch). One `vim.notify` WARN per `(root, got, want)` when a
 buffer is served by a TypeScript whose **major** differs from the one its own
 package pins. Compared by version, never by path — pnpm gives every package its
 own symlink, so a path comparison fires on every healthy monorepo. Verified
-firing once on a mixed fixture and staying silent on `digitt` (homogeneous),
-`lola-web` (single install) and `expenses` (minor drift only).
+firing once on a mixed fixture and staying silent on a homogeneous monorepo,
+`web/` (single install) and a minor-drift repo (packages differ only by a
+TypeScript minor).
 
 **A gated root clamp** (`lua/config/lsp_root.lua`) — see the section above.
 
@@ -192,12 +193,13 @@ that a root-level `typescript` devDependency (a mainstream layout with no proble
 at all) pinned every package to it and produced two brand-new false errors, plus
 a measured 932 ms `plan()` and 1040 ms first `:edit` on a recursive `packages/**`
 tree. Verified: on a major-gap fixture both packages get their own compiler in
-either open order and the warning goes silent; `digitt`, `lola-web` and
-`expenses` all stay at one client.
+either open order and the warning goes silent; the homogeneous monorepo, `web/`
+and the minor-drift repo all stay at one client.
 
 Major-only is the threshold for both the split and the warning, and they must
-agree — `expenses` (5.6.2 vs 5.5.4) changes no diagnostic and splitting it costs a
-measured +508 MB, so warning about it would be an unactionable nag.
+agree — the minor-drift repo (5.6.2 vs 5.5.4) changes no diagnostic and
+splitting it costs a measured +508 MB, so warning about it would be an
+unactionable nag.
 
 **A manual idle-client sweep** (`lua/config/lsp_reap.lua`, `:LspReapIdle` /
 `<leader>lk`, plus a call at the end of `<leader>bad`). Verified 3 clients / 9

@@ -33,7 +33,7 @@ of it, because none of it was a tag jump.
 
 ### Source-verified behaviour
 
-Against the installed runtime, `/opt/homebrew/Cellar/neovim/0.12.5/share/nvim/runtime`:
+Against Neovim 0.12.5's installed runtime (`$VIMRUNTIME`):
 
 - **`vim.lsp.buf.definition` already pushes a tagstack frame** —
   `lua/vim/lsp/buf.lua:267-271` does `normal! m'` then

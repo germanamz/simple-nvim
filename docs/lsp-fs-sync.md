@@ -1,9 +1,9 @@
 # LSP ↔ filesystem sync on nvim-tree delete/rename
 
 Root-cause analysis (2026-07-25) of: "deleting files from nvim-tree makes the
-LSP go crazy; renaming a package is worse" — observed in
-`~/projects/lola-workspace` (superproject; `lola-server` = Go/gopls,
-`lola-web` = pnpm monorepo/ts_ls). Includes the verified fix design.
+LSP go crazy; renaming a package is worse" — observed in a superproject
+whose submodules include a Go service (gopls) and a pnpm monorepo (ts_ls).
+Includes the verified fix design.
 
 ## Confirmed root cause
 
@@ -34,7 +34,7 @@ re-stats them → error storm, broken features, until the LSP is restarted.
   (`stat .../internal/module/topic/*.go: no such file or directory`,
   `diagnostics failed`, `while diagnosing changed files`) across 5 deleted
   files, ending only at the next nvim restart. Same staleness family:
-  `no package metadata for file` × 578 lines (315 in lola-workspace) across
+  `no package metadata for file` × 578 lines (315 in that superproject) across
   many days, biggest burst 292 lines in one minute.
 - **Live repro** (headless nvim, real config, real workspace): create scratch
   package `internal/lspreprotmp/{lib,user}.go`, wait for gopls to resolve
@@ -49,9 +49,9 @@ re-stats them → error storm, broken features, until the LSP is restarted.
   handshake required (`gopls/internal/server/text_synchronization.go` converts
   changes straight to `file.Modification{OnDisk:true}`).
 
-### ts_ls side (live repro in lola-web)
+### ts_ls side (live repro in the pnpm monorepo)
 
-- Single ts_ls client, rooted at `lola-web` (pnpm-lock.yaml), correct.
+- Single ts_ls client, rooted at the monorepo root (pnpm-lock.yaml), correct.
 - ts_ls advertises **only** `fileOperations.willRename`
   (`**/*.{ts,js,jsx,tsx,mjs,mts,cjs,cts}` files + `**` folders).
 - Deletes: the plugin sends nothing, but tsserver runs its **own native fs
