@@ -63,7 +63,11 @@ monorepo with TypeScript installed only in a leaf package").
 - Specs and plans in `docs/` stay uncommitted; docs of how things currently work
 are committed (`docs/memory/spec-docs-in-repo-not-scratchpad.md`).
 - Docs name the files they describe in inline code. After you edit a file, the
-plugin lists the docs that name it; fix any the change made wrong.
+plugin lists the docs that name it; fix any the change made wrong. Name a file
+that no longer exists in plain text, not inline code: doctor warns about every
+code-formatted path that is not on disk.
+- A memory is for what no committed doc says. When a feature ships with a doc,
+fold the memory's lasting facts into the doc and delete the memory.
 - Run `tusk doctor` after editing docs: it exits 1 on a dangling link or a
 broken rule. Semantic search needs Ollama with `nomic-embed-text`.
 

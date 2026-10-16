@@ -36,7 +36,8 @@ Every cursor this config's keymaps produce takes the **first** branch. `<C-n>`,
 main cursor's mode verbatim (`cursor-manager.lua:1314`) and every action ends by
 normalising each enabled cursor to it (`:2295-2303`). The `getreg(".")` branch
 needs a cursor still holding a *selection* at insert exit, which none of these
-have. So the operative source is the **redo record**, not the `.` register.
+have. So the operative source is the **redo record**, not the `.` register, and a
+fix that only fills the `.` register changes nothing for these cursors.
 
 **minuet's accept never writes the redo record.** `action.accept`
 (`virtualtext.lua:348-402`) inserts the suggestion with
@@ -69,14 +70,30 @@ With three cursors, the same keystrokes now give:
 { "return a - b", "return a - b", "return a - b" }
 ```
 
+### Why `nvim_paste` and not another insert
+
+Measured under `nvim --headless -u NONE`, in insert mode:
+
+- `nvim_paste` records `<80>PS<text><80>PE` — the text embedded **literally** —
+  so dot-repeat reproduces it exactly, untouched by autoindent, `indentexpr`,
+  comment leaders, mini.pairs or blink.
+- `feedkeys` of the text survives none of those: every replay re-runs them (this
+  config sets a treesitter `indentexpr` on ~36 filetypes).
+- `<C-r><C-o>{reg}` round-trips, but **by reference**: the record holds three
+  bytes naming the register, so the replay depends on that register still
+  holding the text. Rejected.
+- `<C-r><C-o>=expr<CR>` does not round-trip at all: only `<C-r><C-o>=` is
+  recorded, and the cmdline eats the expression and the `<CR>`.
+
 ### Why it reads the text back instead of asking minuet for it
 
 There is no instant at which a wrapper can read the suggestion. `accept` resets
 `ctx` (`:375-377`) and clears the ghost-text extmark (`:379`) **synchronously**,
 before its own deferred edit — so after `accept()` returns, the text is gone from
-minuet and not yet in the buffer. `snapshot()`/`measure()` therefore recover it
-from the buffer delta: line-count change plus a tail-length pin, gated on the
-changedtick having moved exactly once.
+minuet and not yet in the buffer. Nor is there a hook: minuet has no accept event,
+and its `User` events cover only the request lifecycle. `snapshot()`/`measure()`
+therefore recover it from the buffer delta: line-count change plus a tail-length
+pin, gated on the changedtick having moved exactly once.
 
 Reading the delta rather than intercepting a particular API call also means
 `<C-l>` (`accept_line`, which is `action.accept(1)` at `:425-427`) is covered for
@@ -116,9 +133,10 @@ cursor, no replication, nothing corrupted.
 - The buffer or window changed under the accept, or the text after the cursor no
   longer matches the snapshot.
 - `vim.paste` is overridden by something that inserts nothing. The rewrite
-  deletes minuet's copy *before* pasting and compares the changedtick after, so a
-  no-op paste is repaired by re-inserting the text it still holds. The ordering
-  is deliberate: the opposite order fails by leaving the suggestion in the buffer
+  deletes minuet's copy *before* pasting and compares the changedtick after —
+  never the paste's return value, which an override controls — so a no-op paste
+  is repaired by re-inserting the text it still holds. The ordering is
+  deliberate: the opposite order fails by leaving the suggestion in the buffer
   twice, which is silent corruption.
 
 ## Coupling
@@ -126,7 +144,8 @@ cursor, no replication, nothing corrupted.
 `install()` wraps `minuet.virtualtext.action.accept`, an internal upstream offers
 no stability contract for — the same posture, and the same debt, as
 `lua/config/minuet_guard.lua`. A rename disables the fix rather than erroring, so
-`install()` returns false and `lua/plugins/minuet.lua` surfaces a warning.
+`install()` returns false and `lua/plugins/minuet.lua` surfaces a warning. A
+wrapper already in place is a success, not a fault, so that case returns true.
 
 Two behaviours are observed rather than documented: that `vim.schedule` callbacks
 run FIFO (so the rewrite sees minuet's completed edit), and that nothing else

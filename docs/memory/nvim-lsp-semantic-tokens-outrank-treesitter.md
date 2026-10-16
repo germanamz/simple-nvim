@@ -56,4 +56,4 @@ blocks the hierarchy deliberately and must be left alone.
 
 Shipped as `config.syntax_emphasis` (see docs/superpowers/token-emphasis.md).
 
-Related: [[nvim-ephemeral-extmark-no-line-hl]], [[nvim-principles-review-2026-07]].
+Related: [[nvim-ephemeral-extmark-no-line-hl]], [[docs/superpowers/refactoring]].

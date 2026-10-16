@@ -156,6 +156,11 @@ Shipped as designed, plus three fixes out of an adversarial review:
 Refuted-by-review non-issue worth remembering: overlapping-root double-apply
 cannot occur here (single client per root; union dedupes by id).
 
+`tests/spec/unit/lsp_fs_sync_spec.lua` runs every case in one nvim, so each test
+needs buffer names of its own (a reused name is E95 on `nvim_buf_set_name`), and
+`after_each` drains the scheduled failed-rename recovery before restoring the
+stubs — undrained, it fires into the next test.
+
 ## `FolderCreated`'s payload quirk was not harmless (2026-08-31)
 
 The original review waved `FolderCreated`'s payload through as "inherited

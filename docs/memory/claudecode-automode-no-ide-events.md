@@ -20,7 +20,7 @@ plugin-side under auto mode — the editor receives no signal. The only viable
 trigger is a Claude-side `PostToolUse` hook (matcher `Edit|Write|MultiEdit`)
 that pokes nvim via `nvim --server <addr> --remote`. A pure-nvim filesystem
 watcher was rejected (perf landmine on 100+ submodule repos — see
-[[multi-submodule-perf-changes]]).
+[[docs/superpowers/git-at-scale]]).
 
 Decision: dropped the whole idea and removed claudecode.nvim (commit
 c26e374). The plugin's headline value (accept/reject diffs) is moot under

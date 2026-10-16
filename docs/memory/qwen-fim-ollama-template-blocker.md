@@ -45,4 +45,4 @@ qwen3-era entry to the CATALOG in `lua/config/ai_models.lua` with `fim = true` â
 the existing `qwen3-coder` entry has that bug. Only lead worth an A/B: JetBrains
 Mellum2-12B-A2.5B-Base (2.5B active, but not in Ollama's library, StarCoder-style
 `<fim_prefix>` spelling, and below Qwen2.5-7B on HumanEval). Related:
-[[nvim-leak-audit-2026-07]].
+[[docs/leak-diagnostics]].

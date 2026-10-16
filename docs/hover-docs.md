@@ -180,7 +180,9 @@ Sizes seen on 2026-09-15:
 | `man` | 143 MB | — |
 | `python~3.10` | 16 MB | — |
 
-Nothing refreshes a bundle automatically; re-running `:DocsInstall` does.
+Nothing refreshes a bundle automatically; re-running `:DocsInstall` does. That
+command is the only way a bundle arrives or changes: `K` never touches the
+network.
 
 ## Cutting an excerpt
 
@@ -229,7 +231,7 @@ of its methods.
 
 ## `gK`
 
-`gK`'s URL cascade in `docs/init.lua` has a step after the adapter URL and
+`gK`'s URL cascade in `lua/config/docs/init.lua` has a step after the adapter URL and
 before `documentLink`: `hover.docs_url` asks the buffer's provider for
 candidates and opens the first installed hit's hosted page.
 

@@ -36,4 +36,4 @@ base must land on a later tick — hence the poll), and only
 scoped by the `git_obj._review_base` tag so `gitsigns://` historical buffers keep
 blaming from their own revision. Regression fixtures:
 `git_fixture.superproject_pinned_submodule` and the feature-branch case in
-`tests/spec/e2e/gitsigns_spec.lua`. Related: [[multi-submodule-plan]].
+`tests/spec/e2e/gitsigns_spec.lua`. Related: [[docs/superpowers/git-at-scale]].

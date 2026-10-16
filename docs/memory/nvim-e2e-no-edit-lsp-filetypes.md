@@ -34,4 +34,4 @@ with `:noautocmd setlocal filetype=cpp` — `/usr/bin/clangd` is on the macOS
 PATH and a FileType event starts it beside the fake.
 
 Related: [[nvim-headless-no-insert-in-prompt]],
-[[nvim-e2e-single-file-needs-minimal-init]], [[hover-docs-devdocs]].
+[[nvim-e2e-single-file-needs-minimal-init]], [[docs/hover-docs]].

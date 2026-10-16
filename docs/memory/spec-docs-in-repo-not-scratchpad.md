@@ -29,7 +29,4 @@ The decision record ("rejected and why") **stays in** the committed version;
 `docs/superpowers/README.md` sets that convention — those docs are for someone
 *changing* the config, and "where a design and the implementation diverged, the
 implementation wins" — and js-toolchain.md / lsp-fs-sync.md / zig.md all carry
-one. Related: [[nvim-tagstack-api-traps]].
-
-Note: `docs/superpowers/specs/2026-08-17-openfga-fga-support-design.md` is
-tracked, which predates this rule and contradicts it.
+one. Related: [[docs/navigation-stack]].

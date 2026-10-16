@@ -27,7 +27,7 @@ The tool facts that forced that shape, verified against clang-format 22.1.5:
   config clang-format would have honoured. It looks for `.clang-format` *and*
   `_clang-format`.
 
-conform mechanics worth not re-deriving (see [[js-toolchain-detection-plan]] for
+conform mechanics worth not re-deriving (see [[docs/js-toolchain]] for
 the sibling per-project dispatch):
 
 - `conform.formatters.<name>` may be a **function of bufnr**; it is re-evaluated

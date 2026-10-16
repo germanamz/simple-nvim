@@ -76,6 +76,13 @@ payloads reached a *different* agent, in a different workspace, mid-dialog — v
 cmux 0.64.22 accept a `surfaceId` and silently ignore it, targeting the active
 surface instead.
 
+Driving the agent's TUI was fragile on its own terms too. `cmux send` passes raw
+bytes, so DEL (`0x7f`) works as a backspace, but long bursts of one control key
+are lossy — 95 DELs deleted 61 characters — and Claude Code's prompt ignores
+readline bindings: `send-key ctrl+u` returns `OK` and clears nothing. A text
+blob arrives intact in one call, and one sent without a trailing Enter stays an
+unsubmitted draft in the existing conversation.
+
 Pasting costs one keystroke, always lands where you are looking, works with any
 agent in any terminal, and depends on no cmux API. Removing the sink also
 removed the payload escaping it needed: `cmux send` turns a real newline, and
@@ -92,19 +99,23 @@ Claude Code 2.1.261's binary and the ACP spec, not just their documentation.
 
 - **ACP (Agent Client Protocol).** The standard here, and Claude Code is
   reachable through it via `zed-industries/claude-agent-acp`, Codex via
-  `codex-acp`, with Gemini CLI and OpenCode native. Its only transport is stdio,
-  where "the client launches the agent as a subprocess" — so it requires the
-  agent to live inside Neovim. Worth revisiting only if that ever becomes the
-  workflow; it would also bring `ToolCallLocation {path, line}` follow-along for
-  free.
+  `codex-acp`, with Gemini CLI and OpenCode native. Its `session/prompt` takes
+  `Text` and `ResourceLink` blocks, both baseline, so it carries prose and file
+  references natively. But its only transport is stdio, where "the client
+  launches the agent as a subprocess" (Streamable HTTP is still a draft) — so it
+  requires the agent to live inside Neovim rather than in its own pane. Worth
+  revisiting only if that ever becomes the workflow (CodeCompanion, avante.nvim
+  and agentic.nvim are Neovim-side clients); it would also bring
+  `ToolCallLocation {path, line}` follow-along for free.
 - **Claude's IDE websocket.** The complete set of IDE→Claude notifications is
   `at_mentioned`, `selection_changed` and `log_event`. `at_mentioned` takes
   strictly `{filePath, lineStart, lineEnd}` (0-indexed on the wire) and is
   rendered into the prompt as the literal string this feature already produces.
   There is no field for a comment, so the protocol is a more expensive way to
   type one string.
-- **A custom `mcp__ide__` tool** over that websocket. Plausible — the IDE
-  connection registers as an MCP server named `ide` — but pull-only: the agent
+- **A custom `mcp__ide__` tool** over that websocket. Plausible but never
+  tested — the IDE connection registers as an MCP server named `ide`, which
+  already exposes `getDiagnostics` and `executeCode` — and pull-only: the agent
   must decide to call it, so it is not a notification.
 - **`notifications/claude/channel`.** Real unsolicited MCP push, `{content,
   meta}`, injected into the conversation. Gated behind a `--channels` flag absent

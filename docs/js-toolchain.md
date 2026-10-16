@@ -260,7 +260,10 @@ builtin. With a superproject open and the buffer in a submodule, nvim-lint's
 default (editor cwd) resolves a different project — and fails invisibly, since
 "could not find config file" arrives as an empty diagnostic list. When there is
 no `package.json` above the buffer the two halves still diverge: nvim-lint uses
-the buffer's directory, conform lands on the editor's cwd.
+the buffer's directory, conform lands on the editor's cwd. nvim-lint's `cwd` is
+resolved from the buffer's **name**, never `vim.fs.root(bufnr, …)`: given a
+bufnr, `vim.fs.root` discards the name for any buftype other than `""` and
+answers from `uv.cwd()` — the editor cwd this exists to keep out.
 
 Smaller accepted items: the version probe's bare-semver fallback is not scoped
 per command, so if `prettierd` ever exits 0 without its label the daemon version

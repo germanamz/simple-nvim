@@ -20,4 +20,4 @@ changed-only filter (C).
 **How to apply:** in unit specs, build absolute paths from `vim.fn.getcwd()`
 after the chdir (the form nvim-tree itself builds node paths from), not from the
 fixture/tempname path. Same family as the /var↔/private/var trap in
-[[nvim-tree-workspace-branch-status]].
+[[docs/nvim-tree-git]].

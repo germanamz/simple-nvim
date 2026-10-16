@@ -45,15 +45,16 @@ extraction was meant to remove.
 | `fs.lua` | The single "list every file under the cwd" command shared by both file pickers |
 | `ft.lua` | The markdown-family filetype set, so adding a member is one edit |
 | `hl.lua` | The theme-aware muted-color recipe shared by the nvim-tree decorators |
-| `largefile.lua` | One threshold for "too large for synchronous whole-buffer work", so the treesitter guard and its callers agree |
+| `largefile.lua` | One threshold for "too large for synchronous whole-buffer work" (5000 lines or 512 KB), so the treesitter guard and its callers agree |
 | `markdown.lua` | Frontmatter and fence parsing. Extracted for the paragraph gutter and the glow preview; the preview became a cmux panel that parses nothing, so the gutter is the only consumer left |
 | `project.lua` | "Is this directory an independent project root?", asked about the same tree with different markers by two callers |
 
 Module-scoped extractions that did not warrant `lua/util/`:
 `lua/config/git_status_codes.lua` (the porcelain dominant-letter rule and the
-letter → highlight mapping, previously duplicated verbatim within one file) and
+letter → highlight mapping, previously duplicated verbatim within one file),
 `lua/config/nvim_tree_hl_decorator.lua` (a factory for the tree's
-grey/blue/teal decorators).
+grey/blue/teal decorators), and `lua/config/lock_drift.lua` (the lazy-lock drift
+warning, moved out of `init.lua` so its ref-resolution ladder is unit-testable).
 
 ## Dropped mid-flight
 
@@ -114,6 +115,22 @@ future review will flag them again.
 - **telescope_smart's "status/diff serialization race across pipelines"**, the
   gitsigns `file_new_vs_base` sync-spawn and `GitSignsUpdate` double-fetch
   performance flags, and the gitsigns buffer-loop "triplication".
+- **`ai_models`' `start_pull` module-state reset as "coupling"**, the picker
+  legend's `VimResized`-after-`BufLeave` "leak", and a notify on `ai.lua`'s
+  model-persist write failure.
+- **Dropping `shfmt` for zsh, or pinning `stylua` through mason.** shfmt parses
+  zsh as bash, which suits the bash-compatible scripts it meets; zsh-only syntax
+  fails visibly on save. stylua must be on the shell `PATH` for `make lint` and
+  `make fmt`, where mason's bin dir is not, and a mason copy would shadow it
+  inside Neovim. Both are commented in `lua/config/formatters.lua`.
+- **A central repo registry.** `util.git`'s root cache, `git_head`'s watched set
+  and the `review_base` map each have one owner and together already form an
+  implicit registry; only liveness was unowned, and buffer-lifecycle eviction now
+  owns it. See [git-at-scale.md](git-at-scale.md).
+- **Resolving the wikilinks root through `util.git.root`.** That resolver is
+  git-toplevel-only and returns nil for a vault with no repo. The two answer
+  different questions and coincide only on `.git`, so `wikilinks.lua` keeps its
+  own `WIKI_MARKERS`.
 - **Deduplicating the 2000 ms bound, the status argv, or the ripgrep argument
   literals.** Coincidental similarity; unifying would couple unrelated modules.
 - **Unifying the two `relpath` variants.** One is a defensive prefix-match, the
@@ -129,7 +146,17 @@ future review will flag them again.
   `raw = { "--max-time", "N" }`.
 - **`util.git.run` returns `lines, ok, timed_out`.** A timeout is `code == 124`
   and `signal == 9` from `vim.system():wait(ms)`. The old nil-return branch
-  survives only for SIGKILL-proof processes.
+  survives only for SIGKILL-proof processes. `review_base` relies on the
+  distinction: a timed-out validation returns the stored base unvalidated and
+  retries after a 10 s per-root backoff, and only a definitive failure prunes it.
+  The backoff is deliberately not reset with the cache; it tracks git
+  responsiveness, not store contents.
+- **`config.ai` owns `DEFAULT_MODEL`** and `ai_models` reads it. That is the
+  require direction that already existed (`ai_models` requires `ai`), so keep the
+  export on that side or a cycle appears.
+- **`ai_models`' `CURATED_FIM` is keyed by exact installable name**, not by
+  family. Family keys let an installed instruct tag inherit the base tags'
+  `fim = true` and skip the `<CR>` `/api/show` gate.
 - **`util.state.write_atomic` returns a boolean** — `os.rename` does not raise.
   `review_base.write_state` gates its cache write-through on that return.
 - **A latent quirk, left unfixed:** `statusline.refresh()`'s async callback guards

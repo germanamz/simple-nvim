@@ -160,3 +160,28 @@ though neither is declared in the `servers` table. Ruff's `F401`/`E501` are not
 settable through this picker — it lists only pyright rule names (`report*`) — and
 ruff does no type checking, so it is not a source of the Pydantic noise. It is
 worth knowing about when a diagnostic you want gone does not appear in the list.
+
+## Rejected
+
+Three other routes to per-project severities look plausible and do nothing here.
+
+- **Rewriting severities in a `textDocument/publishDiagnostics` handler.**
+  Pyright dynamically registers `textDocument/diagnostic`, so Neovim *pulls* its
+  diagnostics and the push handler never runs — an override fired 0 times while
+  6 diagnostics landed. Every "downgrade LSP severity in Neovim" recipe built on
+  that handler is a silent no-op against pyright.
+  (`init_options = { disablePullDiagnostics = true }` forces push back if it is
+  ever needed.) Test push versus pull with
+  `client:supports_method("textDocument/diagnostic")`, not
+  `server_capabilities.diagnosticProvider == nil`: pull arrives both ways —
+  pyright registers it dynamically, ruff declares a static provider.
+- **neoconf.nvim.** Structurally inert under the native API: it injects settings
+  through `lspconfig.util.on_setup` → `on_new_config`, and neither
+  `vim.lsp.config` nor `vim.lsp.enable` ever calls them.
+- **A project `.nvim.lua` (`exrc`) calling `vim.lsp.config("pyright", …)`.**
+  There is no protective merge priority: every `vim.lsp.config` call outside
+  `lsp/*.lua` lands in the same tier (`:h lsp-config-merge`, item 4) and merges
+  in call order, last wins. This config registers its servers in
+  mason-lspconfig's `config()`, which runs on `BufReadPre` — after `exrc` — so
+  it wins every key both set. The exrc appears to work only for keys the config
+  never sets.

@@ -47,8 +47,8 @@ divergence is called out — those deltas are usually the most useful part.
 ## Where the originals went
 
 These documents were synthesized from 19 design specs, phase plans and
-verification handoffs that lived under `docs/superpowers/specs/` and
-`docs/superpowers/plans/`. Those were deleted on 2026-07-31, after an audit
+verification handoffs that lived under docs/superpowers/specs/ and
+docs/superpowers/plans/. Those were deleted on 2026-07-31, after an audit
 confirmed nothing of forward value survived only in them — the durable parts are
 above, and the rest was TDD scaffolding, acceptance criteria for finished work,
 and `file:line` references that had already drifted.

@@ -8,7 +8,7 @@ description: "cmux (as of 2026-09): rpc terminal.paste/surface.send_text/termina
 # Cmux send targeting hazards
 
 Learned the hard way on 2026-09-05 while building nvim→agent review comments
-(see [[agent-comment-channels-2026-09]]). A probe agent injected three payloads
+(see [[docs/agent-review-comments]]). A probe agent injected three payloads
 into a DIFFERENT live agent's session, in a different workspace, mid-dialog.
 
 **Never use `cmux rpc terminal.paste` / `surface.send_text` / `terminal.input`.**
@@ -44,4 +44,4 @@ workspaces use `id`/`ref`. There is also a `here` boolean on the caller's surfac
 for the clipboard. Even with the uuid fix, injected text lands wherever focus is
 in the target pane, so a permission prompt or picker swallows it. See
 `docs/agent-review-comments.md` (committed). Related:
-[[agent-comment-channels-2026-09]], [[processes-that-outlive-nvim]].
+[[docs/agent-review-comments]], [[docs/leak-diagnostics]].

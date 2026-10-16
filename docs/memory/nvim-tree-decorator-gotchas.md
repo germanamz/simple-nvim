@@ -57,12 +57,12 @@ under a single `NvimTreeRootFolder` group (`renderer/builder.lua` `format_root_n
 per-part colour, no `%#Group#` markup (renders literally), and decorators do NOT
 run on the header line. So coloured root-line status is impossible there — the
 winbar (statusline markup) is the only coloured option. Used monochrome for the
-superproject branch/status header; see [[nvim-tree-workspace-branch-status]].
+superproject branch/status header; see [[docs/nvim-tree-git]].
 
 Tests: pure predicates `_is_dotfolder`/`_is_symlink` in
 `tests/spec/unit/nvim_tree_decorators_spec.lua` + `util.hl` in `hl_spec.lua`;
 colour distinctness, dispatch, overlap precedence, and the no-crash reload
 regression in `tests/spec/e2e/nvim_tree_decorators_spec.lua`.
 
-See [[nvim-tree-ignore-filter]], [[nvim-tests-need-sandbox-disabled]],
-[[nvim-e2e-single-file-needs-minimal-init]], [[nvim-tree-workspace-branch-status]].
+See [[docs/nvim-tree-git]], [[nvim-tests-need-sandbox-disabled]],
+[[nvim-e2e-single-file-needs-minimal-init]].

@@ -120,7 +120,10 @@ raises a warning. Verify with:
 ```
 
 Must print `true`. `install()` is idempotent so `:Lazy reload minuet-ai.nvim` does
-not stack wrappers.
+not stack wrappers. It also returns false for a backend it has already wrapped, so
+a second call on the same module draws the same warning as a missing internal
+(`config.minuet_multicursor` returns true there). `:Lazy reload` never hits this:
+it unloads minuet's modules, and the guard wraps a fresh one.
 
 **Unreported and unfixed upstream** as of 2026-08-22. `git log -S'is_on_throttle'
 --all` finds one commit in the repo's history (`223b639`, 2024-12-14) and

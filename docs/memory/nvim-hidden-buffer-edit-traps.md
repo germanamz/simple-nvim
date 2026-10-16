@@ -9,7 +9,7 @@ description: "Three verified nvim API traps behind the duplicated/lost gopls pac
 
 Found 2026-08-31 fixing "creating `internal/nice/better/better.go` from
 nvim-tree gives the package line once per directory, and sometimes not at all"
-(see [[lsp-stale-on-tree-delete-rename]]; write-up in docs/lsp-fs-sync.md).
+(write-up in [[docs/lsp-fs-sync]]).
 
 **Upstream trigger:** nvim-tree's `actions/fs/create-file.lua:93` dispatches
 `FolderCreated` after every `mkdir` but passes `new_file_path` — the whole

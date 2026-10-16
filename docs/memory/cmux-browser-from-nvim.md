@@ -53,6 +53,6 @@ Discoverability: `cmux --help`, `cmux docs browser`, `cmux browser --help`,
 `cmux identify --json --id-format both`. Browser skill doc:
 `https://raw.githubusercontent.com/manaflow-ai/cmux/main/skills/cmux-browser/SKILL.md`
 
-Design consequence for [[nvim-refactor-stage-plan]]: a single `open_url(url)` seam in
+Design consequence for [[docs/superpowers/refactoring]]: a single `open_url(url)` seam in
 the nvim config (cmux-aware, falls back to `vim.ui.open`) serves `gx`, markdown
 preview, and dependency-docs lookups alike.

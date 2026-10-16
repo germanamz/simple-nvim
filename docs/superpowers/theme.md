@@ -55,7 +55,7 @@ The `ColorScheme` autocmds are load-bearing and must stay. The sibling
 
 ## What was deleted
 
-- **`lua/config/syntax_constants.lua`** — the nine-group magenta constants
+- **lua/config/syntax_constants.lua** — the nine-group magenta constants
   override (`@boolean`, `@number`, `@number.float`, `@constant`,
   `@constant.builtin`, `@constant.macro`, `@character`, and two Go LSP groups).
   GitHub colors all of these natively. Its `require` had to go from `init.lua` in

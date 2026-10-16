@@ -75,7 +75,9 @@ test (unit, smoke, and e2e suites green). The Makefile test targets now reap hun
 plenary children through `scripts/run-plenary.sh`; use that wrapper for single-spec
 runs too, since a direct `nvim --headless -c PlenaryBusted...` still strands
 children (the run finishes but a live libuv handle keeps the process from exiting).
-Pre-existing orphans need a one-time `pkill -f plenary.busted`.
+The wrapper runs the parent as its own process group and SIGKILLs what is left of
+it, because a child wedged in Lua never services SIGTERM. Pre-existing orphans need
+a one-time `pkill -f plenary.busted`.
 
 | Where | Defect |
 | --- | --- |
@@ -84,10 +86,36 @@ Pre-existing orphans need a one-time `pkill -f plenary.busted`.
 | `lua/config/ai_models.lua` (`pull_model`) | The streaming curl had no watchdog; a wedged ollama daemon wedged `active_pull` for the session. |
 | `lua/config/telescope_smart.lua` (`_list_all_async`) | The rg/fd walk had no timeout, unlike every other git spawn in the file. |
 | `lua/plugins/nvim-tree.lua` | Three autocmds registered without an augroup; re-sourcing or `:Lazy reload` stacked duplicate handlers, multiplying git spawns per `FocusGained`. |
-| `lua/config/statusline.lua` + `lua/config/review_base.lua` | `FocusGained` swept every loaded buffer with no per-root dedup, firing N identical `git rev-parse` spawns per alt-tab plus cache invalidation forcing sync re-validation. Burst churn, not sustained CPU. |
+| `lua/config/statusline.lua` + `lua/config/review_base.lua` | `FocusGained` swept every loaded buffer with no per-root dedup, firing N identical `git rev-parse` spawns per alt-tab plus cache invalidation forcing sync re-validation. Burst churn, not sustained CPU. The fix's in-flight guard is released only by `on_done`, so each spawn carries a timeout and the fan-out is `pcall`ed; a hung `git` would otherwise wedge it and drop every later sweep. |
 | `lua/util/git.lua` | `root_cache` cached only successes, so every non-repo buffer re-ran a synchronous `git rev-parse ... :wait(2000)` on each miss, stalling the main thread on buffer churn. |
 | `lua/config/nvim_tree_git.lua` | `refresh_labels` bypassed the in-flight dedup, overlapping whole-tree `git status` pipelines during rebases and rapid refreshes. |
 
 The timer-handle discipline these defects exposed is why the [file
 picker's](smart-files.md) loading float reuses one lazily created `vim.uv` timer
 rather than allocating one per press.
+
+## Processes that outlive nvim
+
+A later report, "nvim starts lots of processes on multiple ports and they never
+go away," came from the terminal's sidebar, not the config. The config leaks no
+processes.
+
+- **Language servers exit with nvim.** In a PTY reproduction on a polyglot repo,
+  dprint, ts_ls (with its two tsservers) and gopls (with its telemetry child) all
+  talked stdio, none listened on a port, and all were gone 3 s after `:qa!`.
+  nvim's `--embed` server and every child run with no controlling tty, so a
+  tty-based port scan cannot attribute anything to nvim.
+- **Sidebar port badges are not live processes.** The ports cmux showed had no
+  socket behind them. cmux scans each panel (`ps -t` plus `lsof -sTCP:LISTEN`,
+  driven by shell preexec/precmd hooks, no timer) and keeps ports per panel
+  across restarts; detached daemons (ppid 1, no tty) are invisible to it. Its
+  scan included the root-owned `login` on each panel's tty, failed to inspect
+  it, marked itself incomplete, and so never retired a port it had once seen —
+  fixed upstream in cmux PR #9324. Check `lsof -nP -iTCP:<port>` before
+  suspecting the config.
+- **Two daemons outlive nvim by design.** prettierd keeps one daemon per cwd
+  (`CORE_D_DOTFILE=.prettierd@<cwd>`) with no idle timeout and its portfile
+  under `$TMPDIR`, so a session with a different `TMPDIR` spawns a second daemon
+  and strands the first. eslint_d keeps one per project and exits after 15 idle
+  minutes. The only path in the config that can start Ollama is the
+  `ollama list` fallback in `lua/config/ai_models.lua`.

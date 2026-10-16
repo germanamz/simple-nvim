@@ -42,7 +42,7 @@ the `x` flag has already left insert by the time `nvim_feedkeys` RETURNS, so
 draining outside the mapping silently tests the wrong mode — that read as a
 product bug for one round. This is how
 `tests/spec/unit/minuet_multicursor_spec.lua` pins `nvim_paste`'s
-insert-vs-Replace-vs-normal divergence. See [[minuet-multicursor-accept]].
+insert-vs-Replace-vs-normal divergence. See [[docs/ai-accept-multicursor]].
 
 Cursor-driven events are unreachable too (2026-07, from the nvim-tree
 full_name float work): in a headless **script** context (`-c "luafile ..."`,

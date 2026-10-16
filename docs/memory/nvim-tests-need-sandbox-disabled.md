@@ -11,4 +11,4 @@ The smoke and e2e tiers (`make test-smoke`, `make test-e2e`, anything spawning a
 
 **Why:** sandbox write-denials, not config or test regressions — the suite is fully green (unit + smoke 41 + e2e 20) when run normally.
 
-**How to apply:** run `make test`, `make test-smoke`, `make test-e2e`, `make test-lsp` (and single-spec `PlenaryBustedFile` runs) with `dangerouslyDisableSandbox: true`. Pure-lua `make test-unit` runs fine inside the sandbox. The e2e suite is the refactor golden net — see [[nvim-refactor-stage-plan]].
+**How to apply:** run `make test`, `make test-smoke`, `make test-e2e`, `make test-lsp` (and single-spec `PlenaryBustedFile` runs) with `dangerouslyDisableSandbox: true`. Pure-lua `make test-unit` runs fine inside the sandbox. The e2e suite is the refactor golden net — see [[docs/superpowers/refactoring]].

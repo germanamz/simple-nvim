@@ -79,7 +79,8 @@ Design points worth keeping:
   of them for every package under that root. Which one is decided by the last
   `root_dir` resolution written before that client's `before_init` runs. Client
   creation is deferred, so opening files one at a time (waiting for each attach)
-  makes that the *first* buffer, while a concurrent open resolves every buffer
+  makes that the *first* buffer, while a concurrent open (`nvim -p`, a session
+  restore, a multi-select open from Telescope or quickfix) resolves every buffer
   before any client starts and the *last* one wins. Measured, 6/6 deterministic
   each way (see "Multiple monorepos" below).
 - **The memo is a handoff, not a cache.** `root_dir` records its answer for the
@@ -91,6 +92,10 @@ Design points worth keeping:
   bundled TypeScript rather than borrowing a sibling's. That is the honest
   answer for it, and it is controllable (open the package whose version you want
   and `<leader>lr`), whereas sticky session state is not.
+- **Finders end in an explicit `return nil`.** A Lua function that falls off the
+  end returns *zero* values, not `nil`: `tostring(resolve(...))` then raises
+  "value expected", and `assert.is_nil(resolve(...))` becomes an argument-less
+  call that cannot fail.
 
 ### Verification
 
@@ -100,6 +105,22 @@ Design points worth keeping:
 - Real headless Neovim after the fix, both fixture and `web/`: the forked
   process is now the project's `apps/*/node_modules/typescript/lib/tsserver.js`.
 - Full suite `make test`: 732 pass / 0 fail. `make test-lsp` passes.
+
+To see which TypeScript is running, drive `typescript-language-server` directly
+with a throwaway stdio LSP client (about 60 lines of Node) and read
+`window/logMessage` for "Using Typescript version …"; end to end, start headless
+Neovim and run `ps -Ao args | grep -o '[^ ]*tsserver.js'` to see which library
+forked. Two probe mistakes produce convincing false results:
+
+- **A fixture whose `typescript` symlinks to mason's own copy.** The
+  `(user-setting)` project TypeScript and the `(bundled)` fallback are then the
+  same files, so the version log cannot tell fixed from broken. Use an
+  independent install of the same version, and confirm by the forked argv rather
+  than the version number.
+- **A virtual (not-on-disk) file.** tsserver puts it in an inferred project,
+  globals vanish, and it looks like a tsconfig bug. Probe an on-disk file — the
+  same mechanism as the unsaved-buffer symptom under "Two symptoms this is
+  *not*".
 
 ## Multiple monorepos in one workspace
 
@@ -183,7 +204,18 @@ firing once on a mixed fixture and staying silent on a homogeneous monorepo,
 `web/` (single install) and a minor-drift repo (packages differ only by a
 TypeScript minor).
 
-**A gated root clamp** (`lua/config/lsp_root.lua`) — see the section above.
+**A gated root clamp** (`lua/config/lsp_root.lua`), for the stray-lockfile
+capture above. When lspconfig's root sits above the repository holding the
+buffer, the root is pulled down to that repository — but only if the repository
+is itself a TypeScript project (owns a `tsconfig.json` or `jsconfig.json`). The
+gate is load-bearing: ungated, a git submodule vendored inside a TS project and
+compiled by the parent's tsconfig re-roots at itself, tsserver drops the file
+into an inferred project, and a file that compiled cleanly grows a false
+`TS2307`. Verified both ways. The clamp sits *inside* `wrap_root_dir`, because
+`before_init` looks the memo up by the clamped root; applied outside it, every
+injection misses — measured worse than not clamping at all. Each wrapper
+recognises the other's output (`lsp_tsdk.is_wrapped`), so `:Lazy reload` does
+not stack a second layer.
 
 **A divergent-package split** (`lsp_tsdk.wrap_root_dir`). When a client for this
 root already runs a different **major**, the package gets its own client rooted at

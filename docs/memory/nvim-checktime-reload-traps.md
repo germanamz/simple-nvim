@@ -46,4 +46,4 @@ recurse). `vim.lsp`'s `on_reload` sends didClose+didOpen, so LSP resync is free
 once the buffer actually reloads. Cost is ~18us/buffer, no spawn.
 
 Related: [[nvim-headless-no-insert-in-prompt]], [[nvim-pty-probe-key-timing]],
-[[nvim-virtual-lines-and-headless-lies]], [[nvim-tree-git-perf-tiered]].
+[[nvim-virtual-lines-and-headless-lies]], [[docs/nvim-tree-git]].

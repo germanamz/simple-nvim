@@ -32,7 +32,9 @@ and status in the file tree). This document is the engineering side.
 - **`lua/util/git.lua`** — the whole shellout surface. `run` bounds every call at
   `TIMEOUT_MS = 2000` via `vim.system():wait(ms)` and returns
   `lines, ok, timed_out`, so a caller can tell a transient hang from a real git
-  error. `buf_root` / `buf_in_root` do the per-buffer scoping. `head` /
+  error. `root` memoizes per directory, a definitive "not a repo" included, but
+  never a timed-out resolve, so a hang is retried rather than remembered.
+  `buf_root` / `buf_in_root` do the per-buffer scoping. `head` /
   `parse_head` share one parse between the sync and async paths.
   `index_key(dir)` is the state key that lets a status cache skip an unchanged
   submodule.
@@ -88,6 +90,10 @@ and status in the file tree). This document is the engineering side.
   it now scales with the machine.
 - **Per-process timeout** is 2000 ms, matching `util.git`'s bound. A hung
   submodule degrades to "no labels for that one" rather than wedging the pool.
+  The outer whole-tree status and diff get five times that
+  (`BULK_GIT_TIMEOUT_MS`): long enough not to kill a legitimate cold status, and
+  still bounded, because one hung spawn would otherwise wedge the per-cwd
+  `refreshing` flag and silently stop every later refresh for that cwd.
 - **Recursion is skipped entirely when there is no `.gitmodules`** — one `fs_stat`,
   so ordinary single repos pay nothing.
 - **Startup is submodule-count-independent** (P7).
@@ -107,9 +113,41 @@ Do not file these as bugs.
 - **One unnamed-buffer watcher is never reaped.** The lifecycle autocmd skips
   empty buffer names, so the cwd-root watcher an unnamed buffer seeds stays alive.
   One handle, kept alive by any named sibling.
+- **An unborn repo's first commit goes unnoticed.** On an unborn HEAD,
+  `git branch --show-current` names the branch but `rev-parse HEAD` resolves
+  nothing, and the watcher reacts only to events on the `HEAD` file, which a
+  first commit does not touch (it creates the branch ref). The unborn handling is
+  defensive, not a live signal.
+- **LSP servers are not told about out-of-editor file changes.**
+  `lua/plugins/lsp.lua` turns `workspace/didChangeWatchedFiles` off for every
+  server: without watchman or fswatch, Neovim serves each registration with a
+  recursive walk of the server's workspace root, one per submodule root in a
+  superproject, and every external file event then runs a glob match on the main
+  loop. A checkout, rebase, codegen run or install outside the editor reaches a
+  server only through the reload sweep and manual hatches in
+  [`../external-changes.md`](../external-changes.md); tree deletes and renames go
+  through [`../lsp-fs-sync.md`](../lsp-fs-sync.md).
 - **nvim-tree's own git scan and LSP-per-root** are separate concerns, addressed
   elsewhere (see [`../nvim-tree-git.md`](../nvim-tree-git.md) and
   [`../lsp-typescript-version.md`](../lsp-typescript-version.md)).
+
+## Test notes
+
+- Local-path submodule fixtures need `git -c protocol.file.allow=always
+  submodule add`: git disabled the file transport by default after
+  CVE-2022-39253. `tests/helpers/git_fixture.lua` and the script below both pass
+  it.
+- Statusline event-scoping specs spy on `git.buf_in_root`, which is synchronous
+  and deterministic, rather than observing the async branch cache, which watcher
+  re-entrancy pollutes. `git_head`'s fs-event and recheck specs stub
+  `_resolve_head` and call `_check` directly.
+- **Two known gaps.** P5's bound is not pinned: dropping `:wait(TIMEOUT_MS)`
+  from `git.run` keeps the suite green; only the stderr separation is tested, and
+  the review-base timeout specs stub `git.resolve`. And two `submodule_spec.lua`
+  cases `chdir` into a temp dir and delete it without restoring the cwd, so later
+  cases run with an empty `getcwd()` and the load-sensitive `buf_in_root` case
+  can flake (it fails closed). Saving and restoring the cwd in `after_each` fixes
+  it.
 
 ## Verifying by hand
 

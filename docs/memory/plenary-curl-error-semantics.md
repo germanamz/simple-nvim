@@ -23,4 +23,4 @@ vim.schedule (it receives `{message=...}`). Sync path — on_error's RETURN IS
 DISCARDED; the request returns an EMPTY table (no `.status`), so gate on
 `res.status`. `opts.timeout` only applies to the sync `job:sync` path; in
 callback mode enforce bounds with `raw = { "--max-time", "N" }`. Used in
-lua/config/ai_models.lua ([[nvim-principles-review-2026-07]]).
+lua/config/ai_models.lua ([[docs/superpowers/refactoring]]).

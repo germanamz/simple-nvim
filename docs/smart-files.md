@@ -22,7 +22,10 @@ base"). Unchanged files carry a blank prefix so the column lines up on every row
 
 Two behaviors are load-bearing and must survive any change here: the
 changed-files-first ordering at an empty prompt, and the status prefix column on
-every row.
+every row. The ordering rests on feed order, not on `entry.index`: at an empty
+prompt the sorter scores every entry 1, and Telescope's entry manager runs its
+index tiebreak only below a score of 1, so entries keep the order they were fed
+in. A sorter that scored 0 there would break it.
 
 ## The performance problem
 
@@ -112,6 +115,9 @@ silently skipped, and files inside it render without their in-submodule status
 prefixes, because the outer status does not descend into a submodule the discovery
 step never found. This is an accepted limitation for the picker's purpose; the
 `fs_stat(.git)` gate and the real-git integration tests cover the healthy case.
+If it ever matters, reading gitlinks (mode `160000`) from `git ls-files --stage`
+enumerates from the index like `git submodule status` does and measured about as
+cheap, around 10 ms at 200 submodules.
 
 ## The loading float
 
@@ -171,10 +177,18 @@ never happened with the fully materialized list. Since the stated pain was the
 many-submodule open, which cheap discovery and the loading float already solve,
 the streaming path was not worth its complexity or its behavior change.
 
-One caveat for anyone who revisits it: Telescope's stock `async_oneshot_finder`
-has an inverted `% await_count` yield guard that yields on every iteration rather
-than every 1000th (in Lua a nonzero modulo result is truthy). A streaming finder
-would need a corrected copy with `% 1000 == 0`, not the vendored version.
+Caveats for anyone who revisits it:
+
+- Telescope's stock `async_oneshot_finder` has an inverted `% await_count` yield
+  guard, in two places, that yields on every iteration rather than every 1000th
+  (in Lua a nonzero modulo result is truthy). A streaming finder would need a
+  corrected copy with `% 1000 == 0`, not the vendored version.
+- Telescope calls `finder:close()` from several sites in `pickers.lua`, so a
+  hand-rolled finder's `close()` must be idempotent.
+- Moving the walk into the finder drops `WALKER_TIMEOUT_MS` (10 s), which
+  currently bounds the walker spawn; the finder needs its own `close()` timer.
+- Changed-first ordering would still rest on feed order (see above), so the
+  changed files must be fed before the walk.
 
 ## Where the code lives
 
@@ -186,3 +200,7 @@ would need a corrected copy with `% 1000 == 0`, not the vendored version.
   `tests/spec/e2e/telescope_spec.lua`, which pins the prefix column on both
   changed and unchanged rows. Run the suite with the sandbox disabled; the
   fixtures do real git writes.
+- `smart_files()` opens through `M._open_picker` and refreshes through
+  `M._refresh_async`, so the unit spec stubs both and tests the loading-float
+  wiring synchronously, with no Telescope and no real 150 ms timer. A spec that
+  arms the debounce stops it with `M._loading_timer():stop()` in teardown.

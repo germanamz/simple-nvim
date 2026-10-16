@@ -45,6 +45,53 @@ Coloring it would mean moving the status to the winbar, which parses statusline
 markup; the status stays on the repo-name row instead, where it scrolls with the
 tree. Submodule labels are decorators, so they are fully colored.
 
+## Builtin git is off
+
+nvim-tree's own git integration is disabled (`git.enable = false`). In a
+superproject it runs one synchronous `git status --ignored` per submodule and
+counts timeouts in a module-level counter that is never reset; after five it
+turns git integration off for the rest of the session, and the `git_ignored`
+filter with it, so `node_modules` and build output reappear "after a while".
+Nothing here needs it: labels come from the `telescope_smart` codes cache,
+repaints from this config's own autocmds, and ignore hiding from
+`config.ignore_filter`.
+
+Builtin git also redrew the tree for free, and the decorator labels had come to
+depend on those redraws. Turning it off exposed a latent bug: the decorator keyed
+the shared codes cache with `fnamemodify(getcwd(), ":p")`, which carries a
+trailing slash, while every other caller keys plain `getcwd()`. The key
+ping-ponged, blanking labels and running the recursive scan twice per repaint.
+The decorator now keys with plain `getcwd()`; the `same_dir()` comparison in the
+`SmartCodesRefreshed` handler stays as a symlink defense.
+
+### Hiding ignored files
+
+`config.ignore_filter` is a `filters.custom` predicate. nvim-tree calls it
+synchronously for every entry while it scans a directory, so it does only table
+lookups, fed by two layers:
+
+- **A static basename set** of heavy dirs that are essentially never tracked
+  (`node_modules`, `.venv`, `__pycache__`, …), hidden before any git runs. Names
+  some ecosystems do track (`target`, `build`, `dist`, `vendor`) are left to the
+  oracle.
+- **An async `git --no-optional-locks -C <toplevel> check-ignore -z --stdin`
+  oracle** for everything else, one bounded process per enclosing toplevel
+  through `util.pool`. A miss shows the path (fail open) and queues it; when the
+  batch lands the tree reloads once. `--no-optional-locks` keeps check-ignore off
+  the repo's git index lock, which the decorator's concurrent `git status` and
+  `git diff` in the same repo would otherwise collide on, making one exit nonzero
+  and drop its output.
+
+A batch drains in two async stages, toplevel resolution (so a burst of uncached
+directories is not a run of blocking `rev-parse` calls on the main loop) and then
+check-ignore. Both stages check that the cache table is still the one they
+started with. A clear mints a new table, so a batch that straddles a
+`.gitignore` edit drops its stale verdicts, and skips priming `util.git`'s root
+memo, instead of repopulating the fresh cache. The cache clears when a
+`.gitignore` or `info/exclude` is written or reloaded, on `<leader>r`, and
+through `config.dir_cache` (cwd or `.gitmodules` change, `<leader>gR`).
+Index-only changes (`git add -f`, `git rm --cached`) need `<leader>gR`.
+
 ## Showing only changed files (`C`)
 
 Press `C` in the tree to hide everything without git changes. What remains:
@@ -127,9 +174,17 @@ submodule path set for
 the current cwd from `telescope_smart._submodule_paths_async`, the cheap
 `.gitmodules` enumerator (see the [picker doc](smart-files.md)), and identifies a
 submodule row by matching `node.absolute_path` against that set. nvim-tree has no
-submodule concept of its own, so the caller must supply the set. The decorator
-runs `icons()` only on visible nodes, so a submodule resolves only when its folder
-row is actually on screen, never for one you have not navigated to.
+submodule concept of its own, so the caller must supply the set. The set is keyed
+by the enumerator's own relative paths rather than re-relativized against
+`git.root(cwd)`: git returns the canonical toplevel (on macOS `/private/var/…`)
+while the cwd may be the logical `/var/…`, and the `:p` normalize does not
+resolve symlinks, so the two would share no prefix. The decorator runs `icons()`
+only on visible nodes, so a submodule resolves only when its folder row is
+actually on screen, never for one you have not navigated to.
+
+A submodule's dirty flag and count could also be had for free by
+prefix-filtering the recursive codes cache. The decorator uses the uniform
+resolver instead, since branch and ahead/behind need that resolve anyway.
 
 ## Staying fast: a tiered status model
 
@@ -159,7 +214,10 @@ dirty-submodule rollup signal, anything else is a file code. The tree rolls a
 commit-diverged submodule up into all its ancestor directories, so a collapsed
 folder shows a dirty marker for a bumped nested submodule immediately, at zero
 added cost. The picker filters these gitlink lines out of its file list, since the
-path is a folder.
+path is a folder. The dirty-submodule set and the rollup markers are keyed by
+slash-free relative paths, while `path_util.relative` normalizes with `:p`, which
+appends `/` to a directory; strip it before keying or looking up, or no directory
+marker ever matches.
 
 ### Tier 1: lazy, visible rows only
 
@@ -171,12 +229,15 @@ to reflect working-tree dirt the moment the row is on screen.
 
 `config.submodule_status` runs `git status` inside each submodule to catch
 working-tree-only dirt (same HEAD, uncommitted edits) that Tier 0 cannot see.
-Results are cached per submodule, keyed by `HEAD sha + .git/index mtime`. The scan
-runs to completion once on a cold open, non-blocking and progressive, and the tree
-reloads as rollups fill in. On later focus or refresh, only submodules whose HEAD
-or index actually changed re-run, so steady-state cost is near zero instead of the
-old per-focus storm. The picker reuses this exact cache, so one computation feeds
-both consumers.
+Results are cached per submodule, keyed by `util.git.index_key`, the mtime of the
+submodule's git index, which a stage, commit, checkout or submodule update
+rewrites. The scan runs to completion once on a cold open, non-blocking and
+progressive, and the tree reloads as rollups fill in. On later focus or refresh,
+only submodules whose index actually moved re-run, so steady-state cost is near
+zero instead of the old per-focus storm. The picker reuses this exact cache, so
+one computation feeds both consumers; its recursion calls
+`submodule_status.revalidate()` on every run, without which the shared cache
+would serve it stale codes.
 
 ### Fidelity
 
@@ -191,7 +252,8 @@ both consumers.
 ## Caching and invalidation
 
 The cheap building block is `util.git.index_key`, a spawn-free read of a repo's
-git index mtime. It state-keys both the `repo_status` per-directory cache and the
+git index mtime (a submodule's `.git` file is followed to its real gitdir). It
+state-keys both the `repo_status` per-directory cache and the
 `submodule_status` cache. On `FocusGained`, `refresh_labels` revalidates each entry
 with a stat only and keeps unchanged submodules, instead of dropping everything and
 re-resolving. The definitive signals still force a hard flush: `HeadChanged`,
@@ -244,8 +306,10 @@ and `<leader>gR`) already keeps status fresh at near-zero steady-state cost.
   decorator.
 - **`config.submodule_status`** owns the per-submodule codes cache, the state key,
   the bounded incremental scan, and targeted invalidation. It knows nothing about
-  nvim-tree and fires a `User` event on completion. Consumed by `nvim_tree_git`
-  and `telescope_smart`.
+  nvim-tree: the tree's per-submodule `request()` fires
+  `User SubmoduleStatusChanged`, while the picker's bulk `scan()` is silent and
+  reports through its callback. Consumed by `nvim_tree_git` and
+  `telescope_smart`.
 - **`config.nvim_tree_submodule`** is the `after`-placement decorator that renders
   each visible submodule's segments.
 - **`config.nvim_tree_git`** unions the outer-repo file codes with the
