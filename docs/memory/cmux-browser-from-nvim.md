@@ -23,7 +23,13 @@ Verified contract (2026-08-12):
 - `cmux browser <surface> goto <url>` → re-navigates an existing surface. Enables one
   pinned docs pane instead of a new split per lookup.
 - `cmux browser <surface> get url` → reads current URL.
-- `cmux open <path-or-url>` → generic opener (HTML→browser split, markdown→preview tab).
+- `cmux open <path-or-url>` → generic opener (HTML→browser split, markdown→preview tab,
+  anything else → a `filepreview` tab, which renders images). It tabs into an
+  EXISTING pane (default: the caller's own) and never dedupes; `split-off` moves a tab
+  into a new pane without taking focus. `list-panes --json` gives each pane's
+  `surface_ids` and `pixel_frame` (`tree` has surface types but no geometry). Backs
+  images from nvim-tree; the full flow is
+  in the header of `lua/config/image_preview.lua`.
 - `cmux markdown open <path>` → a *rendered* markdown panel that live-reloads from
   disk. Backs `<leader>mp` (see `lua/config/markdown_preview.lua`). Three traps,
   each cost a probe cycle (2026-08-27): it **always splits a new pane** (no

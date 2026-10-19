@@ -247,6 +247,20 @@ so and does nothing. `<Space>tt` / `tv` / `th` open a cmux terminal tab / split
 right / split below in the folder under the cursor, or in a file's parent
 folder (§4).
 
+Opening an **image** from the tree (`<CR>`, `o`, `<C-v>`, `<Tab>` or any other
+open key, on a png, jpg, gif, webp, heic, …) shows it in a cmux pane beside the
+editor instead of reading its bytes into a buffer. If a pane is already open
+next to Neovim (a terminal, an agent, a preview), the image opens as a tab
+there, in the biggest one if there are several. Only when Neovim is alone does
+it split a new pane off to the right. The cursor stays in the tree, which stays
+open, so you can keep walking it: each image opens as a tab of that same pane,
+and opening one again replaces its tab rather than adding a second. Closing the
+pane's last tab closes the pane; the next image looks for a pane again. SVG is
+not on the list (it is text you may want to
+edit), so it opens as text; `s` shows it in the system viewer. Outside cmux,
+images go to the system viewer too. The code lives in
+`lua/config/image_preview.lua`.
+
 `<Space>E` opens netrw (`:Explore`) in the current window using the tree
 listing style (`g:netrw_liststyle = 3`) with the banner hidden. The previous
 buffer stays loaded. `<C-^>` or `:b#` returns to it. Inside netrw: `<CR>` on

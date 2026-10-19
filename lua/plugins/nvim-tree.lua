@@ -107,7 +107,8 @@ return {
     -- Keep all default mappings, but rebind I and C (the builtins toggle
     -- git_ignored and git_clean, both inert with builtin git off) to the custom
     -- predicates in filters.custom above, so ignored-visibility and a
-    -- changed-files-only view toggle from their usual keys.
+    -- changed-files-only view toggle from their usual keys. The open keys are
+    -- rebound too, so images go to cmux (see the image_preview call below).
     on_attach = function(bufnr)
       local api = require("nvim-tree.api")
       api.config.mappings.default_on_attach(bufnr)
@@ -127,6 +128,10 @@ return {
       map("C", function()
         require("config.nvim_tree_changed").toggle()
       end, "Toggle Filter: Changed only (custom)")
+      -- Every open key (<CR>, o, <C-v>, <Tab>, ...) shows an image node in a
+      -- cmux pane beside the editor instead of reading it into a buffer as
+      -- bytes; any other node opens as the key always did.
+      require("config.image_preview").set_tree_keymaps(bufnr)
       -- Same `<leader>mp` as in a markdown buffer, so previewing a doc from the
       -- tree needs no detour through opening it. The module owns the node
       -- resolution (and the "that is a directory" / "that is not markdown"

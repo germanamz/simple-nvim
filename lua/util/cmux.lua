@@ -8,8 +8,9 @@
 -- to know whether there is a CLI to call at all.
 --
 -- Consumers: config.open_url (docs into a browser pane),
--- config.markdown_preview (markdown into a rendered panel) and
--- config.cmux_terminal (a terminal tab or split in a given folder). The detector
+-- config.markdown_preview (markdown into a rendered panel),
+-- config.cmux_terminal (a terminal tab or split in a given folder) and
+-- config.image_preview (images from nvim-tree into a pane beside Neovim). The detector
 -- lives here so the "is this a cmux session" rule is stated once.
 local M = {}
 
