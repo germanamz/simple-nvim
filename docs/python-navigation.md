@@ -8,7 +8,9 @@ what it does so that the answer does not depend on how Neovim was started.
 The pieces: `lua/config/python_lsp.lua` (the server and its per-project
 wiring), `lua/config/python_env.lua` (the interpreter),
 `lua/config/python_root.lua` (the root), the navigation verbs in
-`lua/config/tagstack.lua`, all wired from `lua/plugins/lsp.lua`.
+`lua/config/tagstack.lua`, all wired from `lua/plugins/lsp.lua`. The research
+behind the design, including how other editors answer the same three
+questions, is in [research/python-navigation](research/python-navigation/README.md).
 
 ## Keys
 

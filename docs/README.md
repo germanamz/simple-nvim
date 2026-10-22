@@ -35,6 +35,12 @@ beyond the code.
   nothing for annotated-but-sloppy codebases, which five rules Pydantic actually
   trips, the silent aliasing trap in delivering per-root LSP settings, and
   `:PythonQuiet` for a project whose own config makes basedpyright far louder.
+- **[research/python-navigation](research/python-navigation/README.md).** The
+  research behind the Python navigation design: how VS Code with Pylance,
+  PyCharm, Zed, Helix, Sublime Text and the Neovim distributions handle large
+  Python projects, which language servers exist, and an audit of the config
+  before the change. A record of October 2026, not a description of the config
+  now.
 - **[navigation-stack.md](navigation-stack.md).** Why `<C-o>` walks you back
   through everything you read after a `gd`, why the fix is `<C-t>` rather than a
   smarter `<C-o>` (every other editor reached the same conclusion), and the
