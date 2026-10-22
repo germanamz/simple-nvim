@@ -91,6 +91,15 @@ describe("config.statusline", function()
       assert.are.equal("", _G.lsp_refs_status())
       assert.are.equal("", _G.gitsigns_hunks_status())
     end)
+
+    -- config.python_lsp replaces it once the LSP stack loads; until then the
+    -- statusline must still evaluate.
+    it("defines a no-op python_env_status and places it in the statusline", function()
+      assert.is_function(_G.python_env_status)
+      assert.are.equal("", _G.python_env_status())
+      require("config.statusline").setup()
+      assert.truthy(vim.o.statusline:find("%{v:lua.python_env_status()}", 1, true))
+    end)
   end)
 
   -- Behavioral lock for the data.root event scoping (plan stage P4). The

@@ -90,4 +90,45 @@ describe("smoke: language server filetype ownership", function()
       end
     end
   end)
+
+  -- Python: exactly one TYPE server. Neovim merges definition, implementation
+  -- and reference results from every attached client, so a second one turns
+  -- every `gd` into a list of the same place twice. ruff (diagnostics, fixes)
+  -- also attaches to Python and is fine: it answers none of those requests.
+  -- pyright is the one that would sneak back — it stays installed on machines
+  -- that ran the old pin, and mason-lspconfig enables every installed server
+  -- unless told otherwise. (The harness's data dir is empty, so the exclusion
+  -- itself is what can be checked here, not its effect.)
+  describe("python", function()
+    it("enables basedpyright as the Python type server", function()
+      assert.are.same({ "python" }, filetypes("basedpyright"))
+      assert.is_not_nil(vim.lsp._enabled_configs["basedpyright"])
+    end)
+
+    it("keeps pyright out of mason-lspconfig's automatic enable", function()
+      local auto = require("mason-lspconfig.settings").current.automatic_enable
+      assert.is_table(auto)
+      assert.is_true(vim.list_contains(auto.exclude or {}, "pyright"))
+      assert.is_nil(vim.lsp._enabled_configs["pyright"])
+    end)
+
+    it("roots it at the workspace and hands it the interpreter", function()
+      local cfg = vim.lsp.config.basedpyright
+      assert.are.equal(require("config.python_root").root_dir, cfg.root_dir)
+      assert.are.equal(require("config.python_lsp").before_init, cfg.before_init)
+    end)
+
+    it("keeps pyright's checking level rather than basedpyright's stricter default", function()
+      local analysis = vim.lsp.config.basedpyright.settings.basedpyright.analysis
+      assert.are.equal("standard", analysis.typeCheckingMode)
+      -- lspconfig's own defaults survive the merge.
+      assert.are.equal("openFilesOnly", analysis.diagnosticMode)
+    end)
+
+    -- A project config discards that "standard" and brings basedpyright's
+    -- "recommended" back; :PythonQuiet is the local way out (config.pyright_mode).
+    it("offers :PythonQuiet for projects whose own config is louder", function()
+      assert.is_not_nil(vim.api.nvim_get_commands({})["PythonQuiet"])
+    end)
+  end)
 end)

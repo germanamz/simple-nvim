@@ -116,7 +116,7 @@ describe("smoke: completion (blink.cmp)", function()
         and c.capabilities.textDocument.completion.completionItem.snippetSupport
     end
 
-    for _, server in ipairs({ "lua_ls", "ts_ls", "pyright", "gopls" }) do
+    for _, server in ipairs({ "lua_ls", "ts_ls", "basedpyright", "gopls" }) do
       it("advertises blink completion capabilities to " .. server, function()
         assert.is_true(
           snippet_support(server) == true,

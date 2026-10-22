@@ -68,7 +68,7 @@ describe("smoke: lsp fs sync", function()
     -- imports, drop the stale path). The module only advertises operations it
     -- actually sends — the old plugin's blanket willCreate/willDelete must be
     -- gone, so servers don't wait on requests that will never come.
-    for _, server in ipairs({ "lua_ls", "ts_ls", "pyright", "gopls" }) do
+    for _, server in ipairs({ "lua_ls", "ts_ls", "basedpyright", "gopls" }) do
       it("advertises exactly the supported file operations to " .. server, function()
         local caps = vim.lsp.config[server]
           and vim.lsp.config[server].capabilities

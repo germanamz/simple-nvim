@@ -3,6 +3,10 @@
 -- does not follow them by the letter — Pydantic being the canonical case —
 -- draws a wall of red that buries the diagnostics worth reading.
 --
+-- The server is basedpyright (config.python_lsp), which is pyright with the
+-- same rule names and the same config precedence; "pyright" below means the
+-- engine both share.
+--
 -- Why per-RULE and not typeCheckingMode
 -- -------------------------------------
 -- The usual advice, `typeCheckingMode = "basic"`, does nothing here. The five
@@ -18,7 +22,7 @@
 -- Neovim starts one client per root_dir (lsp.lua's reuse_client_default demands
 -- exact workspace-folder equality), and root_dir is fully resolved by the time
 -- before_init runs — so a settings fragment keyed on the realpath'd root gives
--- genuinely different severities per project from ONE vim.lsp.config("pyright")
+-- genuinely different severities per project from ONE vim.lsp.config(server)
 -- registration, with the enabled config left uncontaminated (vim.lsp deep-copies
 -- it per start attempt).
 --
@@ -39,10 +43,28 @@
 local M = {}
 
 local state_util = require("util.state")
+local python_lsp = require("config.python_lsp")
 
--- Pyright accepts exactly these (plus booleans, which we never write). "hint" is
--- a basedpyright extension: pyright 1.1.409 silently DISCARDS it and leaves the
--- rule at its mode default — i.e. still red — so it must never appear here.
+-- settings[SECTION].analysis.diagnosticSeverityOverrides is where the server
+-- reads severities from. basedpyright ignores python.analysis whenever a
+-- basedpyright section exists — and lspconfig always contributes one.
+local SECTION = python_lsp.section
+
+--- The table the overrides live in, created along the way if missing. Never
+--- replaces a level that already exists: client.settings is aliased to these
+--- tables (see the header).
+---@param settings table
+---@return table analysis
+local function analysis_of(settings)
+  settings[SECTION] = settings[SECTION] or {}
+  settings[SECTION].analysis = settings[SECTION].analysis or {}
+  return settings[SECTION].analysis
+end
+
+-- Pyright accepts exactly these (plus booleans, which we never write).
+-- basedpyright also takes "hint", which plain pyright 1.1.409 silently DISCARDS
+-- (leaving the rule at its mode default, i.e. still red). It stays out, so a
+-- store written here means the same thing to either server.
 M.SEVERITIES = { "error", "warning", "information", "none" }
 
 -- The order <CR> walks in the picker. Deliberately NOT M.SEVERITIES' order: an
@@ -251,14 +273,15 @@ function M.clear(root)
   fire(key, {})
 end
 
---- vim.lsp before_init hook for pyright: fold this root's overrides into the
---- settings table the client is about to be bound to.
+--- vim.lsp before_init hook: fold this root's overrides into the settings table
+--- the client is about to be bound to. Called from config.python_lsp's
+--- before_init, after the interpreter is in.
 ---
 --- MUTATES `config.settings` in place — see the header. `config.settings` is
---- normally non-nil by now (nvim-lspconfig's lsp/pyright.lua contributes
---- python.analysis.{autoSearchPaths,useLibraryCodeForTypes,diagnosticMode}), but
---- if it ever is nil there is nothing aliased to client.settings and creating one
---- here would be a no-op, so bail rather than pretend it worked.
+--- normally non-nil by now (nvim-lspconfig's lsp/basedpyright.lua contributes
+--- basedpyright.analysis.{autoSearchPaths,diagnosticMode}), but if it ever is
+--- nil there is nothing aliased to client.settings and creating one here would
+--- be a no-op, so bail rather than pretend it worked.
 ---@param _ table|nil initialize params (unused)
 ---@param config table the resolved client config
 function M.before_init(_, config)
@@ -270,13 +293,12 @@ function M.before_init(_, config)
   if not settings then
     return
   end
-  settings.python = settings.python or {}
-  settings.python.analysis = settings.python.analysis or {}
-  local overrides = settings.python.analysis.diagnosticSeverityOverrides or {}
+  local analysis = analysis_of(settings)
+  local overrides = analysis.diagnosticSeverityOverrides or {}
   for rule, severity in pairs(rules) do
     overrides[rule] = severity
   end
-  settings.python.analysis.diagnosticSeverityOverrides = overrides
+  analysis.diagnosticSeverityOverrides = overrides
 end
 
 -- Is `dir` inside `root`? Both must already be realpath'd; the "/" guard stops
@@ -371,7 +393,7 @@ end
 --- its only writer, and a merge could never remove a rule the user just cycled
 --- back to pyright's default.
 ---@param root string|nil
----@param clients table[]|nil defaults to every running pyright client
+---@param clients table[]|nil defaults to every running Python type server
 ---@return integer clients updated
 function M.apply(root, clients)
   local key = M.normalize(root)
@@ -379,22 +401,21 @@ function M.apply(root, clients)
     return 0
   end
   local rules = M.get(key)
-  clients = clients or vim.lsp.get_clients({ name = "pyright" })
+  clients = clients or vim.lsp.get_clients({ name = python_lsp.server })
   local reached = 0
   for _, client in ipairs(clients) do
     local settings = client.settings
     local client_root = client.root_dir or (client.config and client.config.root_dir)
     if settings and M.normalize(client_root) == key then
-      settings.python = settings.python or {}
-      settings.python.analysis = settings.python.analysis or {}
-      local overrides = settings.python.analysis.diagnosticSeverityOverrides or {}
+      local analysis = analysis_of(settings)
+      local overrides = analysis.diagnosticSeverityOverrides or {}
       for rule in pairs(overrides) do
         overrides[rule] = nil
       end
       for rule, severity in pairs(rules) do
         overrides[rule] = severity
       end
-      settings.python.analysis.diagnosticSeverityOverrides = overrides
+      analysis.diagnosticSeverityOverrides = overrides
       client:notify("workspace/didChangeConfiguration", { settings = settings })
       reached = reached + 1
     end
@@ -436,8 +457,9 @@ end
 --- Pyright's precedence is wholesale, not per-key: once it finds a config file it
 --- never applies the client's settings group at all — not typeCheckingMode, not
 --- one entry of diagnosticSeverityOverrides. An empty `[tool.pyright]` header is
---- enough to do it, and pyrightconfig.json outranks pyproject.toml. Without this
---- check the picker would look like it worked and change nothing.
+--- enough to do it (basedpyright reads `[tool.basedpyright]` the same way), and
+--- pyrightconfig.json outranks pyproject.toml. Without this check the picker
+--- would look like it worked and change nothing.
 ---@param root string|nil
 ---@return string|nil path of the shadowing file
 function M.shadowed(root)
@@ -448,26 +470,12 @@ function M.shadowed(root)
   if vim.uv.fs_stat(json) then
     return json
   end
-  local pyproject = vim.fs.joinpath(root, "pyproject.toml")
-  -- io.open + f:lines(), not io.lines: io.lines raises if the file vanished
-  -- between the stat and the open. Same reasoning (and same matcher shape) as
-  -- config.formatters' [tool.black] probe. Anchored at the line start so a
-  -- commented-out `# [tool.pyright]` does not count, and the trailing class
-  -- accepts a subtable header ([tool.pyright.defineConstant]), which implies the
-  -- key just as much as the bare section does.
-  local f = io.open(pyproject, "r")
-  if not f then
-    return nil
+  -- The section matcher is config.python_root's, which roots the server at a
+  -- directory carrying one of these sections for the same reason.
+  if require("config.python_root").has_tool_section(root) then
+    return vim.fs.joinpath(root, "pyproject.toml")
   end
-  local found = false
-  for line in f:lines() do
-    if line:match("^%[tool%.pyright[%]%.]") then
-      found = true
-      break
-    end
-  end
-  f:close()
-  return found and pyproject or nil
+  return nil
 end
 
 --- Every occurrence of `rule` inside `root`, rendered one per line as
@@ -528,10 +536,10 @@ end
 --- is keyed on whatever before_init sees as config.root_dir, so the picker has to
 --- agree with the client or it writes overrides under a key nothing reads.
 ---@param bufnr integer
----@param clients table[]|nil defaults to the pyright clients on this buffer
+---@param clients table[]|nil defaults to the Python type server on this buffer
 ---@return string|nil
 function M.resolve_root(bufnr, clients)
-  clients = clients or vim.lsp.get_clients({ bufnr = bufnr, name = "pyright" })
+  clients = clients or vim.lsp.get_clients({ bufnr = bufnr, name = python_lsp.server })
   local client = clients[1]
   if not client then
     return nil
@@ -544,7 +552,7 @@ end
 --- pyright's default).
 ---@param root string|nil
 ---@param rule string
----@param clients table[]|nil defaults to every running pyright client
+---@param clients table[]|nil defaults to every running Python type server
 ---@return string|nil
 function M.cycle(root, rule, clients)
   local severity = M.next_severity(M.get(root)[rule])
@@ -773,7 +781,9 @@ function M.open()
   local root = M.resolve_root(vim.api.nvim_get_current_buf())
   if not root then
     vim.notify(
-      "No pyright client on this buffer — open a Python file in the project first",
+      ("No %s client on this buffer — open a Python file in the project first"):format(
+        python_lsp.server
+      ),
       vim.log.levels.WARN
     )
     return

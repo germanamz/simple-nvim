@@ -64,6 +64,12 @@ describe("config.syntax_emphasis", function()
       assert.is_true(luminance(doc.fg) > luminance(get("Comment").fg))
     end)
 
+    -- Python's doc comment is a string: treesitter captures a docstring as
+    -- @string.documentation, which would otherwise render as loud as a literal.
+    it("puts docstrings in the doc-comment tier", function()
+      assert.are.equal(get("@comment.documentation").fg, get("@string.documentation").fg)
+    end)
+
     it("clears the LSP comment token so the two tiers survive", function()
       -- gopls paints @lsp.type.comment across a whole doc comment at a higher
       -- priority than treesitter; a defined-but-empty group contributes nothing.

@@ -5,6 +5,7 @@
 --     activates it. The server's `filetypes` list gates attach per buffer, so
 --     a server only starts when a matching filetype is opened.
 local ft_util = require("util.ft")
+local python_lsp = require("config.python_lsp")
 
 local servers = {
   -- disableAutomaticTypingAcquisition: tsserver otherwise forks a fourth node
@@ -17,15 +18,16 @@ local servers = {
     filetypes = { "typescript", "typescriptreact", "javascript", "javascriptreact" },
     init_options = { hostInfo = "neovim", disableAutomaticTypingAcquisition = true },
   },
-  -- No `settings` here on purpose. Pyright's per-rule severities are a property
-  -- of the PROJECT, not of this config: a codebase that annotates but does not
-  -- follow the annotations (Pydantic being the canonical case) needs specific
-  -- rules dialed down, while a strict codebase must keep them. So the severities
-  -- are picked per project and injected by config.pyright_rules' before_init,
-  -- wired in the config() block below. Note the usual advice — typeCheckingMode
-  -- = "basic" — does nothing for that case: the rules involved are "error" in
-  -- basic, standard AND strict alike. See docs/python-diagnostics.md.
-  pyright = { filetypes = { "python" } },
+  -- The Python type server: basedpyright, named in config.python_lsp (which
+  -- says why it replaced pyright). Its settings pin the checking level and the
+  -- inlay-hint kinds only. Rule severities are a property of the PROJECT, not
+  -- of this config — a codebase that annotates but does not follow the
+  -- annotations (Pydantic being the canonical case) needs specific rules dialed
+  -- down, while a strict codebase must keep them — so they are picked per
+  -- project and injected by before_init, alongside the project's interpreter.
+  -- before_init and the workspace root_dir are wired in the config() block
+  -- below. See docs/python-navigation.md and docs/python-diagnostics.md.
+  [python_lsp.server] = { filetypes = { "python" }, settings = python_lsp.settings },
   gopls = { filetypes = { "go", "gomod" } },
   -- experimental.localDocs asks rust-analyzer to return a `local` file:// path
   -- alongside the docs.rs URL in its `experimental/externalDocs` reply, so a
@@ -230,6 +232,14 @@ vim.api.nvim_create_autocmd("LspAttach", {
     end
 
     local ft = vim.bo[args.buf].filetype
+    -- ruff's hover only explains `# noqa` codes, and Neovim stacks every
+    -- client's hover into one float — so with it on, `K` on any Python symbol
+    -- grows an empty "ruff" section under the type server's answer. Ruff's own
+    -- editor guide turns it off the same way.
+    if client and client.name == "ruff" then
+      client.server_capabilities.hoverProvider = false
+    end
+
     if client and client.name == "ts_ls" then
       map("gd", function()
         require("config.tagstack").ts_source_definition(client, args.buf)
@@ -241,18 +251,26 @@ vim.api.nvim_create_autocmd("LspAttach", {
       -- so once rather than letting the diagnostics quietly disagree with the
       -- package's own build. See lua/config/lsp_tsdk.lua.
       require("config.lsp_tsdk").warn_mismatch(args.buf, client)
-    elseif client and client.name == "pyright" then
+    elseif client and client.name == python_lsp.server then
       map("gd", tagstack.definition, "Goto definition")
-      -- Buffer-local and pyright-gated for the same reason the ts_ls maps above
-      -- are: the picker acts on the pyright client serving THIS buffer, so the
+      -- The pyright family splits what other servers merge: definition prefers
+      -- the `.py` source, declaration the `.pyi` stub. `gD` makes the stub a
+      -- deliberate jump; left alone it is Vim's search for the word's first
+      -- occurrence in the file. Python-only: elsewhere it keeps that meaning.
+      map("gD", tagstack.declaration, "Goto declaration (stub)")
+      -- Buffer-local and server-gated for the same reason the ts_ls maps above
+      -- are: the picker acts on the type server serving THIS buffer, so the
       -- key is a no-op anywhere else and shouldn't advertise itself there.
       map("<leader>ld", require("config.pyright_rules").open, "Python diagnostic rules")
       -- Say it once per project if a pyrightconfig.json / [tool.pyright] is
       -- discarding the severities recorded for this root — otherwise the picker
       -- looks like it worked and pyright quietly ignored all of it.
-      require("config.pyright_rules").warn_shadowed(
-        client.config and client.config.root_dir or client.root_dir
-      )
+      local root = client.config and client.config.root_dir or client.root_dir
+      require("config.pyright_rules").warn_shadowed(root)
+      -- And once if that config leaves typeCheckingMode unset: the server then
+      -- ignores the editor's "standard" and runs basedpyright's far louder
+      -- "recommended". See lua/config/pyright_mode.lua.
+      require("config.pyright_mode").warn(root)
     elseif ft_util.is_markdown(ft) then
       -- Smart gd: follow a wikilink if the cursor is on one, else LSP definition.
       -- Re-asserted here so marksman's attach doesn't overwrite the FileType map.
@@ -270,6 +288,23 @@ vim.api.nvim_create_autocmd("LspAttach", {
     map("grr", tagstack.references, "References")
     map("gri", tagstack.implementation, "Implementation")
     map("grt", tagstack.type_definition, "Type definition")
+
+    -- Callers / callees. Core has vim.lsp.buf.incoming_calls but binds no key,
+    -- and its quickfix path pushes no frame; config.tagstack routes these like
+    -- the verbs above. Capability-gated like `<leader>uh` below, so the keys
+    -- only exist where some server can answer them.
+    if
+      client
+      and client.supports_method
+      and client:supports_method("textDocument/prepareCallHierarchy")
+    then
+      map("grc", function()
+        tagstack.calls("incoming")
+      end, "Callers")
+      map("grC", function()
+        tagstack.calls("outgoing")
+      end, "Callees")
+    end
 
     local lsp_refs = require("config.lsp_refs")
     map("]r", lsp_refs.next, "Next LSP reference")
@@ -364,9 +399,16 @@ return {
       -- Tool installs are owned by mason-tool-installer (reads
       -- mason-tool-versions.lock); mason-lspconfig is kept only for
       -- vim.lsp.config integration, so ensure_installed is intentionally empty.
+      --
+      -- automatic_enable stays on — it is what attaches ruff and dprint, which
+      -- have no row in `servers` — except for pyright. A machine that ran the
+      -- old pin still has it installed, and enabling it next to basedpyright
+      -- doubles every `gd` / `gri` / `grr` result, because Neovim merges
+      -- location answers from all attached clients.
       require("mason-lspconfig").setup({
         ensure_installed = {},
         automatic_installation = false,
+        automatic_enable = { exclude = { "pyright" } },
       })
 
       -- Advertise blink.cmp's completion capabilities (snippet support,
@@ -405,13 +447,20 @@ return {
         servers.ts_ls.before_init = tsdk.before_init
       end
 
-      -- Per-project pyright rule severities. before_init is the one hook that
-      -- runs AFTER root_dir is resolved but BEFORE the client is created, which
-      -- is exactly what per-root settings need — and it must MUTATE
-      -- config.settings, never reassign it: client.settings is already aliased
-      -- to that table by then, so a reassignment is a silent no-op. The module
-      -- owns that discipline; see lua/config/pyright_rules.lua.
-      servers.pyright.before_init = require("config.pyright_rules").before_init
+      -- The Python type server's per-root wiring. root_dir roots a workspace
+      -- member at the workspace (config.python_root). before_init is the one
+      -- hook that runs AFTER root_dir is resolved but BEFORE the client is
+      -- created, which is exactly what per-root settings need: the project's
+      -- interpreter (python.pythonPath) and its recorded rule severities. It
+      -- must MUTATE config.settings, never reassign it: client.settings is
+      -- already aliased to that table by then, so a reassignment is a silent
+      -- no-op. See lua/config/python_lsp.lua and lua/config/pyright_rules.lua.
+      local python_server = servers[python_lsp.server]
+      python_server.root_dir = require("config.python_root").root_dir
+      python_server.before_init = python_lsp.before_init
+      -- Restarts on a branch switch or a venv change, and the statusline's
+      -- interpreter segment.
+      python_lsp.setup()
 
       -- :PyrightRules mirrors <leader>ld (the picker), for people who reach for
       -- commands — same split as :AIModel / <leader>am. Global rather than
@@ -420,6 +469,12 @@ return {
       vim.api.nvim_create_user_command("PyrightRules", function()
         require("config.pyright_rules").open()
       end, { desc = "Per-project pyright diagnostic rules" })
+      -- For a repo you do not own whose pyright config makes basedpyright loud:
+      -- an untracked pyrightconfig.json holding it at "standard". Global for
+      -- the same reason as :PyrightRules.
+      vim.api.nvim_create_user_command("PythonQuiet", function()
+        require("config.pyright_mode").quiet(vim.api.nvim_get_current_buf())
+      end, { desc = "Hold basedpyright at standard mode with a git-excluded override" })
 
       -- Gate the linter servers on our own detection, so the boundary rule and the
       -- linter priority order actually apply to them. Guarded the same way ts_ls's

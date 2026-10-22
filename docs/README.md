@@ -24,10 +24,17 @@ beyond the code.
 - **[lsp-typescript-version.md](lsp-typescript-version.md).** Why ts_ls ran
   mason's bundled TypeScript instead of the project's in pnpm monorepos, and the
   buffer-relative resolution that fixes it.
+- **[python-navigation.md](python-navigation.md).** Reading a Python project
+  split across files and classes: why `gd` on a call through a base class stops
+  at the abstract method and what `gri` / `grc` do about it, why the type server
+  is basedpyright rather than pyright, how it is handed the project's
+  interpreter and rooted at the workspace, and what to check when a jump still
+  lands somewhere odd.
 - **[python-diagnostics.md](python-diagnostics.md).** The `<leader>ld` picker for
   per-project pyright rule severities: why `typeCheckingMode = "basic"` does
   nothing for annotated-but-sloppy codebases, which five rules Pydantic actually
-  trips, and the silent aliasing trap in delivering per-root LSP settings.
+  trips, the silent aliasing trap in delivering per-root LSP settings, and
+  `:PythonQuiet` for a project whose own config makes basedpyright far louder.
 - **[navigation-stack.md](navigation-stack.md).** Why `<C-o>` walks you back
   through everything you read after a `gd`, why the fix is `<C-t>` rather than a
   smarter `<C-o>` (every other editor reached the same conclusion), and the
@@ -75,8 +82,9 @@ beyond the code.
 - **[hover-docs.md](hover-docs.md).** Why `K` on `realloc`, `std::vector::push_back`
   or `len` showed a signature and nothing else (the headers and stubs carry no
   docs), and how `K` now appends an excerpt from offline DevDocs bundles
-  (`:DocsInstall`): how clangd and pyright name the symbol, how each page family
-  is cut down to a hover, and the alternatives that were rejected.
+  (`:DocsInstall`): how clangd and the Python type server name the symbol, how
+  each page family is cut down to a hover, and the alternatives that were
+  rejected.
 - **[memory/](memory/README.md).** Short notes a coding agent keeps between
   sessions: Neovim and plugin traps, approaches that were tried and refuted, and
   how to work in this repo. One fact per file, indexed by

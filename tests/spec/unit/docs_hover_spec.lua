@@ -105,9 +105,12 @@ describe("config.docs.hover._has_prose", function()
     assert.is_true(hover._has_prose("clangd", lines("clangd_documented")))
   end)
 
-  it("tells a pyright signature from a pyright docstring", function()
-    assert.is_false(hover._has_prose("pyright", lines("pyright_len")))
-    assert.is_true(hover._has_prose("pyright", lines("pyright_join")))
+  -- Recorded from pyright; basedpyright renders hovers with the same template,
+  -- and the provider is keyed on whichever server config.python_lsp names.
+  it("tells a pyright-family signature from its docstring", function()
+    local server = require("config.python_lsp").server
+    assert.is_false(hover._has_prose(server, lines("pyright_len")))
+    assert.is_true(hover._has_prose(server, lines("pyright_join")))
   end)
 
   -- A server whose template this does not know is assumed to have said

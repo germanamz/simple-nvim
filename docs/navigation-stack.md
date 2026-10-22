@@ -133,7 +133,8 @@ and that shadow would drift from the real stack the moment any plugin called
   behaviour; `<C-t>` is the coarse "unwind one hop". This is the shape every
   other editor converged on, and it is why nothing here remaps `<C-o>`.
 - **Semantic jumps push; file pickers do not.** `gd` (all four branches),
-  `grr`, `gri`, `grt`. Telescope file pickers, nvim-tree opens and quickfix
+  `grr`, `gri`, `grt`, `grc` / `grC` (callers / callees) and Python's `gD`.
+  Telescope file pickers, nvim-tree opens and quickfix
   jumps stay jumplist-only. The stack holds 20 frames; filling it with "I chose
   to open a file" turns `<C-t>` into the noisy thing it exists to avoid. This
   matches Emacs xref, where `xref-find-definitions` and `xref-find-references`
@@ -209,7 +210,8 @@ M.jump(origin, item, kind)
 
 The split is by who owns the navigation:
 
-- **LSP paths use `M.jump`** — `gd` (all four branches), `grr`, `gri`, `grt`.
+- **LSP paths use `M.jump`** — `gd` (all four branches), `grr`, `gri`, `grt`,
+  `grc` / `grC`, Python's `gD`.
   This config already supplies `on_list`, so it owns the navigation anyway. For
   ts_ls that means `vim.lsp.util.show_document` is dropped from `lsp.lua:185`
   (its only caller in the whole config), and the result is converted with
@@ -308,12 +310,12 @@ buffers while leaving markdown and the docs reader alone.
 
 | File                                | Responsibility                                                       |
 | ----------------------------------- | -------------------------------------------------------------------- |
-| `lua/config/tagstack.lua`           | The model, and the only code here that calls `settagstack`. `capture` / `push` / `jump` / `frames` / `pop` / `goto_frame` / `drop_frame`, plus the `gd`, `grr`, `gri`, `grt` and ts_ls wrappers |
+| `lua/config/tagstack.lua`           | The model, and the only code here that calls `settagstack`. `capture` / `push` / `jump` / `frames` / `pop` / `goto_frame` / `drop_frame`, plus the `gd`, `gD`, `grr`, `gri`, `grt`, `grc` / `grC` and ts_ls wrappers |
 | `lua/config/tagstack_picker.lua`    | The `<leader>j` Telescope view. `open`, with `rows` / `widths` / `format` as the pure test seam |
 | `lua/config/options.lua`            | `jumpoptions`, the global `<C-t>` map, `<leader>j`                    |
-| `lua/plugins/lsp.lua`               | `LspAttach` routes all four `gd` branches and buffer-local `grr` / `gri` / `grt` through the wrappers |
+| `lua/plugins/lsp.lua`               | `LspAttach` routes all four `gd` branches and buffer-local `grr` / `gri` / `grt` / `grc` / `grC` (and Python's `gD`) through the wrappers |
 | `lua/config/wikilinks.lua`          | Threads one captured origin through both follow paths and the LSP fallback |
-| `tests/spec/unit/tagstack_spec.lua` | 25 examples over the model                                            |
+| `tests/spec/unit/tagstack_spec.lua` | 30 examples over the model                                            |
 
 Two things deliberately absent. Nothing calls `vim.lsp.util.show_document` any
 more — it was the ts_ls path's late-capture bug, and `M.jump` replaces it.
@@ -322,7 +324,7 @@ more — it was the ts_ls path's late-capture bug, and `M.jump` replaces it.
 
 ## What the specs cover
 
-`tests/spec/unit/tagstack_spec.lua` — 25 examples, following the
+`tests/spec/unit/tagstack_spec.lua` — 30 examples, following the
 `lsp_refs_spec.lua` idiom:
 
 - `M.frames()` normalization and the curidx → pop/tag arithmetic, including the
@@ -343,6 +345,10 @@ more — it was the ts_ls path's late-capture bug, and `M.jump` replaces it.
   nothing into a dead window id
 - **an out-of-range destination line is clamped**, so a jump cannot report
   success while leaving the cursor at an arbitrary line of the right file
+- **call hierarchy** (`grc` / `grC`): incoming call sites land in the caller's
+  file and outgoing ones in the file of the function asked about (core's own
+  handler puts them in the current buffer); a lone caller jumps and records one
+  frame; nothing callable, or no server with call hierarchy, says so
 - **`drop_frame` on the frame you are standing at clears the marker** instead of
   moving `●` onto a frame that slid into the slot
 

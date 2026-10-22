@@ -1,6 +1,7 @@
 local nvim_env = require("tests.helpers.nvim_env")
 
--- Regression net for config.pyright_rules, against a REAL pyright.
+-- Regression net for config.pyright_rules, against the REAL Python type server
+-- (basedpyright; config.python_lsp names it).
 --
 -- What only a real server can prove
 -- ---------------------------------
@@ -20,10 +21,11 @@ local nvim_env = require("tests.helpers.nvim_env")
 -- table edit is what does the work and the notify is only the prompt — a
 -- distinction that also disappears against a fake server.
 --
--- Why the slow lane: self-skips without pyright on PATH, like the rest of
+-- Why the slow lane: self-skips without the server on PATH, like the rest of
 -- `make test-lsp`.
 describe("e2e-lsp: per-project pyright rules", function()
   local root, prev_cwd
+  local server = require("config.python_lsp").server
 
   before_each(function()
     root = nvim_env.setup_isolated_env()
@@ -31,7 +33,7 @@ describe("e2e-lsp: per-project pyright rules", function()
   end)
 
   after_each(function()
-    for _, c in ipairs(vim.lsp.get_clients({ name = "pyright" })) do
+    for _, c in ipairs(vim.lsp.get_clients({ name = server })) do
       pcall(function()
         c:stop()
       end)
@@ -44,8 +46,8 @@ describe("e2e-lsp: per-project pyright rules", function()
   -- One example, one isolated env: a second setup_isolated_env() in the same
   -- headless child leaves the LSP log path stale (see lsp_restart_spec).
   it("injects a recorded severity at startup and changes it live without a restart", function()
-    if vim.fn.executable("pyright-langserver") ~= 1 then
-      pending("pyright-langserver not on PATH (mason server not installed)")
+    if vim.fn.executable(server .. "-langserver") ~= 1 then
+      pending(server .. "-langserver not on PATH (mason server not installed)")
       return
     end
 
@@ -83,12 +85,12 @@ describe("e2e-lsp: per-project pyright rules", function()
     local function live()
       return vim.tbl_filter(function(c)
         return not c:is_stopped()
-      end, vim.lsp.get_clients({ bufnr = buf, name = "pyright" }))
+      end, vim.lsp.get_clients({ bufnr = buf, name = server }))
     end
     if not vim.wait(30000, function()
       return #live() > 0
     end, 50) then
-      pending("pyright did not attach within timeout; treating as unavailable")
+      pending(server .. " did not attach within timeout; treating as unavailable")
       return
     end
     local client = live()[1]
@@ -100,7 +102,7 @@ describe("e2e-lsp: per-project pyright rules", function()
     -- Half one: before_init reached the table the client was bound to.
     assert.are.equal(
       "warning",
-      client.settings.python.analysis.diagnosticSeverityOverrides.reportCallIssue
+      client.settings[require("config.python_lsp").section].analysis.diagnosticSeverityOverrides.reportCallIssue
     )
 
     -- `return nil` is load-bearing, not decoration: without it the function
@@ -129,7 +131,7 @@ describe("e2e-lsp: per-project pyright rules", function()
         return severity_of("reportCallIssue") ~= nil
       end, 100)
     then
-      pending("pyright published no reportCallIssue diagnostic within timeout")
+      pending(server .. " published no reportCallIssue diagnostic within timeout")
       return
     end
     -- Unconfigured, this rule is an error in every type-checking mode pyright

@@ -130,7 +130,7 @@ describe("config.pyright_rules", function()
     local function config_for(root)
       return {
         root_dir = root,
-        settings = { python = { analysis = { autoSearchPaths = true } } },
+        settings = { basedpyright = { analysis = { autoSearchPaths = true } } },
       }
     end
 
@@ -143,7 +143,7 @@ describe("config.pyright_rules", function()
 
       assert.same(
         { reportCallIssue = "warning" },
-        config.settings.python.analysis.diagnosticSeverityOverrides
+        config.settings.basedpyright.analysis.diagnosticSeverityOverrides
       )
     end)
 
@@ -152,14 +152,14 @@ describe("config.pyright_rules", function()
       M.set(root, "reportCallIssue", "warning")
       local config = config_for(root)
       local settings = config.settings
-      local python = config.settings.python
-      local analysis = config.settings.python.analysis
+      local section = config.settings.basedpyright
+      local analysis = config.settings.basedpyright.analysis
 
       M.before_init(nil, config)
 
       assert.are.equal(settings, config.settings)
-      assert.are.equal(python, config.settings.python)
-      assert.are.equal(analysis, config.settings.python.analysis)
+      assert.are.equal(section, config.settings.basedpyright)
+      assert.are.equal(analysis, config.settings.basedpyright.analysis)
     end)
 
     it("preserves the settings lspconfig already contributed", function()
@@ -169,7 +169,7 @@ describe("config.pyright_rules", function()
 
       M.before_init(nil, config)
 
-      assert.is_true(config.settings.python.analysis.autoSearchPaths)
+      assert.is_true(config.settings.basedpyright.analysis.autoSearchPaths)
     end)
 
     it("leaves settings untouched for a root with no overrides", function()
@@ -177,10 +177,10 @@ describe("config.pyright_rules", function()
 
       M.before_init(nil, config)
 
-      assert.is_nil(config.settings.python.analysis.diagnosticSeverityOverrides)
+      assert.is_nil(config.settings.basedpyright.analysis.diagnosticSeverityOverrides)
     end)
 
-    it("builds the python.analysis path when lspconfig contributed none", function()
+    it("builds the basedpyright.analysis path when lspconfig contributed none", function()
       local root = tempdir()
       M.set(root, "reportCallIssue", "warning")
       local config = { root_dir = root, settings = {} }
@@ -189,7 +189,7 @@ describe("config.pyright_rules", function()
 
       assert.same(
         { reportCallIssue = "warning" },
-        config.settings.python.analysis.diagnosticSeverityOverrides
+        config.settings.basedpyright.analysis.diagnosticSeverityOverrides
       )
     end)
 
@@ -197,7 +197,7 @@ describe("config.pyright_rules", function()
       local root = tempdir()
       M.set(root, "reportCallIssue", "warning")
       local config = config_for(root)
-      config.settings.python.analysis.diagnosticSeverityOverrides =
+      config.settings.basedpyright.analysis.diagnosticSeverityOverrides =
         { reportMissingImports = "none" }
 
       M.before_init(nil, config)
@@ -205,7 +205,7 @@ describe("config.pyright_rules", function()
       assert.same({
         reportMissingImports = "none",
         reportCallIssue = "warning",
-      }, config.settings.python.analysis.diagnosticSeverityOverrides)
+      }, config.settings.basedpyright.analysis.diagnosticSeverityOverrides)
     end)
 
     it("is a no-op, not an error, when there is no settings table to alias", function()
@@ -226,7 +226,7 @@ describe("config.pyright_rules", function()
       assert.has_no.errors(function()
         M.before_init(nil, config)
       end)
-      assert.is_nil(config.settings.python.analysis.diagnosticSeverityOverrides)
+      assert.is_nil(config.settings.basedpyright.analysis.diagnosticSeverityOverrides)
     end)
   end)
 
@@ -312,6 +312,14 @@ describe("config.pyright_rules", function()
     it("reports a pyproject.toml carrying a [tool.pyright] section", function()
       local root = tempdir()
       write_file(root .. "/pyproject.toml", '[project]\nname = "x"\n\n[tool.pyright]\n')
+      assert.are.equal(root .. "/pyproject.toml", M.shadowed(root))
+    end)
+
+    it("reports a pyproject.toml carrying a [tool.basedpyright] section", function()
+      -- basedpyright reads either section (and refuses a file that has both),
+      -- so either one discards the editor settings.
+      local root = tempdir()
+      write_file(root .. "/pyproject.toml", '[project]\nname = "x"\n\n[tool.basedpyright]\n')
       assert.are.equal(root .. "/pyproject.toml", M.shadowed(root))
     end)
 
@@ -466,10 +474,10 @@ describe("config.pyright_rules", function()
   describe("apply", function()
     local function fake_client(root)
       return {
-        name = "pyright",
+        name = "basedpyright",
         root_dir = root,
         config = { root_dir = root },
-        settings = { python = { analysis = { autoSearchPaths = true } } },
+        settings = { basedpyright = { analysis = { autoSearchPaths = true } } },
         sent = {},
         notify = function(self, method, params)
           table.insert(self.sent, { method = method, params = params })
@@ -487,7 +495,7 @@ describe("config.pyright_rules", function()
 
       assert.same(
         { reportCallIssue = "warning" },
-        client.settings.python.analysis.diagnosticSeverityOverrides
+        client.settings.basedpyright.analysis.diagnosticSeverityOverrides
       )
     end)
 
@@ -496,13 +504,13 @@ describe("config.pyright_rules", function()
       M.set(root, "reportCallIssue", "warning")
       local client = fake_client(root)
       local settings = client.settings
-      local analysis = client.settings.python.analysis
+      local analysis = client.settings.basedpyright.analysis
 
       M.apply(root, { client })
 
       assert.are.equal(settings, client.settings)
-      assert.are.equal(analysis, client.settings.python.analysis)
-      assert.is_true(client.settings.python.analysis.autoSearchPaths)
+      assert.are.equal(analysis, client.settings.basedpyright.analysis)
+      assert.is_true(client.settings.basedpyright.analysis.autoSearchPaths)
     end)
 
     it("notifies workspace/didChangeConfiguration so the change lands without a restart", function()
@@ -525,7 +533,7 @@ describe("config.pyright_rules", function()
       M.set(root, "reportCallIssue", nil)
       M.apply(root, { client })
 
-      assert.same({}, client.settings.python.analysis.diagnosticSeverityOverrides)
+      assert.same({}, client.settings.basedpyright.analysis.diagnosticSeverityOverrides)
     end)
 
     it("leaves a client rooted at another project alone", function()
@@ -535,7 +543,7 @@ describe("config.pyright_rules", function()
 
       M.apply(root, { client })
 
-      assert.is_nil(client.settings.python.analysis.diagnosticSeverityOverrides)
+      assert.is_nil(client.settings.basedpyright.analysis.diagnosticSeverityOverrides)
       assert.are.equal(0, #client.sent)
     end)
 
@@ -637,10 +645,10 @@ describe("config.pyright_rules", function()
   describe("cycle", function()
     local function fake_client(root)
       return {
-        name = "pyright",
+        name = "basedpyright",
         root_dir = root,
         config = { root_dir = root },
-        settings = { python = { analysis = {} } },
+        settings = { basedpyright = { analysis = {} } },
         sent = {},
         notify = function(self, method)
           table.insert(self.sent, method)
@@ -679,7 +687,7 @@ describe("config.pyright_rules", function()
 
       assert.are.equal(
         "warning",
-        client.settings.python.analysis.diagnosticSeverityOverrides.reportCallIssue
+        client.settings.basedpyright.analysis.diagnosticSeverityOverrides.reportCallIssue
       )
       assert.are.equal("workspace/didChangeConfiguration", client.sent[1])
     end)
@@ -851,7 +859,7 @@ describe("config.pyright_rules", function()
   describe("resolve_root", function()
     it("answers with the root of the pyright client serving the buffer", function()
       local root = tempdir()
-      local client = { name = "pyright", root_dir = root, config = { root_dir = root } }
+      local client = { name = "basedpyright", root_dir = root, config = { root_dir = root } }
       assert.are.equal(M.normalize(root), M.resolve_root(0, { client }))
     end)
 
@@ -864,7 +872,7 @@ describe("config.pyright_rules", function()
 
     it("falls back to config.root_dir when the client exposes only that", function()
       local root = tempdir()
-      local client = { name = "pyright", config = { root_dir = root } }
+      local client = { name = "basedpyright", config = { root_dir = root } }
       assert.are.equal(M.normalize(root), M.resolve_root(0, { client }))
     end)
   end)

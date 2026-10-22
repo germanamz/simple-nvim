@@ -171,6 +171,13 @@ if not _G.gitsigns_hunks_status then
     return ""
   end
 end
+-- The interpreter the Python type server runs (config.python_lsp), so a wrong
+-- one is visible before it sends `gd` somewhere strange.
+if not _G.python_env_status then
+  _G.python_env_status = function()
+    return ""
+  end
+end
 
 function M.setup()
   local group = vim.api.nvim_create_augroup("nvim_statusline", { clear = true })
@@ -277,7 +284,7 @@ function M.setup()
   -- directly into netrw); no separate immediate refresh needed here.
 
   vim.o.statusline =
-    "%f %m%r   %{v:lua.git_branch_status()}%=%{v:lua.lsp_refs_status()}%{v:lua.gitsigns_hunks_status()} %y %l:%c %p%% "
+    "%f %m%r   %{v:lua.git_branch_status()}%=%{v:lua.lsp_refs_status()}%{v:lua.gitsigns_hunks_status()}%{v:lua.python_env_status()} %y %l:%c %p%% "
 end
 
 return M

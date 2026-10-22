@@ -7,10 +7,12 @@ local nvim_env = require("tests.helpers.nvim_env")
 --
 -- What only real servers can prove: that clangd's hover for a libc/libc++
 -- symbol really is template-only (the prose check says "no docs"), that its
--- symbolInfo names the symbol the way the DevDocs index spells it, and that
--- pyright's declaration for a builtin lands in typeshed's stdlib stub. The fake
--- server in tests/spec/e2e/docs_hover_spec.lua replays those shapes; this is
--- where they are checked against the source.
+-- symbolInfo names the symbol the way the DevDocs index spells it, and — the
+-- other half of the promise — that a hover which already carries docs is left
+-- alone: basedpyright bundles docstrings for the C-implemented builtins, so `K`
+-- on `len` must show the server's own text with no excerpt bolted on. The fake
+-- server in tests/spec/e2e/docs_hover_spec.lua replays the excerpt path's
+-- shapes; this is where they are checked against the source.
 --
 -- One example, one isolated env: a second setup_isolated_env() in the same
 -- headless child leaves the LSP log path stale (see lsp_restart_spec), so the
@@ -128,7 +130,7 @@ describe("e2e-lsp: K documentation excerpts", function()
     return text
   end
 
-  it("clangd and pyright hovers for library symbols carry the excerpt", function()
+  it("clangd hovers carry the excerpt, and a documented Python hover is left alone", function()
     local ran = 0
     if vim.fn.executable("clangd") == 1 then
       local c = open("a.c", "c", {
@@ -148,15 +150,16 @@ describe("e2e-lsp: K documentation excerpts", function()
       ran = ran + 1
     end
 
-    if vim.fn.executable("pyright-langserver") == 1 then
+    if vim.fn.executable("basedpyright-langserver") == 1 then
       local py = open("a.py", "python", { "x = len([1])", "print(x)" }, "len")
-      local text = hover_until("pyright", py, "Return the length")
-      assert.truthy(text:find("python 3.10 · len()", 1, true), text)
+      local server = require("config.python_lsp").server
+      local text = hover_until(server, py, "Return the number of items in a container")
+      assert.is_nil(text:find("python 3.10 · len()", 1, true), text)
       ran = ran + 1
     end
 
     if ran == 0 then
-      pending("neither clangd nor pyright-langserver on PATH")
+      pending("neither clangd nor basedpyright-langserver on PATH")
     end
   end)
 end)

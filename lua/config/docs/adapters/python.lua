@@ -203,65 +203,12 @@ local function slot(dir)
   return entry
 end
 
---- Resolve a pyenv-managed interpreter for a version request.
----
---- `.python-version` is not the pyenv-only file it used to be: uv writes one
---- too, and it writes a bare minor version. Four of the five `.python-version`
---- files on this machine say `3.12` or `3.13` while `~/.pyenv/versions` holds
---- `3.10.14` and `3.12.10` — an exact directory match finds nothing. So an
---- exact hit is tried first (that is pyenv's own rule) and a component-boundary
---- prefix match is the fallback, taking the highest such version. The boundary
---- check matters: a plain prefix test would let `3.1` claim `3.10.14`.
----@param want string
----@return string|nil
-local function pyenv_interpreter(want)
-  local pyenv = vim.env.PYENV_ROOT
-  if not pyenv or pyenv == "" then
-    pyenv = vim.fs.joinpath(vim.env.HOME or "", ".pyenv")
-  end
-  local versions = vim.fs.joinpath(pyenv, "versions")
-  local exact = vim.fs.joinpath(versions, want, "bin", "python")
-  if vim.uv.fs_stat(exact) then
-    return exact
-  end
-  local best = nil
-  for _, name in ipairs(entries(versions) or {}) do
-    if name:sub(1, #want + 1) == want .. "." and (not best or name > best) then
-      best = name
-    end
-  end
-  if not best then
-    return nil
-  end
-  local exe = vim.fs.joinpath(versions, best, "bin", "python")
-  return vim.uv.fs_stat(exe) and exe or nil
-end
-
---- The virtualenv directory this project's packages live in, if there is one.
----
---- An activated `$VIRTUAL_ENV` only counts when it sits under the project root.
---- Neovim inherits whatever shell it was launched from, and an env var pointing
---- at some other project's venv is worse than no answer: it resolves imports
---- against packages this project never declared.
----@param root string|nil
----@return string|nil
-local function venv_dir(root)
-  if root then
-    for _, name in ipairs({ ".venv", "venv" }) do
-      local dir = vim.fs.joinpath(root, name)
-      if vim.uv.fs_stat(vim.fs.joinpath(dir, "pyvenv.cfg")) then
-        return dir
-      end
-    end
-  end
-  local active = vim.env.VIRTUAL_ENV
-  if active and active ~= "" and (not root or vim.startswith(active, root)) then
-    if vim.uv.fs_stat(vim.fs.joinpath(active, "pyvenv.cfg")) then
-      return active
-    end
-  end
-  return nil
-end
+-- The venv and pyenv lookups live in config.python_env, shared with the type
+-- server so `K` and `gd` agree on the interpreter. This adapter asks about its
+-- root alone (no `top`), as it always has: its memo slots are keyed by the
+-- root's mtime, which a venv created further up would never move.
+local python_env = require("config.python_env")
+local venv_dir = python_env.venv_dir
 
 --- The interpreter that can actually import this project's dependencies.
 ---
@@ -269,7 +216,7 @@ end
 --- — a shell script that re-reads `.python-version` relative to the process
 --- CWD. `cmd` argv is run by the driver with Neovim's cwd, not the project's,
 --- so the shim would resolve against the wrong directory. That is exactly why
---- the pyenv rung above it returns an absolute `versions/<v>/bin/python`
+--- python_env's pyenv rung returns an absolute `versions/<v>/bin/python`
 --- instead of deferring to the shim; the shim is only ever the last resort,
 --- when nothing else identified an interpreter at all.
 ---@param ctx DocCtx
@@ -280,19 +227,8 @@ local function interpreter(ctx)
     return s.exe or nil
   end
 
-  local exe = nil
-  local venv = venv_dir(ctx.root)
-  if venv then
-    local candidate = vim.fs.joinpath(venv, "bin", "python")
-    exe = vim.uv.fs_stat(candidate) and candidate or nil
-  end
-  if not exe and ctx.root then
-    local pinned = state.read_file(vim.fs.joinpath(ctx.root, ".python-version"))
-    local want = pinned and pinned:match("^%s*([%w%.%-_]+)")
-    if want then
-      exe = pyenv_interpreter(want)
-    end
-  end
+  local env = python_env.resolve(ctx.root)
+  local exe = env and env.exe or nil
   if not exe then
     local found = vim.fn.exepath("python3")
     exe = found ~= "" and found or nil

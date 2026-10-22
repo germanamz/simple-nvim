@@ -410,6 +410,108 @@ describe("config.tagstack", function()
     end)
   end)
 
+  -- `grc` / `grC`: callers and callees, delivered like every other verb here so
+  -- `<C-t>` comes back from them too. Core's own call hierarchy writes straight
+  -- to quickfix with no frame, and its outgoing handler places every call site
+  -- in the CURRENT buffer even when the function under the cursor is defined in
+  -- another file; telescope's picker pushes frames itself, a second writer.
+  describe("call hierarchy", function()
+    local function range(line, col)
+      return {
+        start = { line = line, character = col },
+        ["end"] = { line = line, character = col + 1 },
+      }
+    end
+
+    -- A client answering prepare/incoming/outgoing from a table, synchronously.
+    local function fake_client(responses)
+      return {
+        offset_encoding = "utf-16",
+        requests = {},
+        request = function(self, method, params, handler)
+          table.insert(self.requests, { method = method, params = params })
+          handler(nil, responses[method], {})
+          return true, #self.requests
+        end,
+      }
+    end
+
+    it("places incoming call sites in the caller's file", function()
+      local caller = write_file(root, "caller.py", { "def a():", "    b()", "    b()" })
+      local items = M._call_items("incoming", { uri = "file:///elsewhere.py" }, {
+        {
+          from = { name = "a", uri = vim.uri_from_fname(caller) },
+          fromRanges = { range(1, 4), range(2, 4) },
+        },
+      }, "utf-16")
+      assert.are.equal(2, #items)
+      assert.are.equal(caller, items[1].filename)
+      assert.are.equal(2, items[1].lnum)
+      assert.are.equal(5, items[1].col)
+      assert.are.equal(3, items[2].lnum)
+    end)
+
+    it("places outgoing call sites in the file of the function asked about", function()
+      local callee_file = write_file(root, "callee.py", { "def b():", "    c()" })
+      local items = M._call_items("outgoing", { uri = vim.uri_from_fname(callee_file) }, {
+        { to = { name = "c", uri = "file:///c.py" }, fromRanges = { range(1, 4) } },
+      }, "utf-16")
+      assert.are.equal(1, #items)
+      assert.are.equal(callee_file, items[1].filename)
+      assert.are.equal(2, items[1].lnum)
+    end)
+
+    it("jumps to a lone caller and records the hop", function()
+      local caller = write_file(root, "caller.py", { "def a():", "    b()" })
+      local src = write_file(root, "src.py", { "def b():", "    pass" })
+      vim.cmd.edit(vim.fn.fnameescape(src))
+      vim.api.nvim_win_set_cursor(0, { 1, 4 })
+      local item = { name = "b", uri = vim.uri_from_fname(src), range = range(0, 4) }
+      local client = fake_client({
+        ["textDocument/prepareCallHierarchy"] = { item },
+        ["callHierarchy/incomingCalls"] = {
+          { from = { name = "a", uri = vim.uri_from_fname(caller) }, fromRanges = { range(1, 4) } },
+        },
+      })
+
+      M.calls("incoming", client)
+
+      assert.are.equal(caller, vim.api.nvim_buf_get_name(0))
+      assert.are.equal(2, vim.api.nvim_win_get_cursor(0)[1])
+      assert.are.equal(1, stack().length)
+      assert.are.equal("grc", M.frames()[1].kind)
+      -- The prepared item is what the second request is about.
+      assert.are.same(item, client.requests[2].params.item)
+    end)
+
+    it("says so when the cursor is on nothing callable", function()
+      local src = write_file(root, "src.py", { "x = 1" })
+      vim.cmd.edit(vim.fn.fnameescape(src))
+      local notified
+      local orig = vim.notify
+      vim.notify = function(msg)
+        notified = msg
+      end
+      M.calls("outgoing", fake_client({ ["textDocument/prepareCallHierarchy"] = {} }))
+      vim.notify = orig
+      assert.are.equal("no callees found", notified)
+      assert.are.equal(0, stack().length)
+    end)
+
+    it("says so when no attached server supports call hierarchy", function()
+      local src = write_file(root, "src.py", { "x = 1" })
+      vim.cmd.edit(vim.fn.fnameescape(src))
+      local notified
+      local orig = vim.notify
+      vim.notify = function(msg)
+        notified = msg
+      end
+      M.calls("incoming")
+      vim.notify = orig
+      assert.are.equal("no callers: no attached server supports call hierarchy", notified)
+    end)
+  end)
+
   describe("M.jump", function()
     it("still records a frame when the origin window has been closed", function()
       -- The frame used to be silently dropped: M.jump fell back to the current

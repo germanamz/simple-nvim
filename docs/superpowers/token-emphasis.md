@@ -32,7 +32,7 @@ definition actually began.
 | Tier | Value | Contrast | What lands here |
 | --- | --- | --- | --- |
 | Ordinary comment | `palette.muted` `#6e7781` | 4.5:1 | inline `// why` notes — the ones worth reading mid-scan |
-| Doc comment | `#6e7781` blended `0.82` toward the background | ~3.2:1 | the block above a declaration, read on purpose |
+| Doc comment | `#6e7781` blended `0.82` toward the background | ~3.2:1 | the block above a declaration, read on purpose; a Python docstring (`@string.documentation`, linked to this tier) |
 
 `#6e7781` is not a new colour: it is GitHub's own comment grey on the
 non-high-contrast light theme, and the value `lua/config/palette.lua` already

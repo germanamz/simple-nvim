@@ -323,8 +323,8 @@ themselves.
 | `<Space>j`  | picker over the whole chain: `<CR>` pops to a level, `<C-x>` drops a frame |
 | `:tags`     | list                                                       |
 
-`gd`, `grr`, `gri` and `grt` all push a frame, so `<C-t>` means the same thing
-after any of them. Nothing else does — file pickers and the tree stay
+`gd`, `grr`, `gri`, `grt`, `grc`/`grC` and Python's `gD` all push a frame, so
+`<C-t>` means the same thing after any of them. Nothing else does — file pickers and the tree stay
 jumplist-only, deliberately, so the stack stays coarse. See
 [navigation-stack.md](navigation-stack.md).
 
@@ -650,9 +650,10 @@ Buffer-local: these only exist in buffers with an attached LSP client.
 | ------------ | ------------------------------------------------------- |
 | `gd`         | go to definition (ts_ls: source via `_typescript.goToSourceDefinition`) |
 | `<C-t>`      | back one hop; `<Space>j` picks a level out of the whole chain |
-| `gD`         | go to **declaration** (Nvim 0.11 default)               |
-| `grr`        | references (opens quickfix; pushes the definition stack on select) |
-| `gri`        | implementations                                         |
+| `gD`         | **Python only:** go to **declaration**, the `.pyi` stub (elsewhere Vim's own `gD`) |
+| `grr`        | references (always opens quickfix; pushes one definition-stack frame when pressed) |
+| `gri`        | implementations: overrides, subclasses, Protocol implementers |
+| `grc` / `grC`| **callers** / **callees** of the function under the cursor (where the server supports call hierarchy) |
 | `grt`        | type definition                                         |
 | `grn`        | rename symbol (Nvim 0.11 default)                       |
 | `gra`        | code action (Nvim 0.11 default)                         |
@@ -665,10 +666,17 @@ Buffer-local: these only exist in buffers with an attached LSP client.
 | `<Space>lr`  | restart the LSP client(s) on this buffer (also re-resolves ts_ls's TypeScript from this package) |
 | `<Space>ld`  | **Python only:** per-project pyright rule severities (`:PyrightRules`) |
 
-`<Space>ld` opens a picker over the pyright rules firing in this project and
-cycles each one's severity for that project alone, live — the answer to a
-Pydantic-style codebase whose annotations are not followed by the letter. See
-[python-diagnostics.md](python-diagnostics.md).
+Python has its own page on how these keys find the right implementation, which
+interpreter the server uses, and what to check when a jump looks wrong:
+[python-navigation.md](python-navigation.md).
+
+`<Space>ld` opens a picker over the pyright rules (basedpyright is the server)
+firing in this project and cycles each one's severity for that project alone,
+live — the answer to a Pydantic-style codebase whose annotations are not
+followed by the letter. See [python-diagnostics.md](python-diagnostics.md).
+A project whose own pyright config sets no `typeCheckingMode` runs basedpyright
+in its much louder "recommended" mode; you are warned once, and `:PythonQuiet`
+holds it at "standard" with a git-excluded `pyrightconfig.json`.
 
 Global (not buffer-local):
 
@@ -701,8 +709,9 @@ language adapter, and finally to a web search so the key is never a no-op.
 
 `K` in C, C++ and Python fills the gap `gK` would otherwise be needed for. clangd
 hovers libc and libc++ with a signature and nothing else (the macOS SDK headers
-have no doc comments), and pyright does the same for builtins written in C
-(`len`, `str.split`). When the server's hover has no documentation, `K` appends
+have no doc comments), and a Python server can do the same for builtins written
+in C (basedpyright bundles docstrings for most of them; plain pyright has none).
+When the server's hover has no documentation, `K` appends
 a short excerpt from an offline DevDocs bundle: cppreference for `realloc` and
 `std::vector::push_back`, the POSIX/Linux man pages for `read` or `tcsetattr`,
 the Python library reference for `len`. A hover that already carries docs, and
@@ -794,7 +803,9 @@ the only way to restart a client rooted somewhere other than the current buffer
 (`<Space>lr` only reaches this buffer's clients).
 
 Statusline shows `⇄N` when the cursor is on a symbol with `N` references in
-the current buffer.
+the current buffer. In a Python buffer it also names the interpreter the type
+server runs, ` py:.venv ` or ` py:PATH ` (see
+[python-navigation.md](python-navigation.md#interpreter)).
 
 Neovim never reaps LSP clients: close every buffer of a repo and its server keeps
 running (~0.7 GiB and 3 node processes for a warm ts_ls). `<Space>lk` reclaims
@@ -807,8 +818,11 @@ mapped when the attached server advertises `textDocument/inlayHint`.
 
 ### Servers configured
 
-ts_ls, pyright, gopls, rust_analyzer, lua_ls, bashls, jsonls, yamlls, taplo,
-html, cssls, marksman, mdx_analyzer. Each attaches only on its `filetypes`.
+ts_ls, basedpyright, gopls, rust_analyzer, clangd, zls, lua_ls, bashls, jsonls,
+yamlls, taplo, terraformls, html, cssls, graphql, marksman, tilt_ls,
+mdx_analyzer, biome, oxlint. Each attaches only on its `filetypes`. ruff and
+dprint attach through mason-lspconfig's `automatic_enable`, which is on for
+every installed server except pyright.
 
 ### Useful commands
 
@@ -820,6 +834,7 @@ html, cssls, marksman, mdx_analyzer. Each attaches only on its `filetypes`.
 | `:LspReapIdle`     | stop clients with no attached buffers  |
 | `:LspList`         | pick a client to stop or restart       |
 | `:LspRestartAll`   | stop every client, re-attach every buffer |
+| `:PythonQuiet`     | hold basedpyright at "standard" in a project whose config makes it louder |
 | `:Mason`           | manage server binaries                 |
 | `:checkhealth lsp` | diagnose attach problems               |
 
@@ -1035,8 +1050,8 @@ disappears when you can already see where you are.
 
 How much of the screen each kind of text is allowed to claim. Comments are dimmed
 to two tiers — an inline `// why` note stays legible, the doc block above a
-declaration recedes further — while declaration *names* go bold and call sites
-stay plain. A hairline sits above each top-level declaration group so you can see
+declaration (and a Python docstring) recedes further — while declaration *names*
+go bold and call sites stay plain. A hairline sits above each top-level declaration group so you can see
 where one ends and the next begins. Together they matter most in comment-heavy
 languages like Go. See [superpowers/token-emphasis.md](superpowers/token-emphasis.md).
 

@@ -13,7 +13,7 @@ Personal Neovim configuration for Neovim **0.11+**. Uses `lazy.nvim` for plugin 
 | **A C compiler** (`cc` / `clang` / `gcc`) | Treesitter parsers compile to native shared objects on install. |
 | **make** | Builds the `telescope-fzf-native` extension. Without it, Telescope still works but falls back to the slower Lua sorter. |
 | **ripgrep** (`rg`) | Required by Telescope's `live_grep` and `grep_string`. |
-| **Node.js + npm** | Backs the JS-based LSP servers Mason installs (`ts_ls`, `pyright`, `bashls`, `jsonls`, `yamlls`, `html`, `cssls`, `marksman`, `mdx_analyzer`). |
+| **Node.js + npm** | Backs the JS-based LSP servers Mason installs (`ts_ls`, `bashls`, `jsonls`, `yamlls`, `html`, `cssls`, `marksman`, `mdx_analyzer`). |
 
 ### Optional but recommended
 
@@ -23,7 +23,7 @@ Personal Neovim configuration for Neovim **0.11+**. Uses `lazy.nvim` for plugin 
 | **stylua** | Lua formatter used by conform (format-on-save for this config itself) and the `make lint` / `make fmt` targets. Shell-PATH-managed (Homebrew/cargo), not mason-pinned. |
 | **Go toolchain** | Needed at runtime by `gopls` if you edit Go files. |
 | **Rust toolchain** (`rustup` / `cargo`) | Needed at runtime by `rust_analyzer` if you edit Rust files. |
-| **Python ≥ 3.8** | Needed by `pyright` if you edit Python files. |
+| **Python ≥ 3.8** | Mason installs `basedpyright` (the Python type server, which bundles its own Node) into a Python venv. |
 
 ### Install on macOS (Homebrew)
 

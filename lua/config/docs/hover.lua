@@ -2,15 +2,16 @@
 -- when the server's hover has none.
 --
 -- clangd hovers libc and libc++ symbols with a signature and nothing else (the
--- macOS SDK headers carry no doc comments), and pyright does the same for the
--- builtins implemented in C (typeshed stubs carry no docstrings). The text
--- exists — cppreference, the POSIX man pages, the Python library reference —
--- and config.docs.devdocs keeps it on disk. This module decides when to reach
--- for it and puts it in the same float.
+-- macOS SDK headers carry no doc comments), and the Python type server can do
+-- the same for builtins implemented in C (typeshed stubs carry no docstrings;
+-- basedpyright bundles docstrings for most of them, plain pyright for none).
+-- The text exists — cppreference, the POSIX man pages, the Python library
+-- reference — and config.docs.devdocs keeps it on disk. This module decides
+-- when to reach for it and puts it in the same float.
 --
 -- The split of labor:
 --   * config.docs.brief.<lang> NAMES the symbol by asking its server
---     (clangd symbolInfo, pyright declaration) — no bundle reads.
+--     (clangd symbolInfo, the Python server's declaration) — no bundle reads.
 --   * config.docs.devdocs finds the name in a bundle and cuts the excerpt.
 --   * this module requests the hover, decides whether the server already said
 --     enough, and opens ONE float, so nothing jumps as results arrive.
@@ -74,7 +75,9 @@ local STRUCTURE = {
     "^Padding: ",
     "^Passed ",
   },
-  pyright = {},
+  -- The Python type server (config.python_lsp). Its hover is a fenced
+  -- signature plus the docstring, so nothing outside a fence is template.
+  [require("config.python_lsp").server] = {},
 }
 
 --- Does a hover already carry documentation?

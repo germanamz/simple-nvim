@@ -8,10 +8,11 @@
 -- Two moves, applied together:
 --
 --   1. Comments drop to palette.muted (4.5:1 — GitHub's own comment grey on its
---      non-high-contrast light theme), and DOC comments one step further still,
---      so the block above a declaration reads as a caption rather than a
---      paragraph. Inline `// why` notes inside a body — the ones actually worth
---      reading mid-scan — stay in the louder tier.
+--      non-high-contrast light theme), and DOC comments (Python's docstrings
+--      among them) one step further still, so the block above a declaration
+--      reads as a caption rather than a paragraph. Inline `// why` notes inside
+--      a body — the ones actually worth reading mid-scan — stay in the louder
+--      tier.
 --   2. Declaration NAMES go bold while call sites keep exactly the weight they
 --      have, so `func New` and `func (s *Server) ListenAndServe` anchor the eye
 --      without introducing a second colour.
@@ -164,6 +165,11 @@ function M.apply()
     alpha = M.DOC_ALPHA,
     fallback = "Comment",
   })
+  -- Python's doc comment is a string literal, captured as @string.documentation,
+  -- and without this a docstring under every `def` reads as loud as the code.
+  -- Same tier, same reason. No LSP layer to clear: basedpyright sends no string
+  -- tokens.
+  vim.api.nvim_set_hl(0, "@string.documentation", { link = "@comment.documentation" })
   -- Cleared, not dimmed: a defined-but-empty group contributes no attributes, so
   -- gopls' comment token stops overpainting treesitter's two tiers.
   vim.api.nvim_set_hl(0, "@lsp.type.comment", {})

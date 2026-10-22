@@ -18,10 +18,16 @@ two more places. Each case below was checked against the real servers on
 | C++, clangd + libc++ | `std::vector::push_back`, `std::to_string` | Signature only. libc++ headers have no doc comments either. |
 | Python, pyright | `len`, `print`, `str.split` | Signature only. typeshed stubs have no docstrings, and C-implemented builtins have no `.py` source for pyright to fall back on. |
 | Python, pyright | `os.path.join` | **Has** a docstring, because pyright reads it from `posixpath.py`. |
+| Python, basedpyright | `len`, `str.split`, `math.sqrt` | **Has** a docstring: basedpyright bundles them for the C-implemented builtins (checked 2026-10-21). |
 | Go, Rust, TS, Lua, Zig | anything | Already has doc comments, so these filetypes keep core's `K`. |
 
 The text does exist: cppreference, the POSIX and Linux man pages, and the Python
 library reference. DevDocs publishes all three as offline bundles.
+
+Python's type server is now basedpyright
+([python-navigation.md](python-navigation.md)), whose own hover documents the
+builtins, so the prose check below leaves those hovers alone and the Python
+excerpt is a fallback for whatever the server has no docstring for.
 
 ## Who does what
 
@@ -29,7 +35,7 @@ library reference. DevDocs publishes all three as offline bundles.
 | ------ | -------------- |
 | `lua/config/docs/hover.lua` | The `K` driver. Sends the hover request, checks whether the server already said enough, asks the provider for names, and opens **one** float. Also answers `gK`'s DevDocs URL step. |
 | `lua/config/docs/brief/c.lua` | Names a C/C++ symbol through clangd's `textDocument/symbolInfo`. Never reads a bundle. |
-| `lua/config/docs/brief/python.lua` | Names a Python symbol through pyright's `textDocument/declaration`. Never reads a bundle. |
+| `lua/config/docs/brief/python.lua` | Names a Python symbol through the type server's `textDocument/declaration`. Never reads a bundle. |
 | `lua/config/docs/devdocs.lua` | The on-disk store: index lookup, page excerpts, HTML→markdown, `:DocsInstall`. |
 | `lua/config/docs/devdocs_split.lua` | Splits a downloaded `db.json` into one file per page, run as its own `nvim --clean -l` process. |
 | `lua/plugins/lsp.lua` | Maps `K` in `LspAttach`, only when the buffer's filetype has a provider. |
@@ -46,8 +52,9 @@ file per language, and nothing about page markup leaks into those files.
    `buf_request_all`. Results are filtered the way core filters them: errors
    are logged, empty contents are dropped, and "No information available" /
    "Empty hover response" are reported as core reports them.
-2. **Prose check.** The result from the provider's own server (`clangd` or
-   `pyright`) is checked for documentation. If it has some, the hover opens
+2. **Prose check.** The result from the provider's own server (`clangd`, or
+   the Python type server named in `lua/config/python_lsp.lua`) is checked for
+   documentation. If it has some, the hover opens
    unchanged.
 3. Otherwise the provider returns candidates. The first candidate whose bundle
    is installed and whose name the index knows becomes the excerpt. A candidate
@@ -78,7 +85,8 @@ documentation if any non-blank line survives outside code fences.
 - **clangd:** `### kind`, `provided by`, `→ type`, `Parameters:`,
   `Template parameters:`, `- item`, `Type:`, `Value =`, `Size:`, `Offset:`,
   `Padding:`, `Passed`, and `---`.
-- **pyright:** only code fences and `---`.
+- **the Python type server** (pyright's template, which basedpyright keeps):
+  only code fences and `---`.
 
 **Any other server counts as having prose.** A template change or an unknown
 server therefore degrades to today's hover, never to docs bolted onto a hover
@@ -116,9 +124,9 @@ libc++'s inline `__1`), and the declaration's location.
 
 ### Python (`brief/python.lua`)
 
-- **Gate.** pyright's declaration must land in a `.pyi` under a
+- **Gate.** the type server's declaration must land in a `.pyi` under a
   `/typeshed…/stdlib/` directory. Third-party packages ship real source, which
-  pyright already reads docstrings from.
+  the server already reads docstrings from.
 - **Module** comes from the path after `stdlib/`: `os/path.pyi` gives `os.path`,
   `json/__init__.pyi` gives `json`.
 - **Qualified name** comes from an upward indentation scan of the stub from the
@@ -259,7 +267,7 @@ and `url` is a synchronous function over a coordinate.
 | `tests/spec/unit/docs_brief_spec.lua` | `make test-unit` | Both providers against clangd/pyright payload shapes recorded on 2026-09-15. |
 | `tests/spec/unit/docs_hover_spec.lua` | `make test-unit` | The prose check against recorded hovers, composition, and the candidate walk, including a throwing provider. |
 | `tests/spec/e2e/docs_hover_spec.lua` | `make test-e2e` | An in-process fake `clangd`: the `K` mapping (C++ yes, Go no), the merged float, second-`K` focus, a documented hover left alone, the install hint, a moved cursor opening nothing, and `gK` opening cppreference. |
-| `tests/spec/e2e-lsp/docs_hover_spec.lua` | `make test-lsp` | Real clangd on `realloc` and `push_back`, and real pyright on `len`. Self-skips per server. |
+| `tests/spec/e2e-lsp/docs_hover_spec.lua` | `make test-lsp` | Real clangd on `realloc` and `push_back`, and real basedpyright on `len`, whose own docstring must be left alone. Self-skips per server. |
 
 The fixture bundles in `tests/fixtures/devdocs/` are trimmed from the real
 downloads, keeping only the entries the specs name and the markup around what

@@ -16,7 +16,7 @@
 local M = {}
 
 --- The server whose hover this provider completes.
-M.server = "pyright"
+M.server = require("config.python_lsp").server
 
 --- The module a typeshed stdlib stub declares, or nil for any other file.
 ---@param path string|nil

@@ -378,6 +378,99 @@ function M.type_definition()
   M.locations(vim.lsp.buf.type_definition, "grt", "type definition")
 end
 
+--- `gD`: the declaration. For pyright-family servers this is the other half of
+--- `gd`: definition prefers the `.py` source, declaration the `.pyi` stub.
+function M.declaration()
+  M.locations(vim.lsp.buf.declaration, "gD", "declaration")
+end
+
+--- Call-hierarchy results as quickfix items.
+---
+--- An incoming call carries its ranges in the CALLER's file (`call.from`); an
+--- outgoing call carries them in the file of the item that was asked about,
+--- which need not be the current buffer — the cursor may sit on a call to a
+--- function defined elsewhere. Core's handler places outgoing ranges in the
+--- current buffer regardless (lsp/handlers.lua), which points them at the
+--- wrong file in exactly that case.
+---@param direction "incoming"|"outgoing"
+---@param item table the prepared CallHierarchyItem
+---@param calls table[]|nil CallHierarchyIncomingCall[] | CallHierarchyOutgoingCall[]
+---@param encoding string the client's offset encoding
+---@return table[]
+function M._call_items(direction, item, calls, encoding)
+  local locations = {}
+  for _, call in ipairs(calls or {}) do
+    local uri = direction == "incoming" and call.from.uri or item.uri
+    for _, range in ipairs(call.fromRanges or {}) do
+      locations[#locations + 1] = { uri = uri, range = range }
+    end
+  end
+  return vim.lsp.util.locations_to_items(locations, encoding)
+end
+
+--- `grc` / `grC`: callers / callees of the function under the cursor.
+---
+--- Through deliver() like every verb above — one result jumps, several open
+--- the list, and either way `<C-t>` comes back — rather than core's
+--- vim.lsp.buf.incoming_calls (quickfix, no frame) or telescope's picker
+--- (which pushes frames itself and would make this module one writer of two).
+---@param direction "incoming"|"outgoing"
+---@param client table|nil defaults to the first attached server that supports it
+function M.calls(direction, client)
+  local origin = M.capture()
+  local kind = direction == "incoming" and "grc" or "grC"
+  local title = direction == "incoming" and "callers" or "callees"
+  client = client
+    or vim.lsp.get_clients({ bufnr = origin.bufnr, method = "textDocument/prepareCallHierarchy" })[1]
+  if not client then
+    vim.notify(
+      ("no %s: no attached server supports call hierarchy"):format(title),
+      vim.log.levels.WARN
+    )
+    return
+  end
+  local method = direction == "incoming" and "callHierarchy/incomingCalls"
+    or "callHierarchy/outgoingCalls"
+  local params = vim.lsp.util.make_position_params(origin.winid, client.offset_encoding)
+
+  local function ask(item)
+    client:request(method, { item = item }, function(err, calls)
+      if err then
+        vim.notify(("%s: %s"):format(title, err.message), vim.log.levels.WARN)
+        return
+      end
+      deliver(
+        origin,
+        kind,
+        title,
+        M._call_items(direction, item, calls, client.offset_encoding),
+        { list_title = ("%s of %s"):format(title, item.name) }
+      )
+    end, origin.bufnr)
+  end
+
+  client:request("textDocument/prepareCallHierarchy", params, function(err, items)
+    if err or type(items) ~= "table" or #items == 0 then
+      vim.notify("no " .. title .. " found", vim.log.levels.INFO)
+      return
+    end
+    if #items == 1 then
+      return ask(items[1])
+    end
+    -- Several items for one position: overloads, or a name bound twice.
+    vim.ui.select(items, {
+      prompt = "Call hierarchy for:",
+      format_item = function(item)
+        return item.detail and item.detail ~= "" and (item.name .. " " .. item.detail) or item.name
+      end,
+    }, function(item)
+      if item then
+        ask(item)
+      end
+    end)
+  end, origin.bufnr)
+end
+
 --- ts_ls `gd`: follow the import chain to the real source.
 ---
 --- Plain `textDocument/definition` on an imported symbol lands on the import

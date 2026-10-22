@@ -34,3 +34,4 @@ line here for each new memory. `CLAUDE.md` has the rules for writing one.
 - [[cmux-terminal-cwd|Cmux terminal cwd]] — <leader>tt/tv/th: new-split has no cwd flag but rpc surface.split takes working_directory; typed --command is eaten by a shell startup prompt; safe probing.
 - [[nvim-tempname-vs-getcwd-symlink|Tempname vs getcwd symlink]] — tempname() is /tmp/... but getcwd() after chdir is /private/tmp/...; build spec paths from getcwd() or cwd-relative predicates silently fail open.
 - [[nvim-zig-format-flake|Zig format-on-save flake]] — the zigfmt e2e can time out under full `make test` load; re-run the spec alone before calling it a regression.
+- [[plenary-timeout-prints-nothing|Plenary timeout prints nothing]] — a spec past the 50 s per-file timeout prints only its Testing: header, no Fail line; stop LSP retry loops on an error reply.
