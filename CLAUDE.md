@@ -15,6 +15,10 @@ management with automatic bootstrapping.
 search, display, markdown writing mode)
 - `lua/plugins/*.lua` — Each file returns a lazy.nvim plugin spec (or table of
 specs). lazy.nvim auto-discovers all files in this directory.
+- `claude-mods/` — Claude Code mods, as a plugin marketplace on disk, installed
+per project with `:ClaudeModInstall` (`lua/config/claude_mods.lua`). Today:
+`nvim-review`, which pulls the review-comment queue into Claude's prompt (see
+`docs/agent-review-comments.md`). Tests: `make test-mod`.
 - `ftplugin/*.lua` — Filetype options for filetypes the runtime ships no
 ftplugin for (e.g. `starlark`, sourced by `tiltfile`; see `docs/tiltfile.md`).
 

@@ -12,7 +12,8 @@ agent opens exactly the code you meant.
 ```
 
 The queue lives in memory and dies with the session. No comment is ever written
-to disk.
+to disk. In Claude Code a mod can pull the batch instead of the clipboard: see
+[Pulled by a Claude Code mod](#pulled-by-a-claude-code-mod).
 
 Discarding is therefore the one irreversible action here, and `<leader>ax` sits
 one key from `<leader>ac` and `<leader>as`, so it confirms first — the same
@@ -24,9 +25,11 @@ becoming a second, unguarded way to destroy the queue.
 
 | file | owns |
 | --- | --- |
-| `lua/config/review_comments.lua` | The queue, its extmark anchors, the payload format, and the four entry points behind the keymaps. |
+| `lua/config/review_comments.lua` | The queue, its extmark anchors, the payload format, the four entry points behind the keymaps, and `snapshot()` / `ack()`, the pair the Claude Code mod calls over RPC. |
 | `lua/config/file_reference.lua` | `relpath(buf)` — the project-root-relative path both this feature and `<leader>yl` are spelled from. |
-| `lua/config/options.lua` | The four mappings, lazy-requiring the module so nothing loads until a key is pressed. |
+| `lua/config/options.lua` | The four mappings and the two `:ClaudeMod*` commands, lazy-requiring their modules so nothing loads until one is used. |
+| `claude-mods/nvim-review/hooks/register.tsx` | The Claude Code mod: finds this workspace's nvims, draws the band, answers `/nvim-review`, fills the prompt and acks. |
+| `lua/config/claude_mods.lua` | `:ClaudeModInstall` / `:ClaudeModUninstall`: the claude CLI calls that install a mod from `claude-mods/` into one project. |
 
 ## The reference format
 
@@ -92,10 +95,75 @@ line, and an ordinary comment like "strip the trailing `\n`" fired Enter into
 the agent's prompt. `setreg` is also synchronous, which retires the in-flight
 guard the async sink needed to avoid double-delivering a review.
 
+## Pulled by a Claude Code mod
+
+The clipboard stays the default, for every agent. In Claude Code a mod (its
+hooks API, early access as of 2.1.318) pulls the batch instead: a band above
+Claude's prompt reads "nvim: 2 review comments queued [ Insert ]", and the
+button or `/nvim-review` puts the batch in the prompt box as an unsent draft.
+It is installed per project, from nvim:
+
+```
+:ClaudeModInstall     install nvim-review into the current project
+:ClaudeModUninstall   remove it again
+```
+
+`claude-mods/` is a plugin marketplace on disk
+(`claude-mods/.claude-plugin/marketplace.json`), and the first install adds it
+to Claude by itself. A plugin installed from a folder marketplace is read in
+place, never copied, so an edit to the mod reaches a Claude session at its next
+start or `/reload-plugins` with no reinstall. The install uses Claude's `local`
+scope, the project's uncommitted settings.local.json: the marketplace path
+exists only on this machine, so a team project's committed settings must not
+name it. Claude resolves the project itself, so running the command from a
+subdirectory installs into the repo's root. The mod's own tests run with
+`make test-mod`.
+
+Pulling answers what retired the cmux sink:
+
+- **It cannot reach the wrong session.** The session that receives the batch is
+  the one you pressed Insert in; nvim never addresses a session.
+- **A dialog cannot swallow it.** The mod's prompt write refuses while a
+  permission prompt or picker holds the keys, and the comments stay queued.
+- **Nothing is escaped.** The batch crosses as a string, not keystrokes, so a
+  `\n` in a comment stays text.
+- **Nothing is lost.** `flush()` clears the queue as it copies, so a clipboard
+  overwritten before the paste loses the batch. Over the mod, nvim drops a
+  comment only when the mod acks it after the draft took it.
+- **Nothing touches disk.** The mod talks to nvim over nvim's own RPC socket.
+
+The contract is two functions in `lua/config/review_comments.lua`, called with
+`nvim --server <socket> --remote-expr`:
+
+- `snapshot()` returns one JSON string: `count`, `ids`, `text` (the payload
+  `flush()` copies, absent when the queue is empty), `cwd`, and `workspace`
+  (`CMUX_WORKSPACE_ID`, absent outside cmux).
+- `ack(ids)` drops the comments with those ids and keeps anything queued since
+  the snapshot. Ids are never reused, not even across a clear, so a late ack
+  cannot land on a newer comment.
+
+The mod finds nvim by listing the server sockets nvim creates on macOS, one
+random directory per nvim under $TMPDIR/nvim.$USER/, each holding nvim.PID.0.
+It keeps the nvims whose `workspace` matches its own session's (an editor pane
+and an agent pane in one cmux workspace both inherit it), and outside cmux
+falls back to an nvim whose cwd shares the session's tree. An nvim that had
+already loaded this module before `snapshot()` existed answers with an error
+and is ignored until it restarts; one that never loaded it picks up the new
+file on the first query.
+
+Finding nvims is the mod's background poll, every 3 s. Insert and
+`/nvim-review` only re-ask the nvims already found, because a suspended nvim
+(ctrl+z) accepts the connection and never answers: with a full scan on every
+press, two of those made each insert wait out a 2 s timeout. A socket that times
+out is left alone for 30 s. Each poll costs one `nvim --clean --headless`
+client per matching nvim, about 25 ms each.
+
 ## Rejected, and why
 
 Do not re-propose these without new evidence; each was investigated against
 Claude Code 2.1.261's binary and the ACP spec, not just their documentation.
+Claude Code mods came later and are the pull path above; none of these needs
+revisiting for it.
 
 - **ACP (Agent Client Protocol).** The standard here, and Claude Code is
   reachable through it via `zed-industries/claude-agent-acp`, Codex via
@@ -146,4 +214,6 @@ prompt — so the behavior was verified under a real pty, and the specs pin what
 headless *can* observe. Do not "simplify" that call back to `feedkeys`.
 
 The clipboard specs save and restore the `+` register: the suite must not
-clobber the clipboard of whoever runs it.
+clobber the clipboard of whoever runs it. Under Claude Code's sandbox they fail
+(no clipboard tool), as does any probe of a live nvim's RPC socket: see
+[[sandbox-hides-live-nvim-sockets]].

@@ -83,7 +83,8 @@ beyond the code.
 - **[agent-review-comments.md](agent-review-comments.md).** Annotate lines while
   reading a change and hand the batch to a coding agent in one paste, each
   comment carrying the `@path#L39-41` it names. Why the ranges follow your edits,
-  why the destination is the clipboard rather than the agent's terminal, and the
+  why the destination is the clipboard rather than the agent's terminal, the
+  Claude Code mod that pulls the batch over nvim's RPC socket instead, and the
   five transports that were investigated and rejected.
 - **[hover-docs.md](hover-docs.md).** Why `K` on `realloc`, `std::vector::push_back`
   or `len` showed a signature and nothing else (the headers and stubs carry no

@@ -1,0 +1,6 @@
+{
+  "name": "nvim-review",
+  "version": "0.1.0",
+  "description": "Insert the review comments queued in this workspace's nvim into the prompt",
+  "types": "./types/index.d.ts"
+}

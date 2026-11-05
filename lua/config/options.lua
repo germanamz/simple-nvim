@@ -256,6 +256,29 @@ vim.keymap.set("n", "<leader>ax", function()
   require("config.review_comments").discard()
 end, { desc = "Discard queued review comments" })
 
+-- In Claude Code the nvim-review mod pulls that queue into the prompt instead
+-- of the clipboard. It lives in claude-mods/ and is installed per project, at
+-- local scope; see lua/config/claude_mods.lua.
+vim.api.nvim_create_user_command("ClaudeModInstall", function(o)
+  require("config.claude_mods").install(o.args)
+end, {
+  nargs = "?",
+  complete = function(lead)
+    return require("config.claude_mods").complete(lead)
+  end,
+  desc = "Install a Claude Code mod from claude-mods/ into this project",
+})
+
+vim.api.nvim_create_user_command("ClaudeModUninstall", function(o)
+  require("config.claude_mods").uninstall(o.args)
+end, {
+  nargs = "?",
+  complete = function(lead)
+    return require("config.claude_mods").complete(lead)
+  end,
+  desc = "Uninstall a Claude Code mod from this project",
+})
+
 -- Quit all windows, discarding unsaved changes
 vim.keymap.set("n", "<leader>qa", "<cmd>qa!<cr>", { desc = "Quit all (force)" })
 

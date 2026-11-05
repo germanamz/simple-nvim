@@ -21,6 +21,7 @@ local M = {}
 local ns = vim.api.nvim_create_namespace("review_comments")
 
 ---@class ReviewComment
+---@field id integer never reused, so an ack names exactly what was delivered
 ---@field file string root-relative path, resolved once at push time
 ---@field bufnr integer
 ---@field mark integer|nil extmark id, nil when the buffer would not take one
@@ -30,6 +31,10 @@ local ns = vim.api.nvim_create_namespace("review_comments")
 
 ---@type ReviewComment[]
 local queue = {}
+
+-- Not reset by clear(): a slow ack naming a batch already cleared away must not
+-- match a comment queued since.
+local last_id = 0
 
 --- Queue a comment on `buf` covering lines `first`..`last` (1-indexed, `last`
 --- nil for a single line). False when the buffer has no file behind it, since
@@ -55,7 +60,9 @@ function M.push(buf, first, last, text)
     right_gravity = true,
     end_right_gravity = true,
   })
+  last_id = last_id + 1
   queue[#queue + 1] = {
+    id = last_id,
     file = file,
     bufnr = buf,
     mark = ok and mark or nil,
@@ -106,11 +113,16 @@ function M.drop(index)
   table.remove(queue, index)
 end
 
+---@param c ReviewComment
+local function unmark(c)
+  if c.mark and vim.api.nvim_buf_is_loaded(c.bufnr) then
+    pcall(vim.api.nvim_buf_del_extmark, c.bufnr, ns, c.mark)
+  end
+end
+
 function M.clear()
   for _, c in ipairs(queue) do
-    if c.mark and vim.api.nvim_buf_is_loaded(c.bufnr) then
-      pcall(vim.api.nvim_buf_del_extmark, c.bufnr, ns, c.mark)
-    end
+    unmark(c)
   end
   queue = {}
 end
@@ -150,6 +162,51 @@ function M.payload()
     return nil
   end
   return M.format(M.resolve())
+end
+
+--- The queue as one JSON string, for the Claude Code mod that reads it over
+--- nvim's RPC socket (`nvim --server <addr> --remote-expr`; see
+--- docs/agent-review-comments.md). `ids` names what `text` holds, so the mod
+--- acks exactly what it delivered; `cwd` and `workspace` are how it tells
+--- which nvim belongs to its session.
+---@return string
+function M.snapshot()
+  local ids = {}
+  for i, c in ipairs(queue) do
+    ids[i] = c.id
+  end
+  return vim.json.encode({
+    count = #queue,
+    ids = ids,
+    text = M.payload(),
+    cwd = vim.fn.getcwd(),
+    workspace = vim.env.CMUX_WORKSPACE_ID,
+  })
+end
+
+--- Drop the comments the mod delivered, by the ids its snapshot named. Anything
+--- queued since that snapshot stays.
+---@param ids integer[]
+---@return integer dropped
+function M.ack(ids)
+  local sent = {}
+  for _, id in ipairs(ids) do
+    sent[id] = true
+  end
+  local kept, dropped = {}, 0
+  for _, c in ipairs(queue) do
+    if sent[c.id] then
+      unmark(c)
+      dropped = dropped + 1
+    else
+      kept[#kept + 1] = c
+    end
+  end
+  queue = kept
+  if dropped > 0 then
+    vim.notify(string.format("%d review comment(s) sent to Claude", dropped))
+  end
+  return dropped
 end
 
 --- The line span the comment applies to: the cursor line, or the visual

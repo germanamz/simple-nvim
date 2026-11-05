@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help sync warm update check lint fmt test test-unit test-smoke test-e2e test-lsp
+.PHONY: help sync warm update check lint fmt test test-unit test-smoke test-e2e test-lsp test-mod
 
 help:
 	@echo "Targets:"
@@ -14,6 +14,7 @@ help:
 	@echo "  test-smoke Run smoke tests (full init, no real LSP)"
 	@echo "  test-e2e   Run end-to-end tests (full init)"
 	@echo "  test-lsp   Run slow LSP end-to-end tests"
+	@echo "  test-mod   Run the Claude Code mod tests in claude-mods/ (needs claude)"
 
 # Make this machine match the committed pins: plugins (lazy-lock.json),
 # treesitter parsers (parser-revisions.lua), and mason tools
@@ -54,3 +55,8 @@ test-e2e:
 
 test-lsp:
 	@scripts/run-plenary.sh tests/full_init.lua tests/spec/e2e-lsp
+
+# The mods' own *.test.tsx, run by the claude CLI against its engine. Not in
+# `test`: it needs claude on PATH, and nothing in nvim depends on it.
+test-mod:
+	@claude plugin test claude-mods/nvim-review

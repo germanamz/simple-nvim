@@ -1,0 +1,11 @@
+{
+  "name": "simple-nvim",
+  "owner": { "name": "germanamz" },
+  "plugins": [
+    {
+      "name": "nvim-review",
+      "source": "./nvim-review",
+      "description": "Insert the review comments queued in this workspace's nvim into the prompt"
+    }
+  ]
+}

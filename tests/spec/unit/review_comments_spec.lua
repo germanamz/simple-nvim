@@ -553,3 +553,105 @@ describe("config.review_comments.list", function()
     assert.are.equal(1, rc.count())
   end)
 end)
+
+-- The half of the queue a Claude Code mod reads over nvim's RPC socket (see
+-- docs/agent-review-comments.md). snapshot() is what the mod reads; ack()
+-- removes only what it delivered. The mod fills the prompt between the two
+-- calls, so a comment queued in that gap, or a stale ack from a slow call, must
+-- not cost a comment the mod never sent.
+describe("config.review_comments over RPC", function()
+  local buf
+
+  before_each(function()
+    rc.clear()
+    buf = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_name(buf, vim.fn.getcwd() .. "/rpc.lua")
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, { "one", "two", "three", "four", "five" })
+  end)
+
+  after_each(function()
+    pcall(vim.api.nvim_buf_delete, buf, { force = true })
+  end)
+
+  --- ack() reports to the editor; keep that out of the spec output.
+  local function quiet(fn)
+    local real = vim.notify
+    vim.notify = function() end
+    local ok, result = pcall(fn)
+    vim.notify = real
+    if not ok then
+      error(result)
+    end
+    return result
+  end
+
+  it("snapshots the payload, the ids and the cwd as JSON", function()
+    rc.push(buf, 2, 3, "needs a guard")
+    rc.push(buf, 5, nil, "stale")
+    local snap = vim.json.decode(rc.snapshot())
+    assert.are.equal(2, snap.count)
+    assert.are.equal(2, #snap.ids)
+    assert.are.equal(rc.payload(), snap.text)
+    assert.are.equal(vim.fn.getcwd(), snap.cwd)
+  end)
+
+  -- The mod matches an nvim to its session by cmux workspace: both inherit
+  -- CMUX_WORKSPACE_ID from the panes they run in.
+  it("names the cmux workspace it runs in", function()
+    local saved = vim.env.CMUX_WORKSPACE_ID
+    vim.env.CMUX_WORKSPACE_ID = "ws-1"
+    local ok, raw = pcall(rc.snapshot)
+    vim.env.CMUX_WORKSPACE_ID = saved
+    assert.is_true(ok, raw)
+    assert.are.equal("ws-1", vim.json.decode(raw).workspace)
+  end)
+
+  -- The mod reads `ids` as an array; an empty Lua table must not encode as {}.
+  it("snapshots an empty queue with no text and an empty id list", function()
+    local raw = rc.snapshot()
+    assert.is_truthy(raw:find('"ids":[]', 1, true))
+    local snap = vim.json.decode(raw)
+    assert.are.equal(0, snap.count)
+    assert.is_nil(snap.text)
+  end)
+
+  it("acks only the ids it is given", function()
+    rc.push(buf, 1, nil, "sent")
+    local ids = vim.json.decode(rc.snapshot()).ids
+    rc.push(buf, 2, nil, "queued after the snapshot")
+    assert.are.equal(
+      1,
+      quiet(function()
+        return rc.ack(ids)
+      end)
+    )
+    assert.are.equal(1, rc.count())
+    assert.are.equal("queued after the snapshot", rc.resolve()[1].text)
+  end)
+
+  it("removes an acked comment's extmark", function()
+    rc.push(buf, 1, nil, "sent")
+    local ids = vim.json.decode(rc.snapshot()).ids
+    quiet(function()
+      rc.ack(ids)
+    end)
+    local ns = vim.api.nvim_create_namespace("review_comments")
+    assert.are.same({}, vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {}))
+  end)
+
+  -- Ids are never reused, so an ack that names a batch already cleared away
+  -- cannot land on a comment queued since.
+  it("never reuses an id after the queue is cleared", function()
+    rc.push(buf, 1, nil, "old")
+    local old = vim.json.decode(rc.snapshot()).ids
+    rc.clear()
+    rc.push(buf, 1, nil, "new")
+    assert.are.equal(
+      0,
+      quiet(function()
+        return rc.ack(old)
+      end)
+    )
+    assert.are.equal(1, rc.count())
+  end)
+end)

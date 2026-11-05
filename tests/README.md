@@ -19,6 +19,7 @@ Populates `~/.local/share/nvim/lazy/` with all plugins at the revisions pinned i
 | `make test-smoke`| smoke tests against the full init (no real LSP)      |
 | `make test-e2e`  | end-to-end tests against the full init               |
 | `make test-lsp`  | slow LSP end-to-end tests (excluded from `make test`)|
+| `make test-mod`  | the Claude Code mods' own tests, via `claude plugin test` (excluded from `make test`)|
 
 ### Running a single spec file
 

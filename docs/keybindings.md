@@ -941,7 +941,10 @@ The clipboard is the destination on purpose. An earlier version typed the batch
 straight into a sibling terminal pane, which could deliver a review into the
 wrong session — and injected text lands wherever focus is over there, so a
 permission prompt would swallow it. Pasting costs one keystroke and always
-lands where you are looking.
+lands where you are looking. In Claude Code, a mod shows the count above the
+prompt and `/nvim-review` pulls the batch into the draft instead.
+`:ClaudeModInstall` installs that mod into the current project and
+`:ClaudeModUninstall` removes it (see `docs/agent-review-comments.md`).
 
 ---
 
